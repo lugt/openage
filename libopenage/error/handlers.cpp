@@ -38,6 +38,7 @@ namespace error {
 
 [[noreturn]] void terminate_handler() noexcept;
 void sigsegv_handler(int /* unused */);
+void interrupt_handler(int signum);
 void exit_handler();
 
 // The global state has internal linkage only.
@@ -50,9 +51,13 @@ std::terminate_handler old_terminate_handler;
 typedef sig_t sighandler_t;
 #endif
 sighandler_t old_sigsegv_handler;
+sighandler_t old_sigint_handler;
+sighandler_t old_sigterm_handler;
 
 util::OnInit install_handlers([]() {
 	old_sigsegv_handler = signal(SIGSEGV, sigsegv_handler);
+	old_sigint_handler = signal(SIGINT, interrupt_handler);
+	old_sigterm_handler = signal(SIGTERM, interrupt_handler);
 	old_terminate_handler = std::set_terminate(terminate_handler);
 	// Install the ObjC exception tracker so the terminate handler can report
 	// NSExceptions that cross the C++ boundary (Apple only; no-op elsewhere).
@@ -66,6 +71,8 @@ util::OnDeInit restore_handlers([]() {
 	uninstall_objc_exception_tracker();
 	std::set_terminate(old_terminate_handler);
 	signal(SIGSEGV, old_sigsegv_handler);
+	signal(SIGINT, old_sigint_handler);
+	signal(SIGTERM, old_sigterm_handler);
 });
 
 
@@ -138,6 +145,34 @@ void sigsegv_handler(int /* unused */) {
 	// however, everything is broken anyways. can't hurt to try to print
 	// more useful info. fuck the police! wheeee!
 	std::terminate();
+}
+
+
+void interrupt_handler(int signum) {
+	// This handler is for SIGINT (Ctrl+C) and SIGTERM (e.g. `kill <pid>`).
+	//
+	// It exists only to leave a breadcrumb in the log so that a shutdown
+	// triggered from the outside is distinguishable from an in-engine crash:
+	// teardown after a signal can surface as SIGSEGV/terminate (C++ static
+	// objects and threads torn down while the main loop still touches them),
+	// which otherwise looks identical to a genuine bug.
+	//
+	// Only async-signal-safe functions may be used here (no std::cout, no
+	// malloc, ...). write() is safe.
+	const char *msg;
+	if (signum == SIGINT) {
+		msg = "\n\x1b[33;1mSIGINT received (user requested interrupt, e.g. Ctrl+C); exiting\x1b[m\n";
+	}
+	else {  // SIGTERM
+		msg = "\n\x1b[33;1mSIGTERM received (termination requested, e.g. kill); exiting\x1b[m\n";
+	}
+	util::ignore_result(write(1, msg, strlen(msg)));
+
+	// Restore the default disposition and re-raise so the process terminates
+	// the way it would have without our handler (preserving the usual exit
+	// status / core-dump behaviour for the signal).
+	signal(signum, SIG_DFL);
+	raise(signum);
 }
 
 
