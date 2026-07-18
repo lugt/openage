@@ -29,6 +29,13 @@ def init_subparser(cli: ArgumentParser):
         help="list of modpacks to load")
 
     cli.add_argument(
+        "--no-prompts", action='store_false', dest='show_prompts',
+        help="disable user prompts (e.g. the asset-conversion prompt); "
+             "no conversion is attempted and, when no modpacks are "
+             "specified, the first available modpack is selected "
+             "automatically")
+
+    cli.add_argument(
         "--window-size", nargs=2, type=int, default=[1024, 768],
         metavar=('WIDTH', 'HEIGHT'),
         help="Initial window size in pixels")
@@ -93,7 +100,7 @@ def main(args, error):
         export_api(converted_path)
 
     # check if modpacks need to be converted
-    if wanna_convert():
+    if args.show_prompts and wanna_convert():
         convert_assets(asset_path, args)
 
     available_modpacks = enumerate_modpacks(asset_path / "converted", exclude={"engine"})
@@ -116,8 +123,19 @@ def main(args, error):
 
         args.modpacks = [modpack.encode("utf-8") for modpack in args.modpacks]
 
-    else:
+    elif args.show_prompts:
         args.modpacks = [query_modpack(list(available_modpacks.keys())).encode("utf-8")]
+
+    else:
+        # prompts disabled and no modpacks specified: select the first
+        # available modpack automatically (or fall back to bare engine mode)
+        proposals = sorted(available_modpacks.keys())
+        if proposals:
+            info("No modpacks specified; selecting %s", proposals[0])
+            args.modpacks = [proposals[0].encode("utf-8")]
+        else:
+            info("No modpacks available; starting bare 'engine' mode")
+            args.modpacks = ["engine".encode("utf-8")]
 
     # Pass window parameters to engine
     args.window_args = {
