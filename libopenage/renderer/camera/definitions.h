@@ -56,8 +56,11 @@ static constexpr float DEFAULT_MIN_ZOOM = 0.5f;
 
 /**
  * Maximum zoom out level of the camera.
+ *
+ * 2.0f == zoom out until map content is half its default size (viewport covers
+ * twice the area). Keeps the map readable rather than shrinking it to a dot.
  */
-static constexpr float DEFAULT_MAX_ZOOM_OUT = 8.0f;
+static constexpr float DEFAULT_MAX_ZOOM_OUT = 2.0f;
 
 /**
  * Default zoom ratio.
