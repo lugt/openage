@@ -23,6 +23,8 @@
 #include "gamestate/activity/xor_event_gate.h"
 #include "gamestate/activity/xor_gate.h"
 #include "gamestate/api/activity.h"
+#include "gamestate/api/patch.h"
+#include "gamestate/api/player_setup.h"
 #include "gamestate/component/api/idle.h"
 #include "gamestate/component/api/live.h"
 #include "gamestate/component/api/move.h"
@@ -38,6 +40,7 @@
 #include "gamestate/manager.h"
 #include "gamestate/player.h"
 #include "gamestate/system/types.h"
+#include "log/log.h"
 #include "log/message.h"
 #include "renderer/render_factory.h"
 #include "time/time.h"
@@ -130,13 +133,71 @@ std::shared_ptr<GameEntity> EntityFactory::add_game_entity(const std::shared_ptr
 	return entity;
 }
 
-std::shared_ptr<Player> EntityFactory::add_player(const std::shared_ptr<openage::event::EventLoop> & /* loop */,
+std::shared_ptr<Player> EntityFactory::add_player(const std::shared_ptr<openage::event::EventLoop> &loop,
                                                   const std::shared_ptr<GameState> &state,
-                                                  const nyan::fqon_t & /* player_setup */) {
+                                                  const nyan::fqon_t &player_setup) {
+	(void)loop;
+
 	auto player = std::make_shared<Player>(this->get_next_player_id(),
 	                                       state->get_db_view()->new_child());
 
-	// TODO: Components (for resources, diplomacy, etc.)
+	// Resolve the PlayerSetup nyan object. Authoring errors (missing FQON,
+	// wrong type) surface here rather than later when patches reference
+	// non-existent targets.
+	nyan::Object setup_obj;
+	try {
+		setup_obj = state->get_db_view()->get_object(player_setup);
+	}
+	catch (const std::exception &e) {
+		throw Error{ERR << "add_player: failed to load PlayerSetup "
+		                << player_setup << ": " << e.what()};
+	}
+	if (not api::APIPlayerSetup::is_player_setup(setup_obj)) {
+		throw Error{ERR << "add_player: " << player_setup
+		                << " is not a PlayerSetup (parent="
+		                << setup_obj.get_parents()[0] << ")"};
+	}
+
+	// Apply civ-specific game_setup patches to the *player's* view rather
+	// than the root game_state view, so each player gets their own civ
+	// modifications independently. Applying to game_state.db_view would
+	// leak the civ patch into every other player - defeating per-player
+	// civ selection. The player's view was just created via new_child();
+	// commits here only affect this player's entity tree.
+	{
+		auto patches = api::APIPlayerSetup::get_patches(setup_obj);
+		if (not patches.empty()) {
+			// order=0: civ setup happens at game initialization, before any
+			// simulation tick, so time-axis ordering has no consequence.
+			auto tx = player->get_db_view()->new_transaction(0);
+			for (const auto &patch : patches) {
+				// A patch with no resolvable target is an authoring defect
+				// in the nyan data; skip with a warning rather than letting
+				// nyan throw InternalError during commit (transaction.cpp:88).
+				if (patch.get_target() == nullptr) {
+					log::log(MSG(warn) << "add_player: PlayerSetup " << player_setup
+					                   << " contains patch with unresolvable target, skipping");
+					continue;
+				}
+				tx.add(patch);
+			}
+			if (not tx.commit()) {
+				throw Error{ERR << "add_player: failed to commit PlayerSetup patches for player "
+				                << player->get_id()};
+			}
+		}
+	}
+
+	// Pour PlayerSetup.starting_resources into the player's stockpile.
+	// Each ResourceAmount(type, amount) maps to
+	// player.resources[ResourceAmount.type.fqon] += amount.
+	for (const auto &res : api::APIPlayerSetup::get_start_resources(setup_obj)) {
+		nyan::Object type_obj = res.get_object("ResourceAmount.type");
+		int64_t amount = res.get_int("ResourceAmount.amount");
+		player->add_resource(type_obj.get_name(), amount);
+	}
+
+	// TODO: diplomacy components (post-tutorial).
 
 	return player;
 }
