@@ -109,6 +109,12 @@ const coord::input Controller::get_drag_select_start() const {
 	return this->drag_select_start.value();
 }
 
+bool Controller::has_drag_select_start() const {
+	std::unique_lock lock{this->mutex};
+
+	return this->drag_select_start.has_value();
+}
+
 void Controller::reset_drag_select() {
 	std::unique_lock lock{this->mutex};
 
@@ -191,6 +197,14 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	binding_func_t drag_selection{
 		[&](const event_arguments &args,
 	        const std::shared_ptr<Controller> controller) {
+			// A drag-select release without a registered press start must be a
+			// no-op: this happens when the left button press was consumed by
+			// the window manager (e.g. during a window resize) so the start
+			// was never set. Skip instead of throwing.
+			if (not controller->has_drag_select_start()) {
+				return std::shared_ptr<event::Event>{nullptr};
+			}
+
 			Eigen::Matrix4f cam_matrix = camera->get_projection_matrix() * camera->get_view_matrix();
 			event::EventHandler::param_map::map_t params{
 				{"controlled", controller->get_controlled()},

@@ -95,6 +95,18 @@ public:
 	const coord::input get_drag_select_start() const;
 
 	/**
+	 * Check if a drag selection start position has been set.
+	 *
+	 * A drag-select start is set on left mouse button press and cleared on
+	 * release. A release without a preceding (registered) press - e.g. when a
+	 * mouse button press is consumed by the window manager during a window
+	 * resize - must not be treated as a drag-select.
+	 *
+	 * @return True if a start position is set, else false.
+	 */
+	bool has_drag_select_start() const;
+
+	/**
 	 * Reset the drag select start position.
 	 */
 	void reset_drag_select();
