@@ -15,12 +15,19 @@ enum class component_t {
 	OWNERSHIP,
 	ACTIVITY,
 
-	// API
+	// API - movement / lifecycle
 	IDLE,
 	TURN,
 	MOVE,
 	SELECTABLE,
-	LIVE
+	LIVE,
+
+	// Resource / production (tutorial-level)
+	GATHER,
+	BUILD,
+	TRAIN,
+	PRODUCTION,
+	RESOURCE_STORAGE,
 };
 
 } // namespace openage::gamestate::component

@@ -23,6 +23,11 @@ namespace openage::gamestate::api {
 
 /**
  * Maps internal ability types to nyan API values.
+ *
+ * Keep in sync with ability_t (api/types.h). entity_factory.cpp:166-211 looks
+ * up the parent class of every nyan ability via ability_obj.get_parents()[0]
+ * and matches the FQON against this table's values. An entry missing here
+ * means the nyan ability loads as a no-op (silently dropped).
  */
 static const auto ABILITY_DEFS = datastructure::create_const_map<ability_t, nyan::ValueHolder>(
 	std::pair(ability_t::IDLE,
@@ -32,7 +37,35 @@ static const auto ABILITY_DEFS = datastructure::create_const_map<ability_t, nyan
 	std::pair(ability_t::LIVE,
               nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Live"))),
 	std::pair(ability_t::TURN,
-              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Turn"))));
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Turn"))),
+	std::pair(ability_t::GATHER,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Gather"))),
+	std::pair(ability_t::DROP_RESOURCES,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.DropResources"))),
+	std::pair(ability_t::HARVESTABLE,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Harvestable"))),
+	std::pair(ability_t::REGENERATE_RESOURCE_SPOT,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.RegenerateResourceSpot"))),
+	std::pair(ability_t::CONSTRUCTABLE,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Constructable"))),
+	std::pair(ability_t::FOUNDATION,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Foundation"))),
+	std::pair(ability_t::CREATE,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Create"))),
+	std::pair(ability_t::PRODUCTION_QUEUE,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.ProductionQueue"))),
+	std::pair(ability_t::RESEARCH,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Research"))),
+	std::pair(ability_t::ATTACK,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Attack"))),
+	std::pair(ability_t::RESISTANCE,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Resistance"))),
+	std::pair(ability_t::PASSIVE_TRANSFORM_TO,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.PassiveTransformTo"))),
+	std::pair(ability_t::DESPAWN,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.Despawn"))),
+	std::pair(ability_t::PROVIDE_CONTINGENT,
+              nyan::ValueHolder(std::make_shared<nyan::ObjectValue>("engine.ability.type.ProvideContingent"))));
 
 /**
  * Maps internal property types to nyan API values.
@@ -69,13 +102,32 @@ static const auto ACTIVITY_NODE_DEFS = datastructure::create_const_map<std::stri
 /**
  * Maps API activity task system types to engine system types.
  *
- * TODO: Expand this to include all systems.
+ * When entity_factory (init_activity) processes a TaskSystem node that
+ * references an ability FQON, the loader looks the FQON up here and attaches
+ * the matching engine system_id_t to the corresponding TaskSystemNode
+ * (entity_factory.cpp:264-269). Without an entry, the node is created but
+ * has no system bound and will throw "Unhandled subsystem" at runtime
+ * (system/activity.cpp:127-143).
+ *
+ * Container-style abilities (Foundation/Resistance/Despawn/...) and event
+ * driven abilities (Attack) are deliberately omitted: they don't appear as
+ * Activity.task_system nodes in nyan and are wired via other paths.
  */
 static const auto ACTIVITY_TASK_SYSTEM_DEFS = datastructure::create_const_map<std::string, system::system_id_t>(
 	std::pair("engine.ability.type.Idle",
               system::system_id_t::IDLE),
 	std::pair("engine.ability.type.Move",
-              system::system_id_t::MOVE_COMMAND));
+              system::system_id_t::MOVE_COMMAND),
+	std::pair("engine.ability.type.Gather",
+              system::system_id_t::GATHER),
+	std::pair("engine.ability.type.DropResources",
+              system::system_id_t::DROP_RESOURCES),
+	std::pair("engine.ability.type.Constructable",
+              system::system_id_t::BUILD_PROGRESS),
+	std::pair("engine.ability.type.Create",
+              system::system_id_t::TRAIN),
+	std::pair("engine.ability.type.Research",
+              system::system_id_t::RESEARCH));
 
 /**
  * Maps API activity condition types to engine condition types.

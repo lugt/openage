@@ -17,6 +17,21 @@ enum class system_id_t {
 	MOVE_DEFAULT,
 
 	ACTIVITY_ADVANCE,
+
+	// Resource gathering chain (villager -> spot -> TC drop)
+	GATHER,
+	GATHER_PICKUP,
+	RETURN_TO_DROP,
+	DROP_RESOURCES,
+
+	// Construction (villager -> foundation -> progress)
+	BUILD_PROGRESS,
+
+	// Training (production queue ticking down + spawn on completion)
+	TRAIN,
+
+	// Research (building -> progress -> patch commit on completion)
+	RESEARCH,
 };
 
 } // namespace openage::gamestate::system

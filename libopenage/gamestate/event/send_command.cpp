@@ -12,6 +12,7 @@
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/types.h"
+#include "log/log.h"
 
 
 namespace openage::gamestate {
@@ -74,7 +75,18 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 					params.get("target",
 			                   coord::phys3{0, 0, 0})));
 			break;
+
+		// TODO(Phase A6/C1-C4): construct the matching command class for each
+		// type. We intentionally log instead of silently dropping so test
+		// data wiring problems surface instead of looking like no-op orders.
+		case component::command::command_t::GATHER:
+		case component::command::command_t::BUILD:
+		case component::command::command_t::TRAIN:
+		case component::command::command_t::ATTACK:
 		default:
+			log::log(MSG(warn) << "SendCommandHandler: unhandled command_type "
+			                   << static_cast<int>(command_type)
+			                   << " (command class not yet implemented)");
 			break;
 		}
 	}
