@@ -8,6 +8,7 @@ import typing
 
 import os
 import pickle
+from dataclasses import replace
 from tempfile import gettempdir
 from zlib import decompress
 
@@ -97,6 +98,16 @@ def load_gamespec(
     del compressed_data
 
     spam("length of decompressed data: %d", len(file_data))
+
+    # The dat file starts with an 8-byte version string ("VER x.y\0").
+    # Newer 'Definitive Edition' updates changed the binary unit layout,
+    # so we detect the variant here and record it on the game version.
+    # 'VER 8.4' is the 'Battle for Greece' DLC format which inserts extra
+    # bytes into the projectile/living unit structs.
+    versionstr = file_data[:8].rstrip(b"\x00").decode("ascii", errors="ignore")
+    if game_version.edition.game_id == "AOE2DE" and versionstr == "VER 8.4":
+        dbg("detected Battle for Greece dat format (versionstr='%s')", versionstr)
+        game_version = replace(game_version, update_number="BfG")
 
     wrapper = EmpiresDatWrapper()
     _, gamespec = wrapper.read(file_data, 0, game_version, dynamic_load=dynamic_load)

@@ -344,6 +344,7 @@ EFFECT_APPLY_TYPE = {
     199: "UNKNOWN",
     200: "UNKNOWN",
     201: "UNKNOWN",
+    202: "UNKNOWN",
 
     # attribute_id:
     # 0: hit points
@@ -441,6 +442,9 @@ COMMAND_ABILITY = {
     153: "RESOURCE_FOLLOW",
     154: "LOOT",         # Chieftains tech; looting on killing villagers, monks, trade carts
     155: "BOOST_MOVE_AND_ATTACK",
+    # 'Battle for Greece' DLC adds new abilities (purpose not yet documented)
+    157: "UNKNOWN_157",
+    158: "UNKNOWN_158",
     768: "UNKNOWN_768",
     1024: "UNKNOWN_1024",
 }
@@ -635,6 +639,8 @@ TERRAIN_RESTRICTIONS = {
     0x1E: "DE2_UNKNOWN",
     0x1F: "SWGB_WATER2",
     0x20: "SWGB_ROCK4",
+    # 'Battle for Greece' DLC (purpose not yet documented)
+    0x31: "BFG_UNKNOWN",
 }
 
 BLAST_DEFENSE_TYPES = {
@@ -699,6 +705,8 @@ OBSTRUCTION_TYPES = {
     3: "BERSERK",
     5: "UNIT",
     10: "MOUNTAIN",  # mountain (matches occlusion_mask)
+    # 'Battle for Greece' DLC (purpose not yet documented)
+    13: "UNKNOWN_13",
 }
 
 SELECTION_EFFECTS = {
@@ -741,6 +749,8 @@ BLAST_OFFENSE_TYPES = {
     66: "UNKNOWN_66",
     130: "DE2_PIERCE",  # attack units behind target (Ghulam); used since Return of Rome
     138: "DE2_PIERCE",  # attack units behind target (Ghulam); unused since Return of Rome
+    # 'Battle for Greece' DLC (purpose not yet documented)
+    11: "UNKNOWN_11",
 }
 
 CREATABLE_TYPES = {

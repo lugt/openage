@@ -11,6 +11,7 @@ import struct
 
 from openage.convert.value_object.read.dynamic_loader import DynamicLoader
 
+from ....log import warn
 from ....util.strings import decode_until_null
 from .member_access import READ, READ_GEN, READ_UNKNOWN, SKIP, MemberAccess
 from .read_members import (IncludeMembers, ContinueReadMember,
@@ -31,6 +32,12 @@ VARARRAY_MATCH = re.compile("([{0}]+) *\\[([{0}]+)\\] *;?".format("a-zA-Z0-9_"))
 
 # match a simple number
 INTEGER_MATCH = re.compile("\\d+")
+
+# Largest finite 32-bit float. Some game data files store 0xffffffff (NaN) in
+# float fields as a "no value" sentinel - alongside FLT_MAX - e.g. the
+# 'Battle for Greece' DE2 dat uses it for unit charge fields. We clamp such
+# non-finite values to FLT_MAX instead of aborting the conversion.
+FLOAT32_MAX = 3.4028234663852886e+38
 
 # type lookup for C -> python struct
 STRUCT_TYPE_LOOKUP = {
@@ -513,9 +520,13 @@ class GenieStructure:
 
                 if symbol == "f":
                     if not math.isfinite(result):
-                        raise SyntaxError("invalid float when "
-                                          "reading %s at offset %# 08x" % (
-                                              var_name, offset))
+                        # Some game data files store 0xffffffff (NaN) in float
+                        # fields as a "no value" sentinel, e.g. the 'Battle for
+                        # Greece' DE2 dat. Tolerate it by clamping to FLT_MAX;
+                        # the warning keeps real parse misalignments visible.
+                        warn("non-finite float when reading %s at offset "
+                             "%#08x; clamping to FLT_MAX", var_name, offset)
+                        result = FLOAT32_MAX
 
                 if export == READ_GEN:
                     # Store the member as ValueMember

@@ -10,6 +10,7 @@ import typing
 
 
 from .....nyan.nyan_structs import MemberOperator
+from .....log import warn
 from ....entity_object.conversion.aoc.genie_tech import CivTeamBonus, CivBonus
 from ..aoc.tech_subprocessor import AoCTechSubprocessor
 from ..aoc.upgrade_attribute_subprocessor import AoCUpgradeAttributeSubprocessor
@@ -305,11 +306,12 @@ class DE2TechSubprocessor:
 
         try:
             upgrade_func = DE2TechSubprocessor.upgrade_attribute_funcs[attribute_type]
-        except KeyError as exc:
-            raise KeyError(
-                f"No DE2 subprocessor function found for handling upgrade of "
-                f"unit attribute: {attribute_type}"
-            ) from exc
+        except KeyError:
+            # Newer game versions (e.g. 'Battle for Greece') use unit
+            # attributes that openage doesn't have an upgrade handler for yet.
+            # Skip the effect instead of aborting the whole conversion.
+            warn("no upgrade handler for unit attribute %s; skipping tech effect", attribute_type)
+            return patches
         for affected_entity in affected_entities:
             patches.extend(upgrade_func(converter_group, affected_entity, value, operator, team))
 
@@ -354,11 +356,12 @@ class DE2TechSubprocessor:
 
         try:
             upgrade_func = DE2TechSubprocessor.upgrade_resource_funcs[resource_id]
-        except KeyError as exc:
-            raise KeyError(
-                f"No DE2 subprocessor function found for handling upgrade of "
-                f"civ resource: {resource_id}"
-            ) from exc
+        except KeyError:
+            # Newer game versions (e.g. 'Battle for Greece') use civ resources
+            # that openage doesn't have an upgrade handler for yet. Skip the
+            # effect instead of aborting the whole conversion.
+            warn("no upgrade handler for civ resource %s; skipping tech effect", resource_id)
+            return patches
         patches.extend(upgrade_func(converter_group, value, operator, team))
 
         return patches

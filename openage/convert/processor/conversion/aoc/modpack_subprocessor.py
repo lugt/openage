@@ -11,6 +11,7 @@ import typing
 
 
 from .....nyan.import_tree import ImportTree
+from .....log import warn
 from ....entity_object.conversion.modpack import Modpack
 from ....entity_object.export.formats.nyan_file import NyanFile
 from ....value_object.conversion.forward_ref import ForwardRef
@@ -94,7 +95,17 @@ class AoCModpackSubprocessor:
 
             if isinstance(obj_location, ForwardRef):
                 # Resolve location and add nested object
-                nyan_object = obj_location.resolve()
+                try:
+                    nyan_object = obj_location.resolve()
+                except KeyError:
+                    # Newer game versions (e.g. 'Battle for Greece') reuse unit
+                    # ids for different content than the static name tables
+                    # expect, which can leave dangling references. Skip the
+                    # orphaned nested object instead of aborting the export.
+                    warn("could not resolve nested object location; skipping "
+                         "raw API object %s", raw_api_object.get_obj_id()
+                         if hasattr(raw_api_object, "get_obj_id") else "")
+                    continue
                 nyan_object.add_nested_object(raw_api_object.get_nyan_object())
                 continue
 
@@ -114,6 +125,8 @@ class AoCModpackSubprocessor:
 
         # Create an import tree from the files
         import_tree = ImportTree()
+
+
 
         for nyan_file in created_nyan_files.values():
             import_tree.expand_from_file(nyan_file)

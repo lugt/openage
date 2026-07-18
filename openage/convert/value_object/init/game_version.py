@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import enum
+import typing
 
 from ..read.media_types import MediaType
 from .game_file_version import GameFileVersion
@@ -201,3 +202,10 @@ class GameVersion:
     """
     edition: GameEdition
     expansions: tuple[GameExpansion, ...] = tuple()
+    # Format variant of the read data files. This is detected from the data
+    # files themselves (e.g. the dat file's "VER x.y" version string) and used
+    # to select structural differences between game updates that share the
+    # same edition, such as the 'Battle for Greece' DLC dat format ("VER 8.4").
+    # It is part of the (hashable) identity so that @cache'd format lookups
+    # return the correct variant.
+    update_number: typing.Any = None

@@ -16,6 +16,7 @@ from ....entity_object.conversion.aoc.genie_unit import GenieVillagerGroup, \
     GenieGarrisonMode, GenieMonkGroup
 from ....entity_object.conversion.combined_terrain import CombinedTerrain
 from ....entity_object.conversion.converter_object import RawAPIObject
+from .....log import warn
 from ....service.conversion import internal_name_lookups
 from ....value_object.conversion.forward_ref import ForwardRef
 from ..aoc.ability_subprocessor import AoCAbilitySubprocessor
