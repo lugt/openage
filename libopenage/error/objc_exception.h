@@ -7,6 +7,7 @@
 namespace openage {
 namespace error {
 
+#if defined(__APPLE__)
 /**
  * Install a process-wide Objective-C exception preprocessor (Apple platforms
  * only; no-op elsewhere) that records the most recent NSException thrown on
@@ -36,6 +37,23 @@ void uninstall_objc_exception_tracker();
  * infinite std::terminate <-> __terminate loop instead of aborting.)
  */
 std::string dump_objc_exception();
+
+#else  // !defined(__APPLE__)
+
+// Non-Apple platforms have no Objective-C runtime; provide inline no-op stubs
+// so handlers.cpp (which calls these unconditionally) links without the
+// objc_exception.mm translation unit (which is only compiled under if(APPLE)
+// in error/CMakeLists.txt).
+
+inline void install_objc_exception_tracker() {}
+
+inline void uninstall_objc_exception_tracker() {}
+
+inline std::string dump_objc_exception() {
+	return "";
+}
+
+#endif  // defined(__APPLE__)
 
 } // namespace error
 } // namespace openage
