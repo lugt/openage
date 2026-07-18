@@ -46,9 +46,18 @@ static constexpr float DEFAULT_FAR_DISTANCE = 100.0f;
 static constexpr float DEFAULT_ZOOM = 1.0f;
 
 /**
+ * Minimum zoom level (max zoom in).
+ *
+ * Values below 1.0f zoom in (enlarge) the view; this is the lower clamp so the
+ * camera cannot zoom in past the point where a single sprite fills the screen
+ * and the map becomes unusable. 0.5f == 2x zoom-in from the default view.
+ */
+static constexpr float DEFAULT_MIN_ZOOM = 0.5f;
+
+/**
  * Maximum zoom out level of the camera.
  */
-static constexpr float DEFAULT_MAX_ZOOM_OUT = 64.0f;
+static constexpr float DEFAULT_MAX_ZOOM_OUT = 8.0f;
 
 /**
  * Default zoom ratio.

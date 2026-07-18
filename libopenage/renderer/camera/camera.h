@@ -16,6 +16,7 @@
 
 #include "renderer/camera/boundaries.h"
 #include "renderer/camera/definitions.h"
+#include "renderer/camera/definitions.h"
 #include "renderer/camera/frustum_2d.h"
 #include "renderer/camera/frustum_3d.h"
 
@@ -106,8 +107,8 @@ public:
 	 * Set the zoom level of the camera. Values smaller than 1.0f let the
 	 * camera zoom in, values greater than 1.0f let the camera zoom out.
 	 *
-	 * The max zoom in value is 0.05f. Passing values lower than that
-	 * will just set the zoom level to max zoom.
+	 * The zoom level is clamped to [DEFAULT_MIN_ZOOM, max_zoom_out]. Passing
+	 * values outside that range just sets the zoom to the nearest bound.
 	 *
 	 * For incremental zooming, use the \p zoom_in() and \p zoom_out()
 	 * methods.
@@ -257,11 +258,12 @@ private:
 	float zoom;
 
 	/**
-	 * Maximum possible zoom in level.
+	 * Minimum zoom level (i.e. the furthest the camera can zoom in).
 	 *
-	 * Has to be above 0.0f, otherwise we get zero division errors.
+	 * Has to be above 0.0f, otherwise we get zero division errors. Clamped to
+	 * DEFAULT_MIN_ZOOM so the view cannot zoom in past a usable bound.
 	 */
-	static constexpr float MAX_ZOOM_IN = 0.005f;
+	static constexpr float MAX_ZOOM_IN = DEFAULT_MIN_ZOOM;
 
 	/**
 	 * Maximum possible zoom out level.
