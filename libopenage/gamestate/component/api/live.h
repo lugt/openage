@@ -3,7 +3,10 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <unordered_map>
+#include <vector>
 
 #include <nyan/nyan.h>
 
@@ -34,6 +37,9 @@ public:
 	/**
 	 * Set the value of an attribute at a given time.
 	 *
+	 * Triggers any callback registered via \p on_attribute_change for
+	 * this attribute once the new value lands.
+	 *
 	 * @param time The time at which the attribute is set.
 	 * @param attribute Attribute identifier (fqon of the nyan object).
 	 * @param value New attribute value.
@@ -41,6 +47,44 @@ public:
 	void set_attribute(const time::time_t &time,
 	                   const nyan::fqon_t &attribute,
 	                   int64_t value);
+
+	/**
+	 * Remove an attribute from storage.
+	 *
+	 * Used when an entity's HP hits zero (the engine chooses to forget
+	 * the curve entry rather than letting it keep ticking down to a
+	 * sentinel, mirroring how AoE2's corpse cleanup runs). No-op if the
+	 * attribute is not present. Registered callbacks for this attribute
+	 * are discarded along with the data - subscribe again if the entity
+	 * is re-spawned with a fresh Live.
+	 *
+	 * @param time The time at which the attribute is removed.
+	 * @param attribute Attribute identifier (fqon of the nyan object).
+	 */
+	void remove_attribute(const time::time_t &time,
+	                      const nyan::fqon_t &attribute);
+
+	/**
+	 * Register a callback that fires whenever this attribute's value
+	 * changes via \p set_attribute.
+	 *
+	 * The callback receives the new (post-write) value; subscribers are
+	 * responsible for any threshold logic (e.g. "if new_value <= 0
+	 * despawn the entity"). Multiple callbacks per attribute are
+	 * supported and fire in registration order. Callbacks are not
+	 * cleared across set_attribute calls - the only way to clear them
+	 * is to call \p remove_attribute or assign a new Live.
+	 *
+	 * Phase C4 will register a despawn callback on Health at entity
+	 * creation; Combat systems will register damage logs on the same
+	 * attribute for the tutorial HUD.
+	 *
+	 * @param attribute Attribute identifier (fqon of the nyan object).
+	 * @param callback Callable invoked after each successful write.
+	 */
+	using attribute_change_callback_t = std::function<void(int64_t new_value)>;
+	void on_attribute_change(const nyan::fqon_t &attribute,
+	                         attribute_change_callback_t callback);
 
 private:
 	using attribute_storage_t = curve::UnorderedMap<nyan::fqon_t,
@@ -50,6 +94,15 @@ private:
 	 * Map of attribute values by attribute type.
 	 */
 	attribute_storage_t attribute_values;
+
+	/**
+	 * Attribute-change callback registry. The attribute FQON identifies
+	 * which attribute to watch; the vector holds the callbacks in
+	 * registration order. We intentionally do not own the attribute
+	 * curves from here - the callback is fired after a set_attribute
+	 * write succeeds, with the new value handed back to the callback.
+	 */
+	std::unordered_map<nyan::fqon_t, std::vector<attribute_change_callback_t>> change_callbacks;
 };
 
 } // namespace openage::gamestate::component
