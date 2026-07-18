@@ -150,6 +150,11 @@ void GlWindow::update() {
 			}
 		} break;
 		case QEvent::Close: {
+			// The user clicked the window's close button (or otherwise asked the
+			// window manager to close the window). Log it explicitly so that a
+			// subsequent shutdown - which may surface as SIGSEGV/terminate during
+			// teardown - is distinguishable from an actual mid-run crash.
+			log::log(MSG(info) << "Window close requested by user (QEvent::Close); shutting down");
 			this->should_be_closed = true;
 		} break;
 

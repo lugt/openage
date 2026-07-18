@@ -59,9 +59,12 @@ void Controller::set_selected(const std::vector<gamestate::entity_id_t> ids) {
 
 bool Controller::process(const event_arguments &ev_args, const std::shared_ptr<BindingContext> &ctx) {
 	// BindingContext is filled at setup time and only read here; no lock needed.
+	log::log(DBG << "game::Controller::process: checking binding for event");
 	if (not ctx->is_bound(ev_args.e)) {
+		log::log(DBG << "game::Controller::process: event NOT bound in game context");
 		return false;
 	}
+	log::log(DBG << "game::Controller::process: event IS bound; spawning");
 
 	// TODO: check if action is allowed
 	auto bind = ctx->lookup(ev_args.e);

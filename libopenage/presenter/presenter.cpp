@@ -3,9 +3,13 @@
 #include "presenter.h"
 
 #include <eigen3/Eigen/Dense>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <vector>
+
+#include <QMouseEvent>
+#include <QTimer>
 
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
@@ -304,6 +308,55 @@ void Presenter::init_input() {
 	}
 
 	log::log(INFO << "Presenter: Input subsystem initialized");
+
+	// TODO: DEBUG-ONLY auto-spawn. Synthesizes Ctrl+LeftClick events to trigger
+	// the "game.spawn_entity" binding (see input/controller/game/controller.cpp),
+	// which spawns trial_base test entities (EagleWarrior, JaguarWarrior,
+	// PlumedArcher, JungleTree, Barracks) in sequence. This lets us verify that
+	// buildings/units render without needing a real mouse. Remove before merge.
+	//
+	// Gated behind the OPENAGE_DEBUG_AUTOSPAWN env var so it is inert by
+	// default and only runs when explicitly requested. The per-click coordinate
+	// logging is at DBG level (use -v / VERBOSE to see it); a single INFO line
+	// announces that auto-spawn is enabled so a normal run is not noisy.
+	const char *autospawn_env = std::getenv("OPENAGE_DEBUG_AUTOSPAWN");
+	if (autospawn_env != nullptr and autospawn_env[0] != '\0' and autospawn_env[0] != '0') {
+		log::log(MSG(info) << "DEBUG: OPENAGE_DEBUG_AUTOSPAWN set; auto-spawning entities "
+		                       "via synthesized Ctrl+LMB in 2s");
+		auto win_size = this->window->get_size();
+		QTimer::singleShot(2000, [this, win_size]() {
+			// NOTE: the spawn binding uses InputManager::mouse_position (updated by
+			// MouseMove events), NOT the click's own coordinates. So we must move the
+			// recorded mouse position before each click, otherwise every entity
+			// spawns at (0,0) and stacks on top of each other.
+			std::vector<QPoint> points = {
+				{int(win_size[0]) / 3, int(win_size[1]) / 3},
+				{int(win_size[0]) * 2 / 3, int(win_size[1]) / 3},
+				{int(win_size[0]) / 2, int(win_size[1]) / 2},
+				{int(win_size[0]) / 3, int(win_size[1]) * 2 / 3},
+				{int(win_size[0]) * 2 / 3, int(win_size[1]) * 2 / 3},
+			};
+			for (const auto &pt : points) {
+				// Move the recorded mouse position (used by the spawn binding's
+				// to_phys3) without dispatching a MouseMove event - dispatching one
+				// changes the input context stack and the subsequent click no longer
+				// reaches the game controller.
+				this->input_manager->set_mouse(pt.x(), pt.y());
+				log::log(DBG << "DEBUG: Ctrl+LMB at window (" << pt.x() << "," << pt.y() << ")");
+				QMouseEvent press{QEvent::MouseButtonRelease, QPointF(pt), QPointF(pt), Qt::LeftButton,
+				                  Qt::LeftButton, Qt::ControlModifier};
+				this->input_manager->process(press);
+			}
+			// report how many entities actually exist after spawning
+			if (this->simulation) {
+				auto gstate = this->simulation->get_game()->get_state();
+				log::log(MSG(info) << "DEBUG: game now has "
+				                   << gstate->get_game_entities().size()
+				                   << " game entities");
+			}
+			log::log(MSG(info) << "DEBUG: auto-spawn done");
+		});
+	}
 }
 
 void Presenter::init_final_render_pass() {
