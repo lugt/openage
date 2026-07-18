@@ -84,3 +84,6 @@ perf.data*
 # copyrighted assets
 /assets/converted/
 /assets/terrain/
+
+# local notes (not for upstream)
+/build-on-jason-pc.md
