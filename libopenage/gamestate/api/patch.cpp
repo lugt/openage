@@ -44,5 +44,14 @@ const nyan::Object APIPatch::get_property(const nyan::Object &patch,
 	return db_view->get_object(property_val->get_name());
 }
 
+const nyan::fqon_t *APIPatch::get_target(const nyan::Object &patch) {
+	// Thin pass-through to nyan::Object::get_target(), which surfaces the
+	// target FQON stored on the patch's NyanPatch parents. nyan returns
+	// nullptr when no target could be resolved - we forward that null
+	// directly so callers can decide between "skip" vs "throw" without
+	// losing context.
+	return patch.get_target();
+}
+
 
 } // namespace openage::gamestate::api
