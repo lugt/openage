@@ -59,11 +59,16 @@ class AoCAuxiliarySubprocessor:
         train_location_id = line.get_train_location_id()
         if isinstance(line, GenieBuildingLineGroup):
             train_location = dataset.unit_lines[train_location_id]
-            train_location_name = name_lookup_dict[train_location_id][0]
+            # Derive the name from the resolved group's head id rather than
+            # train_location_id directly: in newer game versions (e.g. 'Battle
+            # for Greece') a train_location_id may map via fallback to a
+            # different group (e.g. task_group 3 villager id 13 -> shared
+            # villager 118), whose game entity name differs from the raw id's.
+            train_location_name = name_lookup_dict[train_location.get_head_unit_id()][0]
 
         else:
             train_location = dataset.building_lines[train_location_id]
-            train_location_name = name_lookup_dict[train_location_id][0]
+            train_location_name = name_lookup_dict[train_location.get_head_unit_id()][0]
 
         # Location of the object depends on whether it'a a unique unit or a normal unit
         if line.is_unique():
@@ -415,7 +420,7 @@ class AoCAuxiliarySubprocessor:
         tech_lookup_dict = internal_name_lookups.get_tech_lookups(dataset.game_version)
         civ_lookup_dict = internal_name_lookups.get_civ_lookups(dataset.game_version)
 
-        research_location_name = name_lookup_dict[research_location_id][0]
+        research_location_name = name_lookup_dict[research_location.get_head_unit_id()][0]
         tech_name = tech_lookup_dict[tech_group.get_id()][0]
 
         obj_ref = f"{tech_name}.ResearchableTech"

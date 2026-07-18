@@ -9,7 +9,7 @@ from __future__ import annotations
 import typing
 
 
-from .....log import info
+from .....log import info, warn
 from ....entity_object.conversion.aoc.genie_civ import GenieCivilizationGroup
 from ....entity_object.conversion.aoc.genie_civ import GenieCivilizationObject
 from ....entity_object.conversion.aoc.genie_connection import GenieAgeConnection, \
@@ -997,6 +997,13 @@ class AoCProcessor:
                 elif task_group_id == 2:
                     line_id = GenieUnitTaskGroup.female_line_id
 
+                else:
+                    # Additional task groups exist in newer game versions
+                    # (e.g. 'Battle for Greece' uses task_group_id 3). Use the
+                    # first unit found for the group as its head/line id, like
+                    # the male/female villagers use their base villager id.
+                    line_id = unit["id0"].value
+
                 task_group = GenieUnitTaskGroup(line_id, task_group_id, full_data_set)
                 task_group.add_unit(unit)
                 full_data_set.task_groups.update({task_group_id: task_group})
@@ -1109,6 +1116,26 @@ class AoCProcessor:
                 full_data_set.unit_ref.update({upgrade_target_id: upgraded_line})
 
     @staticmethod
+    def _resolve_building_line(full_data_set: GenieObjectContainer, building_id: int):
+        """
+        Resolve a building id to its building line, or None if it isn't one.
+
+        building_lines only holds the first building of each line, so ids that
+        are later upgrades in a line are resolved through unit_ref (which maps
+        every building in a connection to its line). Newer game versions (e.g.
+        'Battle for Greece') reference utility buildings as drop sites,
+        research or train locations that aren't part of any building
+        connection; those resolve to None and the caller skips them.
+        """
+        if building_id in full_data_set.building_lines:
+            return full_data_set.building_lines[building_id]
+
+        if building_id in full_data_set.unit_ref:
+            return full_data_set.unit_ref[building_id]
+
+        return None
+
+    @staticmethod
     def link_creatables(full_data_set: GenieObjectContainer) -> None:
         """
         Link creatable units and buildings to their creating entity. This is done
@@ -1125,7 +1152,13 @@ class AoCProcessor:
         for unit_line in unit_lines.values():
             if unit_line.is_creatable():
                 train_location_id = unit_line.get_train_location_id()
-                full_data_set.building_lines[train_location_id].add_creatable(unit_line)
+                building_line = AoCProcessor._resolve_building_line(
+                    full_data_set, train_location_id)
+                if building_line is not None:
+                    building_line.add_creatable(unit_line)
+                else:
+                    warn("creatable unit line %s trains at unknown building %s; "
+                         "not linking", unit_line.get_id(), train_location_id)
 
         # Link buildings to villagers and fishing ships
         building_lines = full_data_set.building_lines
@@ -1136,6 +1169,16 @@ class AoCProcessor:
 
                 if train_location_id in full_data_set.villager_groups.keys():
                     full_data_set.villager_groups[train_location_id].add_creatable(building_line)
+
+                elif train_location_id in full_data_set.unit_ref:
+                    # The build location is a unit/group that isn't a villager-group
+                    # key itself (villager groups are keyed by the shared id 118).
+                    # This happens for newer game versions where a building's
+                    # train_location points at an individual villager variant id
+                    # (e.g. 'Battle for Greece' uses task_group 3 villager id 13).
+                    # unit_ref maps every villager id to its villager group, so
+                    # resolve through it instead of failing.
+                    full_data_set.unit_ref[train_location_id].add_creatable(building_line)
 
                 else:
                     # try normal units
@@ -1157,7 +1200,13 @@ class AoCProcessor:
         for tech in tech_groups.values():
             if tech.is_researchable():
                 research_location_id = tech.get_research_location_id()
-                full_data_set.building_lines[research_location_id].add_researchable(tech)
+                building_line = AoCProcessor._resolve_building_line(
+                    full_data_set, research_location_id)
+                if building_line is not None:
+                    building_line.add_researchable(tech)
+                else:
+                    warn("tech %s is researched at unknown building %s; "
+                         "not linking", tech.get_id(), research_location_id)
 
     @staticmethod
     def link_civ_uniques(full_data_set: GenieObjectContainer) -> None:
@@ -1220,8 +1269,13 @@ class AoCProcessor:
                     drop_site_id = drop_site_member.value
 
                     if drop_site_id > -1:
-                        drop_site = full_data_set.building_lines[drop_site_id]
-                        drop_site.add_gatherer_id(unit_id)
+                        drop_site = AoCProcessor._resolve_building_line(
+                            full_data_set, drop_site_id)
+                        if drop_site is not None:
+                            drop_site.add_gatherer_id(unit_id)
+                        else:
+                            warn("villager %s drops off at unknown building %s; "
+                                 "not linking", unit_id, drop_site_id)
 
     @staticmethod
     def link_garrison(full_data_set: GenieObjectContainer) -> None:
