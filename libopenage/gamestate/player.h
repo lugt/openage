@@ -2,9 +2,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <unordered_map>
 
 #include "gamestate/types.h"
+#include "nyan/nyan.h"
 
 
 namespace nyan {
@@ -55,6 +58,70 @@ public:
 	 */
 	const std::shared_ptr<nyan::View> &get_db_view() const;
 
+	/**
+	 * Add a positive amount of a resource to the player's stockpile.
+	 *
+	 * Increments the existing counter or inserts a new entry. Negative
+	 * amounts are not allowed here; use \p spend() to deduct. Calling this
+	 * with amount <= 0 is a no-op so that villager "harvest finished but
+	 * nothing in hand" or empty-resource-spot returns do not poison the
+	 * counter.
+	 *
+	 * @param resource_fqon Fully-qualified nyan object name of the resource
+	 *                      type (e.g. "util.resource.types.Wood").
+	 * @param amount Units to add (must be > 0).
+	 */
+	void add_resource(const nyan::fqon_t &resource_fqon, int64_t amount);
+
+	/**
+	 * Get the current amount of a resource the player owns.
+	 *
+	 * Missing entries read as 0 so callers do not have to populate the map
+	 * defensively. The reference is invalidated by any subsequent
+	 * add_resource / spend call; copy if you need to keep the value.
+	 *
+	 * @param resource_fqon Fully-qualified nyan object name of the resource
+	 *                      type.
+	 * @return Units in the stockpile (0 if absent).
+	 */
+	int64_t get_resource(const nyan::fqon_t &resource_fqon) const;
+
+	/**
+	 * Check whether the player can afford to spend \p amount of a resource.
+	 *
+	 * @param resource_fqon Fully-qualified nyan object name of the resource
+	 *                      type.
+	 * @param amount Units required (must be >= 0).
+	 * @return True if current stockpile >= amount.
+	 */
+	bool has_enough(const nyan::fqon_t &resource_fqon, int64_t amount) const;
+
+	/**
+	 * Try to deduct \p amount of a resource from the player's stockpile.
+	 *
+	 * Returns false without mutating state when the player cannot afford
+	 * the spend, so callers (production queues, construction sites, etc.)
+	 * must not assume success and should queue or cancel the action
+	 * accordingly. amount=0 always succeeds (idempotent reservation
+	 * release, etc.).
+	 *
+	 * @param resource_fqon Fully-qualified nyan object name of the resource
+	 *                      type.
+	 * @param amount Units to deduct (must be >= 0).
+	 * @return True if the deduction succeeded; false if insufficient funds.
+	 */
+	bool spend(const nyan::fqon_t &resource_fqon, int64_t amount);
+
+	/**
+	 * Read-only snapshot of the player's resource stockpile.
+	 *
+	 * Used by the tutorial trigger system and the HUD resource bar to
+	 * iterate every non-zero counter without poking at each known FQON.
+	 *
+	 * @return Reference to the internal resource map.
+	 */
+	const std::unordered_map<nyan::fqon_t, int64_t> &get_resources() const;
+
 protected:
 	/**
 	 * A player cannot be default copied because of their unique ID.
@@ -83,6 +150,19 @@ private:
 	 * Player view of the nyan game data database.
 	 */
 	std::shared_ptr<nyan::View> db_view;
+
+	/**
+	 * Per-resource stockpile keyed by nyan FQON (e.g.
+	 * "util.resource.types.Wood").
+	 *
+	 * Owned by the Player because the natural consumer / producer of
+	 * resources is the player-level system (DropResources /
+	 * ResourceStorage / market / tribute). It would also fit on a
+	 * per-entity ResourceStorage component, but the tutorial keeps the
+	 * model player-flavoured to start: villagers carry as travelling
+	 * cargo (not yet modelled) and unload straight into player.resources.
+	 */
+	std::unordered_map<nyan::fqon_t, int64_t> resources;
 };
 
 } // namespace openage::gamestate
