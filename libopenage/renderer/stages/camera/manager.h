@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <utility>
 
@@ -141,9 +142,30 @@ private:
 	int zoom_motion_direction;
 
 	/**
-	 * Move motion speed of the camera.
+	 * Maximum move speed of the camera (units per second). The actual speed
+	 * ramps up toward this via MOVE_ACCEL, so edge-scrolling starts slow and
+	 * eases in instead of jumping to full speed instantly.
 	 */
 	float move_motion_speed;
+
+	/**
+	 * Move acceleration (units per second squared). How fast the current move
+	 * speed ramps up toward move_motion_speed while a move direction is held.
+	 * Gives a brief ease-in (~0.25s to full speed at the defaults).
+	 */
+	static constexpr float MOVE_ACCEL = 16.0f;
+
+	/**
+	 * Current (actual) move speed (units per second). Eases toward
+	 * move_motion_speed while moving, resets to 0 when no direction is held.
+	 */
+	float move_motion_current_speed;
+
+	/**
+	 * Timestamp of the last update_motion() call, used to compute a
+	 * frame-rate-independent delta for the acceleration curve.
+	 */
+	std::chrono::steady_clock::time_point last_update_time;
 
 	/**
 	 * Zoom motion speed of the camera.

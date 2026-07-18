@@ -2,6 +2,7 @@
 
 #include "manager.h"
 
+#include <algorithm>
 #include <eigen3/Eigen/Dense>
 #include <numbers>
 
@@ -15,7 +16,9 @@ CameraManager::CameraManager(const std::shared_ptr<renderer::camera::Camera> &ca
 	camera{camera},
 	move_motion_directions{static_cast<int>(MoveDirection::NONE)},
 	zoom_motion_direction{static_cast<int>(ZoomDirection::NONE)},
-	move_motion_speed{0.2f},
+	move_motion_speed{4.0f},
+	move_motion_current_speed{0.0f},
+	last_update_time{std::chrono::steady_clock::now()},
 	zoom_motion_speed{0.05f},
 	camera_boundaries{camera_boundaries} {
 	this->uniforms = this->camera->get_uniform_buffer()->new_uniform_input(
@@ -73,6 +76,21 @@ void CameraManager::set_camera_boundaries(const CameraBoundaries &camera_boundar
 }
 
 void CameraManager::update_motion() {
+	// Frame-rate-independent delta since the last update. steady_clock (not the
+	// game Clock) is used on purpose: this is a render-thread concern and must
+	// not contend with the simulation's shared_mutex.
+	auto now = std::chrono::steady_clock::now();
+	auto dt = std::chrono::duration<float>(now - this->last_update_time).count();
+	this->last_update_time = now;
+	// Clamp dt so a pause / debugger stop / lid-close does not catapult the
+	// camera when motion resumes.
+	if (dt < 0.0f) {
+		dt = 0.0f;
+	}
+	else if (dt > 0.1f) {
+		dt = 0.1f;
+	}
+
 	if (this->move_motion_directions != static_cast<int>(MoveDirection::NONE)) {
 		Eigen::Vector3f move_dir{0.0f, 0.0f, 0.0f};
 
@@ -89,7 +107,19 @@ void CameraManager::update_motion() {
 			move_dir += Eigen::Vector3f(1.0f, 0.0f, 1.0f);
 		}
 
-		this->camera->move_rel(move_dir, this->move_motion_speed, this->camera_boundaries);
+		// Ease the speed in toward the cap so edge-scrolling accelerates briefly
+		// instead of snapping to full speed on the first frame.
+		this->move_motion_current_speed = std::min(
+			this->move_motion_current_speed + MOVE_ACCEL * dt,
+			this->move_motion_speed);
+
+		// move_motion_speed / current_speed are in units per second; scale by dt
+		// for the per-frame distance. move_rel takes a distance delta, not a speed.
+		this->camera->move_rel(move_dir, this->move_motion_current_speed * dt, this->camera_boundaries);
+	}
+	else {
+		// No direction held: stop immediately (no glide).
+		this->move_motion_current_speed = 0.0f;
 	}
 
 	if (this->zoom_motion_direction != static_cast<int>(ZoomDirection::NONE)) {
