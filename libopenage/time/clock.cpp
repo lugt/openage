@@ -26,27 +26,45 @@ ClockState Clock::get_state() {
 
 void Clock::update_time() {
 	if (this->state == ClockState::RUNNING) {
-		std::unique_lock lock{this->mutex};
+		// NOTE: the throttle sleep below must happen WITHOUT holding this->mutex.
+		// TimeLoop::run() busy-loops update_time() with no other throttling, so the
+		// interval between two calls is frequently <1ms and we hit the
+		// `passed.count() == 0` branch. Sleeping while holding the write lock
+		// starves every reader of this mutex: the presenter thread's
+		// get_real_time() (called per render stage per frame) and the simulation
+		// thread's get_time() both block on condition_variable::wait, which on
+		// macOS's libc++ shared_mutex (write-preferring) lets the time loop
+		// re-acquire the write lock before any reader is woken - so the game
+		// freezes for the cumulative sleep time every frame. The same defect is
+		// latent on Linux/glibc (whose shared_mutex lets in-flight readers finish
+		// first, hiding the problem), so fixing it here is correct everywhere.
+		bool throttle = false;
+		{
+			std::unique_lock lock{this->mutex};
 
-		auto now = simclock_t::now();
-		auto passed = std::chrono::duration_cast<std::chrono::milliseconds>(now - this->last_check);
-		if (passed.count() == 0) {
-			// prevent the clock from stalling the thread forever
+			auto now = simclock_t::now();
+			auto passed = std::chrono::duration_cast<std::chrono::milliseconds>(now - this->last_check);
+			if (passed.count() == 0) {
+				// prevent the clock from stalling the thread forever
+				throttle = true;
+			}
+			else if (passed.count() > this->max_tick_time) {
+				// if too much real time passes between two time updates, we only advance time by a small amount
+				// this prevents the simulation from getting out of control during unplanned stops,
+				// e.g. when debugging or if you close your laptop lid
+				this->sim_time += this->speed * this->max_tick_time;
+				this->sim_real_time += this->max_tick_time;
+			}
+			else {
+				this->sim_time += this->speed * passed.count();
+				this->sim_real_time += passed.count();
+			}
+			this->last_check = now;
+			// TODO: Stop clock if it reaches 0.0s with negative speed?
+		}
+		if (throttle) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		}
-		else if (passed.count() > this->max_tick_time) {
-			// if too much real time passes between two time updates, we only advance time by a small amount
-			// this prevents the simulation from getting out of control during unplanned stops,
-			// e.g. when debugging or if you close your laptop lid
-			this->sim_time += this->speed * this->max_tick_time;
-			this->sim_real_time += this->max_tick_time;
-		}
-		else {
-			this->sim_time += this->speed * passed.count();
-			this->sim_real_time += passed.count();
-		}
-		this->last_check = now;
-		// TODO: Stop clock if it reaches 0.0s with negative speed?
 	}
 }
 
