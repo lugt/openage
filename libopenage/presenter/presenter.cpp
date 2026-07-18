@@ -226,6 +226,12 @@ void Presenter::init_input() {
 		this->input_manager->process(ev);
 	});
 	this->window->add_mouse_button_callback([&](const QMouseEvent &ev) {
+		// Update the mouse position on button events too, not only on move.
+		// Otherwise drag_start/drag_end (set on MouseButtonPress/Release) would
+		// use the position of the last MouseMove, which is stale after a click
+		// without an immediately preceding move (or a move between the last
+		// move event and the button event). See the move callback below.
+		this->input_manager->set_mouse(ev.position().x(), ev.position().y());
 		this->input_manager->process(ev);
 	});
 	this->window->add_mouse_move_callback([&](const QMouseEvent &ev) {

@@ -24,6 +24,16 @@ std::shared_ptr<GuiApplicationImpl> GuiApplicationImpl::get() {
 		QSurfaceFormat format;
 		format.setRenderableType(QSurfaceFormat::OpenGL);
 		QSurfaceFormat::setDefaultFormat(format);
+
+		// Report the exact (possibly fractional) devicePixelRatio instead of
+		// the platform-default rounded value, so HiDPI scaling math uses the
+		// real compositor scale. Must be set before QGuiApplication is
+		// constructed (which happens in the GuiApplicationImpl member
+		// initializer list below). On non-HiDPI (DPR==1.0) and integer-scale
+		// (e.g. 2.0) displays this is a no-op; it only matters for fractional
+		// scales (1.25x / 1.5x / 1.75x).
+		QGuiApplication::setHighDpiScaleFactorRoundingPolicy(
+			Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 	}
 
 	return candidate ? candidate : std::shared_ptr<GuiApplicationImpl>{new GuiApplicationImpl};

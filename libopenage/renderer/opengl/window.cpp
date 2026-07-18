@@ -96,6 +96,12 @@ GlWindow::~GlWindow() {
 
 
 void GlWindow::set_size(size_t width, size_t height) {
+	// Re-read the live DPR: on Wayland the devicePixelRatio delivered by the
+	// compositor's configure event may differ from the value cached at
+	// construction (see the note in the constructor). This keeps the physical
+	// framebuffer in sync with Qt's actual window surface.
+	this->scale_dpr = this->window->devicePixelRatio();
+
 	if (this->size[0] != width || this->size[1] != height) {
 		this->window->resize(width, height);
 		this->size = {width, height};
@@ -119,7 +125,24 @@ void GlWindow::update() {
 			auto ev = std::dynamic_pointer_cast<QResizeEvent>(event);
 			size_t width = ev->size().width();
 			size_t height = ev->size().height();
-			log::log(MSG(dbg) << "Window resized to: " << width << "x" << height);
+
+			// Re-read the live DPR on every resize. On Wayland the compositor
+			// delivers the real devicePixelRatio asynchronously (often with the
+			// first configure event), which fires a Resize, and a window moved
+			// to a different-DPR monitor also fires a Resize. Without this the
+			// cached scale_dpr from construction stays stale and the physical
+			// framebuffer (sized size*scale_dpr) no longer matches Qt's actual
+			// window surface, breaking the NDC->physical mapping at composite
+			// time (HiDPI "lower-left quadrant" bug).
+			double old_scale = this->scale_dpr;
+			this->scale_dpr = this->window->devicePixelRatio();
+			if (old_scale != this->scale_dpr) {
+				log::log(MSG(info) << "DPR changed: " << old_scale << " -> "
+				                  << this->scale_dpr);
+			}
+
+			log::log(MSG(dbg) << "Window resized to: " << width << "x" << height
+			                  << " (DPR=" << this->scale_dpr << ")");
 
 			this->size = {width, height};
 			for (auto &cb : this->on_resize) {
@@ -155,6 +178,22 @@ void GlWindow::update() {
 			auto const ev = std::dynamic_pointer_cast<QWheelEvent>(event);
 			for (auto &cb : this->on_mouse_wheel) {
 				cb(*ev);
+			}
+		} break;
+		case QEvent::ScreenChangeInternal: {
+			// The window's screen changed or the screen's DPR changed at
+			// runtime (e.g. user adjusted display scale, or moved window to a
+			// different-DPR monitor). Re-read the live DPR and re-dispatch all
+			// resize callbacks even though the logical size is unchanged, so
+			// the physical framebuffer (sized size*scale_dpr) is rebuilt for
+			// the new scale. Without this, a DPR change without a logical-size
+			// change leaves the cached scale_dpr stale.
+			double old_scale = this->scale_dpr;
+			this->scale_dpr = this->window->devicePixelRatio();
+			log::log(MSG(info) << "Screen changed; DPR " << old_scale << " -> "
+			                  << this->scale_dpr);
+			for (auto &cb : this->on_resize) {
+				cb(this->size[0], this->size[1], this->scale_dpr);
 			}
 		} break;
 		default:

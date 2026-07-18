@@ -27,6 +27,16 @@ bool WindowEventHandler::eventFilter(QObject * /* obj */, QEvent *event) {
 		add_to_queue();
 		// pass on the event
 		return false;
+	// ScreenChangeInternal is fired when the window moves to a different
+	// screen or the screen's DPR changes (e.g. user changes the display scale
+	// at runtime, or the window is dragged to a different-DPR monitor). We
+	// queue it so GlWindow::update() can re-read devicePixelRatio() and resize
+	// the physical framebuffer accordingly. This may fire WITHOUT an
+	// accompanying Resize, so handling it explicitly is required.
+	case QEvent::ScreenChangeInternal:
+		add_to_queue();
+		// pass on the event
+		return false;
 	case QEvent::Close:
 		add_to_queue();
 		// filter out the event
