@@ -364,7 +364,17 @@ class ImportTree:
         # Traverse the tree downwards
         current_node = self.root
         for part in fqon:
-            current_node = current_node.get_child(part)
+            try:
+                current_node = current_node.get_child(part)
+            except KeyError:
+                # Referenced object was never registered in the import tree
+                # (e.g. a RawAPIObject whose own location failed to resolve).
+                # Best-effort: emit an absolute reference so serialization can
+                # proceed and warn loudly so the dangling ref can be traced.
+                warn("import tree has no node %r (fqon=%r, namespace=%r); "
+                     "emitting absolute reference for dangling object",
+                     part, fqon, namespace)
+                return tuple(fqon)
 
         # Traverse the tree upwards
         sfqon = []

@@ -18,6 +18,7 @@ from math import degrees
 
 
 from .....nyan.nyan_structs import MemberSpecialValue, MemberOperator
+from .....log import warn
 from .....util.ordered_set import OrderedSet
 from ....entity_object.conversion.aoc.genie_unit import GenieBuildingLineGroup, \
     GenieAmbientGroup, GenieGarrisonMode, GenieStackBuildingGroup, \
@@ -166,6 +167,11 @@ class AoCAbilitySubprocessor:
                         if civ_id in items[0]:
                             graphics_set_id = set_id
                             break
+                    else:
+                        # Newer game versions (e.g. 'Battle for Greece') add
+                        # civs that aren't assigned to a graphics set yet.
+                        warn("civ %s has no graphics set; skipping custom animation", civ_id)
+                        continue
 
                     # Check if the object for the animation has been created before
                     obj_exists = graphics_set_id in handled_graphics_set_ids
@@ -460,6 +466,11 @@ class AoCAbilitySubprocessor:
                         if civ_id in items[0]:
                             graphics_set_id = set_id
                             break
+                    else:
+                        # Newer game versions (e.g. 'Battle for Greece') add
+                        # civs that aren't assigned to a graphics set yet.
+                        warn("civ %s has no graphics set; skipping custom animation", civ_id)
+                        continue
 
                     # Check if the object for the animation has been created before
                     obj_exists = graphics_set_id in handled_graphics_set_ids
@@ -2317,6 +2328,11 @@ class AoCAbilitySubprocessor:
                         if civ_id in items[0]:
                             graphics_set_id = set_id
                             break
+                    else:
+                        # Newer game versions (e.g. 'Battle for Greece') add
+                        # civs that aren't assigned to a graphics set yet.
+                        warn("civ %s has no graphics set; skipping custom animation", civ_id)
+                        continue
 
                     # Check if the object for the animation has been created before
                     obj_exists = graphics_set_id in handled_graphics_set_ids
@@ -2722,6 +2738,11 @@ class AoCAbilitySubprocessor:
                         if civ_id in items[0]:
                             graphics_set_id = set_id
                             break
+                    else:
+                        # Newer game versions (e.g. 'Battle for Greece') add
+                        # civs that aren't assigned to a graphics set yet.
+                        warn("civ %s has no graphics set; skipping custom animation", civ_id)
+                        continue
 
                     # Check if the object for the animation has been created before
                     obj_exists = graphics_set_id in handled_graphics_set_ids
@@ -4154,7 +4175,10 @@ class AoCAbilitySubprocessor:
                             break
 
                     else:
-                        raise RuntimeError(f"No graphics set found for civ id {civ_id}")
+                        # Newer game versions (e.g. 'Battle for Greece') add
+                        # civs that aren't assigned to a graphics set yet.
+                        warn("civ %s has no graphics set; skipping Idle animation", civ_id)
+                        continue
 
                     # Check if the object for the animation has been created before
                     obj_exists = graphics_set_id in handled_graphics_set_ids
@@ -4427,6 +4451,11 @@ class AoCAbilitySubprocessor:
                         if civ_id in items[0]:
                             graphics_set_id = set_id
                             break
+                    else:
+                        # Newer game versions (e.g. 'Battle for Greece') add
+                        # civs that aren't assigned to a graphics set yet.
+                        warn("civ %s has no graphics set; skipping custom animation", civ_id)
+                        continue
 
                     # Check if the object for the animation has been created before
                     obj_exists = graphics_set_id in handled_graphics_set_ids

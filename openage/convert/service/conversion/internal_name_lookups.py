@@ -7,7 +7,9 @@ names or filenames.
 from __future__ import annotations
 import typing
 
-from functools import cache
+from functools import cache, wraps
+
+from openage.log import warn
 
 import openage.convert.value_object.conversion.aoc.internal_nyan_names as aoc_internal
 import openage.convert.value_object.conversion.de1.internal_nyan_names as de1_internal
@@ -22,7 +24,63 @@ if typing.TYPE_CHECKING:
     from openage.convert.value_object.init.game_version import GameVersion
 
 
+class _FallbackLookupDict(dict):
+    """
+    Dict subclass that synthesizes a fallback value for missing keys.
+
+    The static name/class lookup tables only cover content that openage knows
+    about. Newer game versions (e.g. the 'Battle for Greece' DLC, dat format
+    "VER 8.4") add units, buildings and classes that aren't in the tables yet.
+    Returning a best-effort fallback (and warning once per missing key) lets
+    the conversion proceed with placeholder names instead of aborting, so
+    cross-references to not-yet-mapped entities still resolve.
+    """
+
+    def __init__(self, mapping, fallback_factory):
+        super().__init__(mapping)
+        self.__fallback_factory = fallback_factory
+
+    def __missing__(self, key):
+        fallback = self.__fallback_factory(key)
+        warn("static lookup missing key %r; using fallback %r", key, fallback)
+        self[key] = fallback
+        return fallback
+
+
+def _fallback_entity(key) -> tuple:
+    # (game_entity_name, filename/location component)
+    return (f"BfgUnknown{key}", f"bfg_unknown_{key}")
+
+
+def _fallback_class(key) -> str:
+    return f"BfgUnknownClass{key}"
+
+
+def _fallback_armor(key) -> str:
+    return f"BfgUnknownArmor{key}"
+
+
+def _tolerant(fallback_factory):
+    """
+    Decorator: wrap the dict returned by a get_*_lookups function in a
+    _FallbackLookupDict so missing keys (content from newer game versions
+    not yet in the static tables) resolve to a best-effort placeholder name
+    instead of raising. None returns (some lookups are unused for an edition)
+    are passed through unchanged.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            result = func(*args, **kwargs)
+            if result is None:
+                return result
+            return _FallbackLookupDict(result, fallback_factory)
+        return wrapper
+    return decorator
+
+
 @cache
+@_tolerant(_fallback_armor)
 def get_armor_class_lookups(game_version: GameVersion) -> dict[int, str]:
     """
     Return the name lookup dicts for armor classes.
@@ -71,6 +129,7 @@ def get_armor_class_lookups(game_version: GameVersion) -> dict[int, str]:
 
 
 @cache
+@_tolerant(_fallback_entity)
 def get_civ_lookups(game_version: GameVersion) -> dict[int, tuple[str, str]]:
     """
     Return the name lookup dicts for civs.
@@ -126,18 +185,19 @@ def get_class_lookups(game_version: GameVersion) -> dict[int, str]:
     # game_expansions = game_version.expansions
 
     if game_edition.game_id in ("ROR", "AOE1DE"):
-        return ror_internal.CLASS_ID_LOOKUPS
+        return _FallbackLookupDict(ror_internal.CLASS_ID_LOOKUPS, _fallback_class)
 
     if game_edition.game_id in ("AOC", "HDEDITION", "AOE2DE"):
-        return aoc_internal.CLASS_ID_LOOKUPS
+        return _FallbackLookupDict(aoc_internal.CLASS_ID_LOOKUPS, _fallback_class)
 
     if game_edition.game_id == "SWGB":
-        return swgb_internal.CLASS_ID_LOOKUPS
+        return _FallbackLookupDict(swgb_internal.CLASS_ID_LOOKUPS, _fallback_class)
 
     raise RuntimeError(f"No lookup dict found for game version {game_edition.edition_name}")
 
 
 @cache
+@_tolerant(_fallback_entity)
 def get_command_lookups(game_version: GameVersion) -> dict[int, tuple[str, str]]:
     """
     Return the name lookup dicts for unit commands.
@@ -179,7 +239,7 @@ def get_entity_lookups(game_version: GameVersion) -> dict[int, tuple[str, str]]:
         entity_lookup_dict.update(ror_internal.AMBIENT_GROUP_LOOKUPS)
         entity_lookup_dict.update(ror_internal.VARIANT_GROUP_LOOKUPS)
 
-        return entity_lookup_dict
+        return _FallbackLookupDict(entity_lookup_dict, _fallback_entity)
 
     if game_edition.game_id == "AOC":
         entity_lookup_dict.update(aoc_internal.UNIT_LINE_LOOKUPS)
@@ -187,7 +247,7 @@ def get_entity_lookups(game_version: GameVersion) -> dict[int, tuple[str, str]]:
         entity_lookup_dict.update(aoc_internal.AMBIENT_GROUP_LOOKUPS)
         entity_lookup_dict.update(aoc_internal.VARIANT_GROUP_LOOKUPS)
 
-        return entity_lookup_dict
+        return _FallbackLookupDict(entity_lookup_dict, _fallback_entity)
 
     if game_edition.game_id == "HDEDITION":
         entity_lookup_dict.update(aoc_internal.UNIT_LINE_LOOKUPS)
@@ -197,7 +257,7 @@ def get_entity_lookups(game_version: GameVersion) -> dict[int, tuple[str, str]]:
 
         # TODO: Include expansion lookups
 
-        return entity_lookup_dict
+        return _FallbackLookupDict(entity_lookup_dict, _fallback_entity)
 
     if game_edition.game_id == "AOE1DE":
         entity_lookup_dict.update(ror_internal.UNIT_LINE_LOOKUPS)
@@ -205,7 +265,7 @@ def get_entity_lookups(game_version: GameVersion) -> dict[int, tuple[str, str]]:
         entity_lookup_dict.update(ror_internal.AMBIENT_GROUP_LOOKUPS)
         entity_lookup_dict.update(ror_internal.VARIANT_GROUP_LOOKUPS)
 
-        return entity_lookup_dict
+        return _FallbackLookupDict(entity_lookup_dict, _fallback_entity)
 
     if game_edition.game_id == "AOE2DE":
         entity_lookup_dict.update(aoc_internal.UNIT_LINE_LOOKUPS)
@@ -233,7 +293,7 @@ def get_entity_lookups(game_version: GameVersion) -> dict[int, tuple[str, str]]:
         entity_lookup_dict.update(de2_internal.AMBIENT_GROUP_LOOKUPS)
         entity_lookup_dict.update(de2_internal.VARIANT_GROUP_LOOKUPS)
 
-        return entity_lookup_dict
+        return _FallbackLookupDict(entity_lookup_dict, _fallback_entity)
 
     if game_edition.game_id == "SWGB":
         entity_lookup_dict.update(swgb_internal.UNIT_LINE_LOOKUPS)
@@ -241,12 +301,13 @@ def get_entity_lookups(game_version: GameVersion) -> dict[int, tuple[str, str]]:
         entity_lookup_dict.update(swgb_internal.AMBIENT_GROUP_LOOKUPS)
         entity_lookup_dict.update(swgb_internal.VARIANT_GROUP_LOOKUPS)
 
-        return entity_lookup_dict
+        return _FallbackLookupDict(entity_lookup_dict, _fallback_entity)
 
     raise RuntimeError(f"No lookup dict found for game version {game_edition.edition_name}")
 
 
 @cache
+@_tolerant(_fallback_entity)
 def get_gather_lookups(game_version: GameVersion) -> dict[int, tuple[str, str]]:
     """
     Return the name lookup dicts for gather tasks.
@@ -343,6 +404,7 @@ def get_restock_lookups(game_version: GameVersion) -> dict[int, tuple[str, str]]
 
 
 @cache
+@_tolerant(_fallback_entity)
 def get_tech_lookups(game_version: GameVersion) -> dict[int, tuple[str, str]]:
     """
     Return the name lookup dicts for tech groups.

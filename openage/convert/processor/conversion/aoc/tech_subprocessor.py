@@ -440,7 +440,11 @@ class AoCTechSubprocessor:
             resource_name = "Gold"
 
         else:
-            raise ValueError("no valid resource ID found")
+            # Newer game versions (e.g. 'Battle for Greece') use resources
+            # beyond the standard Food/Wood/Stone/Gold. Skip the effect.
+            warn("tech %s cost-modify uses unknown resource %s; skipping",
+                 tech_id, resource_id)
+            return patches
 
         # Check if the tech actually costs an amount of the defined resource
         for resource_amount in tech_group.tech["research_resource_costs"].value:

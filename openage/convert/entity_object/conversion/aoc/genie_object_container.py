@@ -11,6 +11,25 @@ import typing
 
 from ..converter_object import ConverterObjectContainer
 
+
+class _RefFallbackDict(dict):
+    """
+    dict that falls back to another dict for missing keys.
+
+    Used for unit_lines and building_lines: an id that isn't a line head (e.g.
+    a villager variant id from a newer game version such as 'Battle for
+    Greece', or a non-head building in a line) resolves to its group through
+    unit_ref, which maps every such id to its line. If the id is in neither
+    dict, KeyError propagates as before.
+    """
+
+    def __init__(self, fallback, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__fallback = fallback
+
+    def __missing__(self, key):
+        return self.__fallback[key]
+
 if typing.TYPE_CHECKING:
     from openage.convert.entity_object.conversion.converter_object import RawAPIObject
     from openage.convert.entity_object.conversion.combined_sound import CombinedSound
@@ -82,11 +101,16 @@ class GenieObjectContainer(ConverterObjectContainer):
         # nyan objects)
         # key: group_id; value: ConverterObjectGroup instance
 
+        # Stores which line a unit is part of. Created before unit_lines and
+        # building_lines so those can fall back to it (see _RefFallbackDict):
+        # ids that are villagers or non-head buildings resolve to their line.
+        self.unit_ref: dict[int, GenieGameEntityGroup] = {}
+
         # Keys are the ID of the first unit in line
-        self.unit_lines: dict[int, GenieUnitLineGroup] = {}
+        self.unit_lines: _RefFallbackDict[int, GenieUnitLineGroup] = _RefFallbackDict(self.unit_ref)
         # Keys are the line ID of the unit connection
         self.unit_lines_vertical_ref: dict[int, GenieUnitLineGroup] = {}
-        self.building_lines: dict[int, GenieBuildingLineGroup] = {}
+        self.building_lines: _RefFallbackDict[int, GenieBuildingLineGroup] = _RefFallbackDict(self.unit_ref)
         self.task_groups: dict[int, GenieUnitTaskGroup] = {}
         self.transform_groups: dict[int, GenieUnitTransformGroup] = {}
         self.villager_groups: dict[int, GenieVillagerGroup] = {}
@@ -108,8 +132,7 @@ class GenieObjectContainer(ConverterObjectContainer):
 
         self.terrain_groups: dict[int, GenieTerrainGroup] = {}
 
-        # Stores which line a unit is part of
-        self.unit_ref: dict[int, GenieGameEntityGroup] = {}
+        # (unit_ref is created above, before unit_lines/building_lines)
 
         # Phase 3: sprites, sounds
         # Animation or Terrain graphics
