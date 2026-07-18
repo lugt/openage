@@ -59,6 +59,10 @@ const std::shared_ptr<Player> &GameState::get_player(player_id_t id) const {
 	return this->players.at(id);
 }
 
+const std::unordered_map<player_id_t, std::shared_ptr<Player>> &GameState::get_players() const {
+	return this->players;
+}
+
 const std::shared_ptr<Map> &GameState::get_map() const {
 	return this->map;
 }

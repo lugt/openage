@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "gamestate/game.h"
+#include "gamestate/game_state.h"
 #include "gamestate/simulation.h"
 #include "input/controller/camera/binding_context.h"
 #include "input/controller/camera/controller.h"
@@ -251,9 +253,24 @@ void Presenter::init_input() {
 	if (this->simulation) {
 		log::log(INFO << "Loading game simulation controls");
 
-		// TODO: Remove hardcoding
+		// Build the controlled-factions set from the players that Game
+		// actually created (one entry per PlayerDescriptor, in order).
+		// Defaults to {0} when the simulation has no game yet (very
+		// early presenter init race) so the controller is never empty.
+		std::unordered_set<size_t> controlled_factions{0};
+		if (auto game = this->simulation->get_game()) {
+			if (auto state = game->get_state()) {
+				controlled_factions.clear();
+				for (const auto &kv : state->get_players()) {
+					controlled_factions.insert(static_cast<size_t>(kv.first));
+				}
+				if (controlled_factions.empty()) {
+					controlled_factions.insert(0);
+				}
+			}
+		}
 		auto game_controller = std::make_shared<input::game::Controller>(
-			std::unordered_set<size_t>{0, 1, 2, 3}, 0);
+			controlled_factions, 0);
 		auto engine_context = std::make_shared<input::game::BindingContext>();
 		input::game::setup_defaults(engine_context, this->time_loop, this->simulation, this->camera);
 		this->input_manager->set_game_controller(game_controller);

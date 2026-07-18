@@ -58,10 +58,16 @@ void GameSimulation::start() {
 	this->init_event_handlers();
 
 	// TODO: wait for presenter to initialize before starting?
+	// TODO(a5-followup): replace the empty vector with the player's chosen
+	// setup FQON when the menu system (out of tutorial scope) exists.
+	std::vector<gamestate::PlayerDescriptor> players{
+		gamestate::PlayerDescriptor{""},
+	};
 	this->game = std::make_shared<gamestate::Game>(event_loop,
 	                                               this->mod_manager,
 	                                               this->entity_factory,
-	                                               this->terrain_factory);
+	                                               this->terrain_factory,
+	                                               players);
 
 	this->running = true;
 

@@ -70,6 +70,17 @@ public:
 	void add_player(const std::shared_ptr<Player> &player);
 
 	/**
+	 * Get the player index (read-only).
+	 *
+	 * Exposed so other subsystems (e.g. the input controller's
+	 * controlled-factions set in Presenter) can iterate over existing
+	 * players without joining the friend chain through Game.
+	 *
+	 * @return Map of player ID -> Player shared pointer.
+	 */
+	const std::unordered_map<player_id_t, std::shared_ptr<Player>> &get_players() const;
+
+	/**
 	 * Set the map of the current game.
 	 *
 	 * @param terrain Map object.

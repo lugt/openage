@@ -27,17 +27,22 @@ namespace openage::gamestate {
 Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
            const std::shared_ptr<assets::ModManager> &mod_manager,
            const std::shared_ptr<EntityFactory> &entity_factory,
-           const std::shared_ptr<TerrainFactory> &terrain_factory) :
+           const std::shared_ptr<TerrainFactory> &terrain_factory,
+           const std::vector<PlayerDescriptor> &players) :
 	db{nyan::Database::create()},
 	state{std::make_shared<GameState>(this->db, event_loop)},
 	universe{std::make_shared<Universe>(state)} {
 	this->load_data(mod_manager);
 
-	// TODO: Testing player creation
-	auto player1 = entity_factory->add_player(event_loop, state, "");
-	auto player2 = entity_factory->add_player(event_loop, state, "");
-	state->add_player(player1);
-	state->add_player(player2);
+	// Add one Player per PlayerDescriptor. Empty FQON yields a player
+	// with neither civ patches nor starting resources (debug/observer
+	// slot). Order of insertion is preserved so player IDs in
+	// GameState.players() correspond 1:1 with this vector.
+	for (const auto &descriptor : players) {
+		auto player = entity_factory->add_player(event_loop, state,
+		                                         descriptor.player_setup_fqon);
+		state->add_player(player);
+	}
 
 	// TODO: This lets the spawner event check which modpacks are loaded,
 	//       so that it can decide which entities it can spawn.

@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace nyan {
 class Database;
@@ -32,6 +33,7 @@ class GameState;
 class EntityFactory;
 class TerrainFactory;
 class Universe;
+struct PlayerDescriptor;
 
 /**
  * Manages a game session (settings, win conditions, etc.).
@@ -51,11 +53,15 @@ public:
 	 * @param event_loop Event simulation loop for the gamestate.
 	 * @param mod_manager Mod manager.
 	 * @param entity_factory Factory for creating entities. Used for creating the players.
+	 * @param players Per-slot configuration; one Player is created per
+	 *                entry in the order given. Empty means no players are
+	 *                added (debug modes only).
 	 */
 	Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 	     const std::shared_ptr<assets::ModManager> &mod_manager,
 	     const std::shared_ptr<EntityFactory> &entity_factory,
-	     const std::shared_ptr<TerrainFactory> &terrain_factory);
+	     const std::shared_ptr<TerrainFactory> &terrain_factory,
+	     const std::vector<PlayerDescriptor> &players);
 	~Game() = default;
 
 	/**
