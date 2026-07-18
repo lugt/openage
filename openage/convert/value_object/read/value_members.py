@@ -434,7 +434,8 @@ class ArrayMember(ValueMember):
         self,
         key_member_name: str,
         force_not_found: bool = False,
-        force_duplicate: bool = False
+        force_duplicate: bool = False,
+        merge_field: str = None
     ) -> ContainerMember:
         """
         Returns a ContainerMember generated from an array with type ARRAY_CONTAINER.
@@ -448,6 +449,11 @@ class ArrayMember(ValueMember):
         :type force_not_found: bool
         :param force_duplicate: Do not raise an exception if the same key value is used twice.
         :type force_duplicate: bool
+        :param merge_field: When a duplicate key is found, sum this member's value
+                            into the existing entry instead of raising. The game engine
+                            sums values such as bonus damage for the same armor class,
+                            so duplicate attack/armor entries are combined this way.
+        :type merge_field: str
         """
         if self.get_type() is not StorageType.ARRAY_CONTAINER:
             raise TypeError("%s: Container can only be generated from arrays with"
@@ -466,6 +472,13 @@ class ArrayMember(ValueMember):
             key_member_value = container[key_member_name].value
 
             if key_member_value in member_dict.keys():
+                if merge_field is not None:
+                    existing = member_dict[key_member_value]
+                    summed = (existing[merge_field].value
+                              + container[merge_field].value)
+                    existing.value[merge_field] = IntMember(merge_field, summed)
+                    continue
+
                 if force_duplicate:
                     continue
 

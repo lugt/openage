@@ -7,7 +7,7 @@ import typing
 from functools import cache
 
 from ...genie_structure import GenieStructure
-from ....read.member_access import READ, READ_GEN, SKIP
+from ....read.member_access import READ, READ_GEN, READ_UNKNOWN, SKIP
 from ....read.read_members import EnumLookupMember, ContinueReadMember, IncludeMembers, SubdataMember
 from ....read.value_members import StorageType
 from .lookup_dicts import COMMAND_ABILITY, OWNER_TYPE, RESOURCE_HANDLING, RESOURCE_TYPES, \
@@ -826,6 +826,12 @@ class ProjectileUnit(ActionUnit):
 
         if game_version.edition.game_id == "AOE2DE":
             data_format.append((READ_GEN, "blast_damage", StorageType.FLOAT_MEMBER, "float"))
+            # 'Battle for Greece' DLC (dat format "VER 8.4") added 16 unknown
+            # bytes here. This struct is shared by missile, living and building
+            # units, so all of them carry the extra bytes.
+            if game_version.update_number == "BfG":
+                data_format.append((READ_UNKNOWN, "bfg_projectile_unknown",
+                                   StorageType.ARRAY_INT, "uint8_t[16]"))
 
         return data_format
 
@@ -939,6 +945,14 @@ class LivingUnit(ProjectileUnit):
                     (READ_GEN, "spawn_graphic_id", StorageType.ID_MEMBER, "int16_t"),
                     (READ_GEN, "upgrade_graphic_id", StorageType.ID_MEMBER, "int16_t"),
                     (READ_GEN, "hero_glow_graphic_id", StorageType.ID_MEMBER, "int16_t"),
+                ])
+                # 'Battle for Greece' DLC (dat format "VER 8.4") added 25
+                # unknown bytes between hero_glow_graphic_id and the charge
+                # fields. Living and building units carry the extra bytes.
+                if game_version.update_number == "BfG":
+                    data_format.append((READ_UNKNOWN, "bfg_living_unknown",
+                                       StorageType.ARRAY_INT, "uint8_t[25]"))
+                data_format.extend([
                     (READ_GEN, "max_charge", StorageType.FLOAT_MEMBER, "float"),
                     (READ_GEN, "charge_regen_rate", StorageType.FLOAT_MEMBER, "float"),
                     (READ_GEN, "charge_cost", StorageType.ID_MEMBER, "int16_t"),
