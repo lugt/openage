@@ -1,7 +1,12 @@
 add_sources(libopenage
+    build.cpp
+    gather.cpp
     idle.cpp
     live.cpp
     move.cpp
+    production.cpp
+    resource_storage.cpp
     selectable.cpp
+    train.cpp
     turn.cpp
 )

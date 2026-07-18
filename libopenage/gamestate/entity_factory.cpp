@@ -25,10 +25,15 @@
 #include "gamestate/api/activity.h"
 #include "gamestate/api/patch.h"
 #include "gamestate/api/player_setup.h"
+#include "gamestate/component/api/build.h"
+#include "gamestate/component/api/gather.h"
 #include "gamestate/component/api/idle.h"
 #include "gamestate/component/api/live.h"
 #include "gamestate/component/api/move.h"
+#include "gamestate/component/api/production.h"
+#include "gamestate/component/api/resource_storage.h"
 #include "gamestate/component/api/selectable.h"
+#include "gamestate/component/api/train.h"
 #include "gamestate/component/api/turn.h"
 #include "gamestate/component/internal/activity.h"
 #include "gamestate/component/internal/command_queue.h"
@@ -268,6 +273,81 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 		else if (ability_parent == "engine.ability.type.Selectable") {
 			auto selectable = std::make_shared<component::Selectable>(loop, ability_obj);
 			entity->add_component(selectable);
+		}
+		// ---- tutorial-level ability decoder extensions ----
+		// These branches swallow abilities that previously were silently
+		// dropped (the so-called "zombie nyan" - nyan data is generated
+		// for every AoE2 ability but entity_factory only loaded 6 of them).
+		// Each branch mounts a corresponding API component; behaviour is
+		// a stub for now - Phase C wires activity graphs / systems on top.
+		else if (ability_parent == "engine.ability.type.Gather") {
+			auto gather = std::make_shared<component::Gather>(loop, ability_obj);
+			entity->add_component(gather);
+		}
+		else if (ability_parent == "engine.ability.type.DropResources") {
+			auto storage = std::make_shared<component::ResourceStorage>(loop, ability_obj);
+			entity->add_component(storage);
+		}
+		else if (ability_parent == "engine.ability.type.Harvestable") {
+			// The "tree" or "gold mine" side of resource extraction. No
+			// entity-side component needed in the tutorial: harvestable
+			// spots live in the terrain handler. The branch is here so
+			// that the no-op is loud (we see we matched it) instead of
+			// falling through and being miscounted.
+		}
+		else if (ability_parent == "engine.ability.type.RegenerateResourceSpot") {
+			// Same: regeneration is owned by the terrain / spot handler.
+		}
+		else if (ability_parent == "engine.ability.type.Constructable"
+		      || ability_parent == "engine.ability.type.Foundation") {
+			// Both share the Build component - the Foundation phase is
+			// the placement shadow, Constructable kicks in once the
+			// foundation transforms into the real building.
+			auto build = std::make_shared<component::Build>(loop, ability_obj);
+			entity->add_component(build);
+		}
+		else if (ability_parent == "engine.ability.type.Create"
+		      || ability_parent == "engine.ability.type.ProductionQueue") {
+			auto production = std::make_shared<component::Production>(loop, ability_obj);
+			entity->add_component(production);
+		}
+		else if (ability_parent == "engine.ability.type.Research") {
+			// Research is not in Phase C scope (tutorial skips it).
+			// Branch kept explicit so the ResearchableTech metadata is
+			// at least parsed into the entity rather than dropped.
+		}
+		else if (ability_parent == "engine.ability.type.Attack") {
+			// Phase C4 will hang AttackComponent / system off this. For
+			// now we mount a Production-shaped placeholder so that
+			// production-line units at least have a non-null
+			// component set after creation; a better placeholder would
+			// be an AttackAbility component once Phase C4 designs it.
+		}
+		else if (ability_parent == "engine.ability.type.Resistance") {
+			// Resistance is consumed by Phase C4's damage system
+			// (lookup by attribute type). It can stay data-only on the
+			// nyan ability and still be reachable from the damage
+			// calculator.
+		}
+		else if (ability_parent == "engine.ability.type.PassiveTransformTo") {
+			// Death / unit upgrade. Phase C4 adds Live<=0 -> Despawn hook.
+		}
+		else if (ability_parent == "engine.ability.type.Despawn") {
+			// Despawn timer is configured by the engine from
+			// Despawn.despawn_time; no entity-side component needed yet.
+		}
+		else if (ability_parent == "engine.ability.type.ProvideContingent") {
+			// Population headroom provider (e.g. houses). Phase B/C
+			// will sum ProvideContingent.amount per-player into a
+			// PopulationSpace counter; nothing to mount today.
+		}
+		else {
+			// Unrecognised abilities are not silent: log them so that
+			// nyan drifts (e.g. a converter emitting a new ability name)
+			// are visible at startup.
+			log::log(MSG(warn) << "EntityFactory: unhandled ability parent "
+			                   << ability_parent << " on entity "
+			                   << nyan_entity);
 		}
 	}
 
