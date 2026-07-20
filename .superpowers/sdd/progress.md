@@ -32,7 +32,24 @@ Revised plan: docs/superpowers/plans/2026-07-21-lazy-convert.md.
     (T2.5) ConverterObject(DynamicLoader) get_member/has_member/self-diff OK;
     (T2.6) realistic base-vs-civ-override diff -> non-trivial changes
     (`garrison_capacity`, `unit_commands`) flow through DynamicLoader.
-- [pending] T3 Lazy stores + extraction rewrite (no .value materialization)
+- [done 2026-07-21] T3 Lazy stores + extraction rewrite (lazy_extract.py)
+  - New module `processor/conversion/lazy_extract.py`: `extract_*_lazy(src,
+    full_data_set)` for every category, mirroring the DE2/AoC legacy extract
+    but driving from `GenieSource` offset tables via `DynamicLoader` +
+    `post_build` hooks (attacks/armors->container, unit_commands graft,
+    civ units->lazy container, effects pop). Stores stay plain dicts of
+    lightweight `GenieObject(members=DynamicLoader)` (no build at populate).
+  - `_LazyUnitContainer(Mapping)`: civ `units` member built on first
+    `civ["units"][id0]` access from `src.civ_units` (was the 124k-override
+    OOM sink via eager `get_container`). `ContainerMember` now accepts any
+    `Mapping` (value_members.py - dict already is one, so legacy untouched).
+  - VALIDATED: all store counts match probe (units 2319, techs 1268,
+    effect_bundles 1218, civs 54, graphics 13709, sounds 760, terrains 200,
+    restrictions 50, connections 4/36/240/211); attacks/armors transform and
+    unit_commands graft byte-match legacy eager; civ override-by-id matches
+    eager; effect counts match; effects popped from bundle members. Full lazy
+    extract: **RSS 219 MB / 55 MB Python heap** (legacy read phase OOM'd at
+    6-10 GB).
 - [pending] T4 backend switch OPENAGE_CONVERTER_BACKEND + DE2 wiring
 - [pending] T5 cache mgmt (LRU) + measure peak RSS
 - [pending] T6 acceptance: RSS < 500MB + golden nyan diff

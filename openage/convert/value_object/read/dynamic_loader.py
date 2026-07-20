@@ -44,7 +44,7 @@ class DynamicLoader:
     """
 
     __slots__ = ('offset', 'cls', 'args', 'raw', 'game_version',
-                 'extra', '_built')
+                 'extra', 'post_build', '_built')
 
     def __init__(
         self,
@@ -54,6 +54,7 @@ class DynamicLoader:
         raw,
         game_version: "GameVersion",
         extra: dict = None,
+        post_build: typing.Callable[[dict, "DynamicLoader"], None] = None,
     ):
         self.offset = offset
         self.cls = cls
@@ -64,6 +65,14 @@ class DynamicLoader:
         # members added via update() after construction (e.g. unit_commands).
         # kept across evictions; re-merged on build.
         self.extra = dict(extra) if extra else {}
+
+        # optional hook run after read() builds the dict, before the extra
+        # merge. Encapsulates per-category extract mutations (e.g. pop the
+        # civ's eager ``units`` array and replace it with a lazy container,
+        # turn ``attacks``/``armors`` into containers, graft ``unit_commands``).
+        # It may mutate ``built`` in place and/or stash persistent results in
+        # ``loader.extra`` (which survive evict and are re-merged below).
+        self.post_build = post_build
 
         # cached built dict[str, ValueMember]; None until first access or after
         # evict().
@@ -81,6 +90,9 @@ class DynamicLoader:
         built: dict[str, "ValueMember"] = {}
         for member in members:
             built[member.name] = member
+
+        if self.post_build is not None:
+            self.post_build(built, self)
 
         if self.extra:
             built.update(self.extra)

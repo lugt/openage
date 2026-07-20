@@ -28,6 +28,7 @@ import typing
 from enum import Enum
 from math import isclose
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 
 from .dynamic_loader import DynamicLoader
 
@@ -304,8 +305,8 @@ class ContainerMember(ValueMember):
 
         self._value = {}
 
-        if isinstance(submembers, (dict, DynamicLoader)):
-            # submembers is a list or loads dynamically
+        if isinstance(submembers, (dict, DynamicLoader, Mapping)):
+            # submembers is a list, dict, or loads dynamically
             self._value = submembers
 
         else:

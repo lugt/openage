@@ -1,5 +1,6 @@
 add_py_modules(
 	__init__.py
+	lazy_extract.py
 )
 
 add_subdirectory(aoc)
