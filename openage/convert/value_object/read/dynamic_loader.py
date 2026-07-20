@@ -1,11 +1,30 @@
-# Copyright 2014-2022 the openage authors. See copying.md for legal info.
+# Copyright 2014-2026 the openage authors. See copying.md for legal info.
 
 # TODO pylint: disable=C,R
 
 """
-Dynamically load and unload data from a file at runtime.
-"""
+Lazy mapping of a struct's ValueMembers.
 
+A ``DynamicLoader`` is a drop-in replacement for the ``dict[str, ValueMember]``
+that ``ConverterObject`` normally holds as ``self.members``: it supports the
+full mapping protocol (``__getitem__``, ``__contains__``, ``keys``/``items``/
+``values``, ``update``, ``get``, ``__len__``, ``__iter__``) so every consumer
+of a ``ConverterObject`` -- ``get_member``, ``has_member``, ``diff``,
+``add_member`` -- works unchanged. The difference: it does not materialize the
+struct's ValueMember subtree until a consumer first touches it, and ``evict()``
+drops the built dict so an LRU (the lazy stores in T3) can bound peak RSS.
+
+The subtree is rebuilt on demand from the record's byte offset via
+``cls(**args).read(raw, offset, game_version)`` -- which is self-contained per
+struct (dynamic lengths and ``passed_args`` resolve within the single read).
+``raw`` is the mmap'd decompressed .dat held by ``GenieSource``; ``args`` carries
+``passed_args`` captured during the offset-table pre-pass (e.g. ``terrain_count``
+for ``TerrainRestriction``).
+
+Extra members added via ``update()`` (e.g. ``unit_commands`` grafted onto a unit
+by ``extract_genie_units``) are kept separate from the dat-built dict so they
+survive ``evict()`` and are re-merged on the next build.
+"""
 from __future__ import annotations
 import typing
 
@@ -17,65 +36,118 @@ if typing.TYPE_CHECKING:
 
 class DynamicLoader:
     """
-    Member that can be loaded and unloaded at runtime, saving
-    memory in the process.
+    Lazy member mapping backed by a (offset, cls, args) handle into ``raw``.
+
+    Builds the ValueMember subtree on first access, caches it, and supports
+    ``evict()`` so a bounded cache can free it without losing ``update()``-ed
+    extras.
     """
 
-    __slots__ = ('name', 'datacls', 'game_version', 'srcdata', 'offset', 'members', '_loaded')
+    __slots__ = ('offset', 'cls', 'args', 'raw', 'game_version',
+                 'extra', '_built')
 
     def __init__(
         self,
-        name: str,
-        datacls: type[GenieStructure],
-        game_version: GameVersion,
-        srcdata: bytes,
-        offset: int
+        offset: int,
+        cls: type,
+        args: dict,
+        raw,
+        game_version: "GameVersion",
+        extra: dict = None,
     ):
-        self.datacls = datacls
+        self.offset = offset
+        self.cls = cls
+        self.args = args
+        self.raw = raw
         self.game_version = game_version
 
-        self.srcdata = srcdata
-        self.offset = offset
-        self._loaded = False
+        # members added via update() after construction (e.g. unit_commands).
+        # kept across evictions; re-merged on build.
+        self.extra = dict(extra) if extra else {}
 
-        self.name = name
-        self.members = None
+        # cached built dict[str, ValueMember]; None until first access or after
+        # evict().
+        self._built: dict[str, "ValueMember"] | None = None
 
-    def load(self) -> dict[str, ValueMember]:
-        """
-        Read the members from the provided source data.
-        """
-        datacls = self.datacls()
-        _, members = datacls.read(self.srcdata, self.offset, self.game_version, dynamic_load=False)
+    # ------------------------------------------------------------------ #
+    def _build(self) -> dict[str, "ValueMember"]:
+        """Materialize the ValueMember subtree from the offset, cache it."""
+        if self._built is not None:
+            return self._built
 
-        self.members = {}
+        inst = self.cls(**self.args)
+        _, members = inst.read(self.raw, self.offset, self.game_version)
+
+        built: dict[str, "ValueMember"] = {}
         for member in members:
-            self.members[member.name] = member
+            built[member.name] = member
 
-        self._loaded = True
+        if self.extra:
+            built.update(self.extra)
 
-        return self.members
+        self._built = built
+        return built
 
-    def unload(self):
+    def evict(self) -> None:
         """
-        Delete the loaded members.
+        Drop the built member dict so its memory can be reclaimed. ``extra``
+        members are preserved; the subtree is rebuilt on next access.
         """
-        del self.members
-        self._loaded = False
+        self._built = None
 
-    def __getitem__(self, key) -> ValueMember:
-        """
-        Retrieve submembers from the loaded members or load them temporarily
-        if they have not been loaded previously.
-        """
-        if self._loaded:
-            return self.members[key]
+    @property
+    def is_built(self) -> bool:
+        return self._built is not None
 
-        # else (expensive)
-        self.load()
-        item = self.members[key]
-        self.unload()
-        return item
+    # ------------------------------------------------------------------ #
+    # mapping protocol -- every access goes through _build() (cached)
+    # ------------------------------------------------------------------ #
+    def __getitem__(self, key) -> "ValueMember":
+        return self._build()[key]
+
+    def __contains__(self, key) -> bool:
+        return key in self._build()
+
+    def __iter__(self):
+        return iter(self._build())
+
+    def __len__(self) -> int:
+        return len(self._built) if self._built is not None else \
+            len(self.extra) + self._member_count_estimate()
+
+    def keys(self):
+        return self._build().keys()
+
+    def values(self):
+        return self._build().values()
+
+    def items(self):
+        return self._build().items()
+
+    def get(self, key, default=None) -> "ValueMember":
+        return self._build().get(key, default)
+
+    def update(self, mapping) -> None:
+        """Add/override members. Survives evict() (stored in ``extra``)."""
+        if hasattr(mapping, "items"):
+            entries = mapping.items()
+        else:
+            entries = mapping
+        for key, value in entries:
+            self.extra[key] = value
+            if self._built is not None:
+                self._built[key] = value
+
+    def _member_count_estimate(self) -> int:
+        """Cheap upper-bound member count from the schema, used only for
+        ``__len__`` before a build is forced (e.g. ``len(obj.members)``)."""
+        try:
+            members = self.cls.get_data_format(
+                self.game_version, allowed_modes=None, flatten_includes=True)
+        except Exception:
+            return 0
+        return sum(1 for entry in members if entry[2] is not None)
 
     def __repr__(self) -> str:
-        return f"DynamicLoader<{'loaded' if self._loaded else 'unloaded'}>"
+        return f"DynamicLoader<{self.cls.__name__}@0x{self.offset:x} " \
+               f"{'built' if self._built is not None else 'lazy'}>"

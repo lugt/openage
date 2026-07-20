@@ -5,6 +5,7 @@ add_py_modules(
 	media_types.py
 	member_access.py
 	read_members.py
+	source.py
 	value_members.py
 )
 

@@ -8,10 +8,11 @@ import typing
 import math
 import re
 import struct
+import time
 
 from openage.convert.value_object.read.dynamic_loader import DynamicLoader
 
-from ....log import warn
+from ....log import info, warn
 from ....util.strings import decode_until_null
 from .member_access import READ, READ_GEN, READ_UNKNOWN, SKIP, MemberAccess
 from .read_members import (IncludeMembers, ContinueReadMember,
@@ -21,6 +22,27 @@ from .read_members import (IncludeMembers, ContinueReadMember,
 from .value_members import ContainerMember, ArrayMember, IntMember, FloatMember, \
     StringMember, BooleanMember, IDMember, BitfieldMember, ValueMember
 from .value_members import StorageType
+
+# Counters used to sample RSS periodically during the read flood. The
+# non-finite float warning fires up to ~114k times on a DE2 dat; emitting
+# 114k extra log lines would drown out the convert progress. Instead we
+# sample every Nth occurrence (cheap) and every N seconds (catch idle).
+_WARN_PROBE_EVERY = 5000
+_WARN_PROBE_INTERVAL_S = 5.0
+_warn_probe_count = 0
+_warn_probe_last_t = 0.0
+
+
+def _sample_rss_mib() -> float:
+    """Best-effort RSS in MiB; -1 if /proc/self/status is unavailable."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024.0
+    except OSError:
+        pass
+    return -1.0
 
 if typing.TYPE_CHECKING:
     from openage.convert.value_object.init.game_version import GameVersion
@@ -151,7 +173,8 @@ class GenieStructure:
                 generated_value_members.extend(gen_members)
 
         if dynamic_load and self.dynamic_load:
-            return offset, DynamicLoader("", self.__class__, game_version, raw, start_offset)
+            return offset, DynamicLoader(start_offset, self.__class__, {},
+                                         raw, game_version)
 
         return offset, generated_value_members
 
@@ -527,6 +550,26 @@ class GenieStructure:
                         warn("non-finite float when reading %s at offset "
                              "%#08x; clamping to FLT_MAX", var_name, offset)
                         result = FLOAT32_MAX
+
+                        # Periodic RSS sample so the read flood gives us
+                        # memory-trajectory data instead of one warn per bad
+                        # float. Throttled by both count and wall time.
+                        global _warn_probe_count, _warn_probe_last_t
+                        _warn_probe_count += 1
+                        now = time.monotonic()
+                        if (_warn_probe_count % _WARN_PROBE_EVERY == 0
+                                or now - _warn_probe_last_t >= _WARN_PROBE_INTERVAL_S):
+                            _warn_probe_last_t = now
+                            info("MEMPROBE read-loop warn#%d rss=%.1f MiB",
+                                 _warn_probe_count, _sample_rss_mib())
+                            # Every 25k warnings also dump a tracemalloc
+                            # snapshot so we know which classes are growing.
+                            if _warn_probe_count % (_WARN_PROBE_EVERY * 5) == 0:
+                                try:
+                                    from openage.convert.tool.memprobe import snapshot
+                                    snapshot(f"read-loop warn#{_warn_probe_count}")
+                                except Exception:
+                                    pass
 
                 if export == READ_GEN:
                     # Store the member as ValueMember
