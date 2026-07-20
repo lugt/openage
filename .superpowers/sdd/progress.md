@@ -70,4 +70,21 @@ Revised plan: docs/superpowers/plans/2026-07-21-lazy-convert.md.
     eviction + correct rebuilds; accessing all 2319 units (would pin everything
     w/o LRU) stays at 2048 built / 221 MB RSS.
 - [pending] T6 acceptance: RSS < 500MB + golden nyan diff
-- [pending] T7 budget_gate + report -> docs/superpowers/reports/phase1.txt
+- [done 2026-07-21] T7 budget_gate tooling + `--memory-budget-test` CLI
+  - New module `processor/../tool/budget_gate.py`: `BudgetGate` samples RSS
+    every 0.25s in a daemon thread (catches transients between stage marks),
+    `mark(stage)` records RSS + bumps peak at known boundaries,
+    `finish(notes=)` writes `docs/superpowers/reports/phase1.txt` with peak
+    RSS, P2(<500)/P3(<300) pass/fail, stage trajectory, and lazy-LRU stats.
+    Report path resolved against repo root (4 dirnames up) so it lands in
+    docs/ regardless of caller CWD. `--memory-budget-test` flag added to
+    `convert/main.py init_subparser`; `convert_assets` forces
+    `OPENAGE_CONVERTER_BACKEND=lazy`, installs the gate on args, starts it,
+    and calls `finish()` after `convert(args)`. `convert_metadata` marks
+    `convert-metadata-start`, `after metadata read (gamespec)`,
+    `after nyan conversion`, per-modpack `after export of <name>`,
+    `after all exports`. Listed in `convert/tool/CMakeLists.txt`.
+    VALIDATED: dry-run unit test (start/mark/finish) writes a well-formed
+    report; argparse recognises the flag (default False); driver+main import
+    clean. The actual phase1.txt is produced by running the full convert
+    with the flag (deferred per the no-full-convert-here constraint).

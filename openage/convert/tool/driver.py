@@ -76,6 +76,12 @@ def convert_metadata(args: Namespace) -> None:
         from . import memprobe
         memprobe.enable()
 
+    # --memory-budget-test installs a BudgetGate on args; mark stage
+    # boundaries so the report shows the RSS trajectory. No-op without it.
+    budget = getattr(args, "budget_gate", None)
+    if budget is not None:
+        budget.mark("convert-metadata-start")
+
     args.converter = get_converter(args.game_version)
 
     # required for player palette and color lookup during SLP conversion.
@@ -127,6 +133,8 @@ def convert_metadata(args: Namespace) -> None:
     info("Finished metadata read (%.2f seconds)", stage_end - stage_start)
     stages_time.update({"read": stage_end - stage_start})
     _mem_log("after metadata read")
+    if budget is not None:
+        budget.mark("after metadata read (gamespec)")
 
     # nyan conversion
     stage_start = timeit.default_timer()
@@ -137,6 +145,8 @@ def convert_metadata(args: Namespace) -> None:
     del gamespec
     gc.collect()
     _mem_log("after nyan conversion (gamespec released)")
+    if budget is not None:
+        budget.mark("after nyan conversion")
 
     stage_end = timeit.default_timer()
     info("Finished data conversion (%.2f seconds)", stage_end - stage_start)
@@ -155,11 +165,15 @@ def convert_metadata(args: Namespace) -> None:
              modpack.info.version,
              mod_export_end - mod_export_start)
         _mem_log(f"after export of {modpack.info.packagename}")
+        if budget is not None:
+            budget.mark(f"after export of {modpack.info.packagename}")
 
     stage_end = timeit.default_timer()
     info("Finished export (%.2f seconds)", stage_end - stage_start)
     stages_time.update({"export": stage_end - stage_start})
     _mem_log("after all exports")
+    if budget is not None:
+        budget.mark("after all exports")
 
     debug_execution_time(args.debugdir, args.debug_info, stages_time)
 

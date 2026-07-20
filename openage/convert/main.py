@@ -117,8 +117,28 @@ def convert_assets(
     # import here so codegen.py doesn't depend on it.
     from .tool.driver import convert
 
+    # --memory-budget-test: force the lazy backend and instrument peak RSS
+    # across the whole pipeline. The BudgetGate samples RSS in a background
+    # thread (catches transients between stage marks) and writes a report.
+    if getattr(args, "memory_budget_test", False):
+        os.environ["OPENAGE_CONVERTER_BACKEND"] = "lazy"
+        from .tool.budget_gate import BudgetGate
+        args.budget_gate = BudgetGate()
+        args.budget_gate.start()
+    else:
+        args.budget_gate = None
+
     # Run the conversion process
     convert(args)
+
+    if getattr(args, "budget_gate", None) is not None:
+        args.budget_gate.finish(notes=[
+            "Peak sampled every %.2fs via /proc/self/status VmRSS."
+            % 0.25,
+            "Compare against legacy backend by unsetting "
+            "OPENAGE_CONVERTER_BACKEND and rerunning without "
+            "--memory-budget-test (legacy read phase OOMs on DE2).",
+        ])
 
     # clean args
     del args.srcdir
@@ -235,6 +255,14 @@ def init_subparser(cli: ArgumentParser):
     cli.add_argument(
         "--low-memory", action='store_true',
         help="Activate low memory mode")
+
+    cli.add_argument(
+        "--memory-budget-test", action='store_true',
+        help=("Force the lazy converter backend, sample peak RSS through the "
+              "full pipeline, and write a budget report to "
+              "docs/superpowers/reports/phase1.txt. Acceptance: peak RSS "
+              "< 500 MiB (P2); < 300 MiB is stretch (P3). Implies "
+              "OPENAGE_CONVERTER_BACKEND=lazy."))
 
     cli.add_argument(
         "--export-api", action='store_true',
