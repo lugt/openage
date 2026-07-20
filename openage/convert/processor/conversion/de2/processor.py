@@ -14,6 +14,7 @@ import openage.convert.value_object.conversion.de2.internal_nyan_names as de2_in
 
 from .....log import info
 from .....util.ordered_set import OrderedSet
+from ....tool.driver import _mem_log
 from ....entity_object.conversion.aoc.genie_graphic import GenieGraphic
 from ....entity_object.conversion.aoc.genie_object_container import GenieObjectContainer
 from ....entity_object.conversion.aoc.genie_unit import GenieBuildingLineGroup, GenieUnitObject, GenieAmbientGroup, \
@@ -67,14 +68,17 @@ class DE2Processor:
             string_resources,
             existing_graphics
         )
+        _mem_log("DE2 after _pre_processor (genie extract)")
         debug_converter_objects(args.debugdir, args.debug_info, dataset)
 
         # Create the custom openae formats (nyan, sprite, terrain)
         dataset = cls._processor(dataset)
+        _mem_log("DE2 after _processor (api objects)")
         debug_converter_object_groups(args.debugdir, args.debug_info, dataset)
 
         # Create modpack definitions
         modpacks = cls._post_processor(dataset)
+        _mem_log("DE2 after _post_processor (nyan + media)")
 
         return modpacks
 
@@ -101,6 +105,30 @@ class DE2Processor:
 
         info("Extracting Genie data...")
 
+        # Lazy backend: gamespec is a GenieSource (offset tables + mmap'd
+        # raw); extraction builds ValueMember subtrees on first access.
+        from openage.convert.value_object.read.source import GenieSource
+        if isinstance(gamespec, GenieSource):
+            from openage.convert.processor.conversion.lazy_extract import (
+                extract_genie_units_lazy, extract_genie_techs_lazy,
+                extract_genie_effect_bundles_lazy, extract_genie_civs_lazy,
+                extract_genie_graphics_lazy, extract_genie_sounds_lazy,
+                extract_genie_terrains_lazy, extract_genie_restrictions_lazy,
+                extract_connections_lazy,
+            )
+            extract_genie_units_lazy(gamespec, dataset)
+            extract_genie_techs_lazy(gamespec, dataset)
+            extract_genie_effect_bundles_lazy(gamespec, dataset)
+            AoCProcessor.sanitize_effect_bundles(dataset)
+            extract_genie_civs_lazy(gamespec, dataset)
+            extract_connections_lazy(gamespec, dataset)
+            extract_genie_graphics_lazy(gamespec, dataset)
+            _mem_log("DE2 after extract_genie_graphics")
+            extract_genie_sounds_lazy(gamespec, dataset)
+            extract_genie_terrains_lazy(gamespec, dataset)
+            extract_genie_restrictions_lazy(gamespec, dataset)
+            return dataset
+
         cls.extract_genie_units(gamespec, dataset)
         AoCProcessor.extract_genie_techs(gamespec, dataset)
         AoCProcessor.extract_genie_effect_bundles(gamespec, dataset)
@@ -111,6 +139,7 @@ class DE2Processor:
         AoCProcessor.extract_unit_connections(gamespec, dataset)
         AoCProcessor.extract_tech_connections(gamespec, dataset)
         cls.extract_genie_graphics(gamespec, dataset)
+        _mem_log("DE2 after extract_genie_graphics")
         AoCProcessor.extract_genie_sounds(gamespec, dataset)
         AoCProcessor.extract_genie_terrains(gamespec, dataset)
         AoCProcessor.extract_genie_restrictions(gamespec, dataset)

@@ -50,7 +50,16 @@ Revised plan: docs/superpowers/plans/2026-07-21-lazy-convert.md.
     eager; effect counts match; effects popped from bundle members. Full lazy
     extract: **RSS 219 MB / 55 MB Python heap** (legacy read phase OOM'd at
     6-10 GB).
-- [pending] T4 backend switch OPENAGE_CONVERTER_BACKEND + DE2 wiring
+- [done 2026-07-21] T4 backend switch OPENAGE_CONVERTER_BACKEND + DE2 wiring
+  - `get_converter_backend()` in gamedata.py reads env (default ``legacy``).
+    `get_gamespec` returns a `GenieSource` (via new `from_compressed`) when
+    ``lazy``; `GenieSource.from_dat(dat_path, game_version=None)` and
+    `from_compressed(compressed, game_version, name)` added. DE2
+    `_pre_processor` branches on `isinstance(gamespec, GenieSource)` -> calls
+    `extract_*_lazy` (+ `sanitize_effect_bundles`); legacy path unchanged.
+    Driver's SWGB `blend_mode_count` access guarded for lazy. VALIDATED: DE2
+    `_pre_processor` lazy branch populates all stores with correct counts;
+    imports clean; default backend = legacy.
 - [pending] T5 cache mgmt (LRU) + measure peak RSS
 - [pending] T6 acceptance: RSS < 500MB + golden nyan diff
 - [pending] T7 budget_gate + report -> docs/superpowers/reports/phase1.txt

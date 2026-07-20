@@ -21,6 +21,28 @@ from ..service.read.palette import get_palettes
 from ..service.read.register_media import get_existing_graphics
 from ..service.read.string_resource import get_string_resources
 
+import os
+import gc
+
+
+def _rss_mib():
+    """Read current process RSS in MiB from /proc/self/status. Cheap."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024.0
+    except OSError:
+        pass
+    return -1.0
+
+
+def _mem_log(label: str) -> None:
+    """Force GC and log current RSS so we can pinpoint peak memory growth."""
+    gc.collect()
+    rss = _rss_mib()
+    info("MEMPROBE %-40s rss=%.1f MiB", label, rss)
+
 if typing.TYPE_CHECKING:
     from argparse import Namespace
 
@@ -48,6 +70,12 @@ def convert_metadata(args: Namespace) -> None:
         info("converting metadata")
         # data_formatter = DataFormatter()
 
+    # Activate periodic memory sampler + SIGUSR1 tracemalloc dump when
+    # OPENAGE_MEMPROBE=1 is set in the environment. Cheap when off.
+    if os.environ.get("OPENAGE_MEMPROBE") == "1":
+        from . import memprobe
+        memprobe.enable()
+
     args.converter = get_converter(args.game_version)
 
     # required for player palette and color lookup during SLP conversion.
@@ -71,8 +99,17 @@ def convert_metadata(args: Namespace) -> None:
     debug_gamedata_format(args.debugdir, args.debug_info, args.game_version)
     gamespec = get_gamespec(args.srcdir, args.game_version, not args.flag("no_pickle_cache"))
 
-    # Blending mode count
-    if args.game_version.edition.game_id == "SWGB":
+    # Ground-truth heap composition right after the .dat load (the peak we want
+    # to characterize). Writes /tmp/openage_memprobe_heap.txt and exits, so we
+    # can iterate on shrinking the gamespec without running the full pipeline.
+    if os.environ.get("OPENAGE_MEMPROBE_HEAP") == "1":
+        from . import memprobe
+        memprobe.dump_heap_breakdown("post-gamespec-load", exit_after=True)
+
+    # Blending mode count (SWGB-only; the lazy backend does not expose
+    # top-level members, and SWGB is not a lazy target, so fall back to None).
+    from ..service.read.gamedata import get_converter_backend
+    if args.game_version.edition.game_id == "SWGB" and get_converter_backend() != "lazy":
         args.blend_mode_count = gamespec[0]["blend_mode_count_swgb"].value
 
     else:
@@ -89,6 +126,7 @@ def convert_metadata(args: Namespace) -> None:
     stage_end = timeit.default_timer()
     info("Finished metadata read (%.2f seconds)", stage_end - stage_start)
     stages_time.update({"read": stage_end - stage_start})
+    _mem_log("after metadata read")
 
     # nyan conversion
     stage_start = timeit.default_timer()
@@ -96,6 +134,9 @@ def convert_metadata(args: Namespace) -> None:
                                       args,
                                       string_resources,
                                       existing_graphics)
+    del gamespec
+    gc.collect()
+    _mem_log("after nyan conversion (gamespec released)")
 
     stage_end = timeit.default_timer()
     info("Finished data conversion (%.2f seconds)", stage_end - stage_start)
@@ -113,10 +154,12 @@ def convert_metadata(args: Namespace) -> None:
              modpack.info.packagename,
              modpack.info.version,
              mod_export_end - mod_export_start)
+        _mem_log(f"after export of {modpack.info.packagename}")
 
     stage_end = timeit.default_timer()
     info("Finished export (%.2f seconds)", stage_end - stage_start)
     stages_time.update({"export": stage_end - stage_start})
+    _mem_log("after all exports")
 
     debug_execution_time(args.debugdir, args.debug_info, stages_time)
 

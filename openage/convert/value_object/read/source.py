@@ -237,15 +237,68 @@ class GenieSource:
         self.tech_connections: dict[int, RecordHandle] = {}
 
     @classmethod
-    def from_dat(cls, dat_path: str) -> "GenieSource":
+    def from_dat(cls, dat_path: str, game_version=None) -> "GenieSource":
         raw, _cache, fd = load_raw_mmap(dat_path)
         versionstr = bytes(raw[:8]).rstrip(b"\x00").decode("ascii", errors="ignore")
-        gv = make_game_version(versionstr)
+        gv = game_version if game_version is not None else make_game_version(versionstr)
         info("genie_source: raw size = %.1f MiB", len(raw) / 1048576.0)
         src = cls(raw, gv, fd)
         src._scan()
         src._summary()
         return src
+
+    @classmethod
+    def from_compressed(cls, compressed: bytes, game_version,
+                        name: str = "empires.dat") -> "GenieSource":
+        """
+        Build a source from already-read compressed .dat bytes (so callers
+        that hold a fslike file object -- e.g. ``get_gamespec`` -- need not
+        resolve a real filesystem path). The decompressed bytes are written to
+        the same tmpfile cache as ``from_dat`` and mmap'd read-only.
+        """
+        cache_env = os.environ.get("OPENAGE_DAT_RAW_CACHE")
+        if cache_env and cache_env != "0":
+            cache_path = cache_env
+        else:
+            cache_path = f"/tmp/openage_dat_raw.{name}.bin"
+
+        reuse = cache_env != "0" and os.path.isfile(cache_path)
+        if not reuse:
+            raw = zlib.decompress(compressed, -15)
+            _check_versionstr(raw, name)
+            if cache_env != "0":
+                try:
+                    with open(cache_path, "wb") as f:
+                        f.write(raw)
+                    info("genie_source: cached raw to %s", cache_path)
+                except OSError as exc:
+                    warn("genie_source: could not write raw cache %s: %s",
+                         cache_path, exc)
+            del raw
+        else:
+            info("genie_source: reusing cached raw at %s", cache_path)
+        del compressed
+
+        fd = open(cache_path, "rb")
+        try:
+            mm = mmap.mmap(fd.fileno(), 0, access=mmap.ACCESS_READ)
+        except ValueError:
+            fd.seek(0)
+            data = fd.read()
+            fd.close()
+            mm = mmap.mmap(-1, len(data))
+            mm.write(data)
+            mm.seek(0)
+            fd = None
+        _check_versionstr(mm, name)
+
+        gv = game_version
+        info("genie_source: raw size = %.1f MiB", len(mm) / 1048576.0)
+        src = cls(mm, gv, fd)
+        src._scan()
+        src._summary()
+        return src
+
 
     # ------------------------------------------------------------------ #
     # the offset-recording walk (mirrors schema_probe.Probe, no ValueMembers)

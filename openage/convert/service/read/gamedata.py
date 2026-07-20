@@ -23,6 +23,21 @@ if typing.TYPE_CHECKING:
     from openage.util.fslike.wrapper import GuardedFile
 
 
+def get_converter_backend() -> str:
+    """
+    Which .dat loading backend to use.
+
+    ``legacy`` (default): read the whole genie tree upfront via
+    ``EmpiresDatWrapper.read(dynamic_load=False)`` -- materializes ~1.85M
+    ValueMembers (the OOM source on DE2/BfG).
+
+    ``lazy``: build a ``GenieSource`` of mmap'd raw bytes + per-record offset
+    tables; extraction wraps each record in a ``DynamicLoader`` that builds the
+    ValueMember subtree on first access. Set via ``OPENAGE_CONVERTER_BACKEND``.
+    """
+    return os.environ.get("OPENAGE_CONVERTER_BACKEND", "legacy").strip().lower()
+
+
 def get_gamespec(srcdir: Directory, game_version: GameVersion, pickle_cache: bool) -> ArrayMember:
     """
     Reads empires.dat file.
@@ -40,6 +55,17 @@ def get_gamespec(srcdir: Directory, game_version: GameVersion, pickle_cache: boo
     else:
         raise RuntimeError("No service found for reading data file of "
                            f"version {game_version.edition.game_id}")
+
+    if get_converter_backend() == "lazy":
+        # BfG detection: 'VER 8.4' inserts extra bytes into unit structs.
+        with filepath.open('rb') as empiresdat_file:
+            compressed = empiresdat_file.read()
+        versionstr = compressed[:8].rstrip(b"\x00").decode("ascii", errors="ignore")
+        if game_version.edition.game_id == "AOE2DE" and versionstr == "VER 8.4":
+            from dataclasses import replace
+            game_version = replace(game_version, update_number="BfG")
+        from ...value_object.read.source import GenieSource
+        return GenieSource.from_compressed(compressed, game_version, name=filepath.name)
 
     cache_file = os.path.join(
         gettempdir(), f"{game_version.edition.game_id}_{filepath.name}.pickle")
