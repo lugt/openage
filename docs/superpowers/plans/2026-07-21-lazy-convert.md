@@ -109,6 +109,22 @@ matching the probe (units 2319, techs 1268, civs 54, graphics 13709,
 …). The open question is whether gather+emit+write stay bounded on top
 of that — see the pin-all analysis before running the full pipeline.
 
+**Pin-all analysis (code-level, 2026-07-21): bounded by design.** Tracing
+the lazy pipeline: (1) DE2 `_pre_processor` lazy branch calls
+`extract_*_lazy` (un-built DynamicLoaders) and returns - it does NOT call
+the legacy `extract_genie_units` that would `.value` all units. (2)
+`_processor`/`create_unit_lines` stores `GenieUnitObject` refs in
+unit_lines but only force-builds the transform-unit minority. (3) nyan
+creation reads every member via `.value` (primitives/transients) -
+`attacks`/`armors`/`unit_commands` are per-call locals, not stored on
+nyan objects; nyan objects hold copied primitives + nyan-API refs +
+ID-based ForwardRefs, never genie member refs. So built genie loaders are
+evictable once their unit_line is emitted, and the LRU caps the
+simultaneously-built count (matches T5's "all 2319 units -> 2048 built /
+221 MiB"). Residual risk: an untraced nyan path holding a genie ref; the
+budget_gate stage trajectory (`after nyan conversion` vs `after metadata
+read`) is the empirical tripwire - flat = bounded, spike = pin-all.
+
 ### (2) Golden nyan diff — needs a RAM-rich box for legacy
 
 ```

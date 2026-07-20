@@ -69,7 +69,34 @@ Revised plan: docs/superpowers/plans/2026-07-21-lazy-convert.md.
     `lru_stats()`/`lru_clear()` for instrumentation. VALIDATED: cap=32 forces
     eviction + correct rebuilds; accessing all 2319 units (would pin everything
     w/o LRU) stays at 2048 built / 221 MB RSS.
-- [pending] T6 acceptance: RSS < 500MB + golden nyan diff
+- [analysis 2026-07-21] T6 boundedness (code-level) - bounded by design; empirical run pending
+  - Code-level trace of the lazy pipeline confirms the LRU bounds
+    processing/export, not just extract:
+    * DE2 `_pre_processor` lazy branch calls `extract_*_lazy` (un-built
+      DynamicLoaders) and returns; it does NOT call the legacy
+      `extract_genie_units` (which would `.value` all units = pin-all). Good.
+    * `_processor` (`create_unit_lines` etc., aoc/processor.py:513) stores
+      `GenieUnitObject` refs in unit_lines but only force-builds the
+      transform-unit minority via `unit["transform_unit_id"].value`; line
+      heads/upgrades otherwise touch connection members, not unit members.
+    * `_post_processor` nyan creation (aoc/nyan_subprocessor.py,
+      entity_object/conversion/aoc/genie_unit.py:215/233/257) reads every
+      member via `.value` (primitives/transients) - `attacks`/`armors`/
+      `unit_commands` are per-call locals, NOT stored on nyan objects. Nyan
+      objects hold copied primitives + nyan-API refs + ID-based ForwardRefs,
+      never genie member refs. So built genie DynamicLoaders are evictable
+      once their unit_line's nyan members are emitted; the LRU caps the
+      simultaneously-built count (matches T5's empirical "all 2319 units ->
+      2048 built / 221 MB").
+  - Conclusion: extract proven 219 MiB; processing/export bounded by
+    design via the `.value`-extraction + LRU pattern. The residual risk is
+    an untraced nyan member path that holds a genie ref; the budget_gate
+    stage trajectory (`after nyan conversion` vs `after metadata read`) is
+    the empirical tripwire - flat = bounded, spike = pin-all.
+  - PENDING: the actual `--memory-budget-test` run (deferred per the
+    no-full-convert-here constraint) to write docs/superpowers/reports/
+    phase1.txt and confirm RSS < 500 MiB. Golden nyan diff needs a legacy
+    run on a RAM-rich box (legacy OOMs locally).
 - [done 2026-07-21] T7 budget_gate tooling + `--memory-budget-test` CLI
   - New module `processor/../tool/budget_gate.py`: `BudgetGate` samples RSS
     every 0.25s in a daemon thread (catches transients between stage marks),
