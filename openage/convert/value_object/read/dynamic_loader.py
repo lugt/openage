@@ -26,12 +26,43 @@ by ``extract_genie_units``) are kept separate from the dat-built dict so they
 survive ``evict()`` and are re-merged on the next build.
 """
 from __future__ import annotations
+import os
 import typing
+from collections import OrderedDict
 
 if typing.TYPE_CHECKING:
     from openage.convert.value_object.read.genie_structure import GenieStructure
     from openage.convert.value_object.init.game_version import GameVersion
     from openage.convert.value_object.read.value_members import ValueMember
+
+
+# --------------------------------------------------------------------------- #
+# global LRU over built DynamicLoaders (T5). Without this, every record a
+# consumer touches stays built for the whole run -- the processing/export
+# phases would re-materialize the full tree and OOM again. The registry caps
+# how many subtrees are alive at once; evicted loaders rebuild on next access.
+# --------------------------------------------------------------------------- #
+def _lru_cap() -> int:
+    """Max built loaders kept alive (env OPENAGE_LAZY_CACHE_SIZE, default 2048)."""
+    try:
+        return max(8, int(os.environ.get("OPENAGE_LAZY_CACHE_SIZE", "2048")))
+    except ValueError:
+        return 2048
+
+
+_LRU: "OrderedDict[int, DynamicLoader]" = OrderedDict()
+
+
+def lru_stats() -> tuple[int, int]:
+    """Return (built_count, cap) for instrumentation."""
+    return len(_LRU), _lru_cap()
+
+
+def lru_clear() -> None:
+    """Evict every built loader (release all cached subtrees)."""
+    for loader in list(_LRU.values()):
+        loader.evict()
+    _LRU.clear()
 
 
 class DynamicLoader:
@@ -44,7 +75,7 @@ class DynamicLoader:
     """
 
     __slots__ = ('offset', 'cls', 'args', 'raw', 'game_version',
-                 'extra', 'post_build', '_built')
+                 'extra', 'post_build', 'pinned', '_built')
 
     def __init__(
         self,
@@ -55,6 +86,7 @@ class DynamicLoader:
         game_version: "GameVersion",
         extra: dict = None,
         post_build: typing.Callable[[dict, "DynamicLoader"], None] = None,
+        pinned: bool = False,
     ):
         self.offset = offset
         self.cls = cls
@@ -73,6 +105,11 @@ class DynamicLoader:
         # It may mutate ``built`` in place and/or stash persistent results in
         # ``loader.extra`` (which survive evict and are re-merged below).
         self.post_build = post_build
+
+        # Pinned loaders are never registered with the global LRU and thus
+        # never evicted. Use for small-but-expensive-to-rebuild records (e.g.
+        # civs: evicting forces re-reading ~2300 unit overrides).
+        self.pinned = pinned
 
         # cached built dict[str, ValueMember]; None until first access or after
         # evict().
@@ -98,6 +135,11 @@ class DynamicLoader:
             built.update(self.extra)
 
         self._built = built
+
+        if not self.pinned:
+            _LRU[id(self)] = self
+            _enforce_lru_cap()
+
         return built
 
     def evict(self) -> None:
@@ -106,6 +148,7 @@ class DynamicLoader:
         members are preserved; the subtree is rebuilt on next access.
         """
         self._built = None
+        _LRU.pop(id(self), None)
 
     @property
     def is_built(self) -> bool:
@@ -163,3 +206,12 @@ class DynamicLoader:
     def __repr__(self) -> str:
         return f"DynamicLoader<{self.cls.__name__}@0x{self.offset:x} " \
                f"{'built' if self._built is not None else 'lazy'}>"
+
+
+def _enforce_lru_cap() -> None:
+    """Evict oldest built loaders until the registry is within the cap."""
+    cap = _lru_cap()
+    while len(_LRU) > cap:
+        _key, loader = _LRU.popitem(last=False)
+        # loader.evict() would re-touch _LRU; drop its cache directly.
+        loader._built = None  # noqa: SLF001

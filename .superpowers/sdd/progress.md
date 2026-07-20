@@ -60,6 +60,14 @@ Revised plan: docs/superpowers/plans/2026-07-21-lazy-convert.md.
     Driver's SWGB `blend_mode_count` access guarded for lazy. VALIDATED: DE2
     `_pre_processor` lazy branch populates all stores with correct counts;
     imports clean; default backend = legacy.
-- [pending] T5 cache mgmt (LRU) + measure peak RSS
+- [done 2026-07-21] T5 cache mgmt (global LRU on lazy builds)
+  - Module-level `_LRU` (OrderedDict) in dynamic_loader.py caps how many built
+    DynamicLoaders are alive at once (`OPENAGE_LAZY_CACHE_SIZE`, default 2048);
+    `_build()` registers, `_enforce_lru_cap()` evicts oldest (FIFO, cache
+    dropped directly to avoid re-entrancy). Civs are `pinned=True` (never
+    evicted) since evicting forces re-reading ~2300 unit overrides.
+    `lru_stats()`/`lru_clear()` for instrumentation. VALIDATED: cap=32 forces
+    eviction + correct rebuilds; accessing all 2319 units (would pin everything
+    w/o LRU) stays at 2048 built / 221 MB RSS.
 - [pending] T6 acceptance: RSS < 500MB + golden nyan diff
 - [pending] T7 budget_gate + report -> docs/superpowers/reports/phase1.txt

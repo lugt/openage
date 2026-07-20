@@ -231,8 +231,12 @@ def extract_genie_civs_lazy(src: "GenieSource",
 
     by_civ = _civ_units_by_civ(src)
     for civ_id, h in src.civs.items():
+        # Pinned: evicting a civ forces re-reading its ~2300 unit overrides
+        # (read() is whole-struct). The post-build civ dict is small (members
+        # + lazy units container), so 54 pinned civs are cheap.
         dl = DynamicLoader(h.offset, h.cls, h.args, src.raw, src.gv,
-                           post_build=_civ_post_build(src, civ_id, by_civ))
+                           post_build=_civ_post_build(src, civ_id, by_civ),
+                           pinned=True)
         civ = GenieCivilizationObject(civ_id, full_data_set, members=dl)
         full_data_set.genie_civs[civ.get_id()] = civ
 
