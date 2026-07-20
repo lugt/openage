@@ -79,3 +79,55 @@ empires2_x2_p1.dat
 ## Non-goals (deferred)
 - Retiring ValueMember entirely (was the old plan's mechanism, not a requirement).
 - Media (sprite/sound file) streaming (P3 stretch).
+
+## T6 acceptance runbook (2026-07-21)
+
+Two acceptance halves: (1) peak RSS < 500 MiB, (2) lazy nyan output
+byte-identical to a golden. Both halves need a full convert run; the
+golden additionally needs a legacy run, which OOMs on this box, so the
+golden is generated on a RAM-rich machine.
+
+### (1) Peak RSS — measured locally via the budget gate
+
+```
+OPENAGE_CONVERTER_BACKEND=lazy openage convert \
+    --memory-budget-test --source-dir <DE2 DAT DIR> \
+    --output-dir <OUT> --no-media --no-prompts
+```
+
+`--memory-budget-test` forces the lazy backend, samples RSS every 0.25 s
+in a daemon thread (catches the true peak between stage marks), records
+RSS at `convert-metadata-start`, `after metadata read (gamespec)`,
+`after nyan conversion`, per-modpack `after export of <name>`, and
+`after all exports`, and writes `docs/superpowers/reports/phase1.txt`
+with P2 (<500 MiB) / P3 (<300 MiB) verdicts. Drop `--no-media` for the
+full run (media export is P3 stretch and the bigger heap driver).
+
+Already proven without a full run (T3): the lazy EXTRACT phase runs at
+**219 MiB RSS / 55 MiB Python heap** with all stores populated and counts
+matching the probe (units 2319, techs 1268, civs 54, graphics 13709,
+…). The open question is whether gather+emit+write stay bounded on top
+of that — see the pin-all analysis before running the full pipeline.
+
+### (2) Golden nyan diff — needs a RAM-rich box for legacy
+
+```
+# on a machine with >= 16 GB RAM (legacy eager materialises ~1.85 M
+# ValueMembers and peaks 6-10 GB):
+OPENAGE_CONVERTER_BACKEND=legacy openage convert \
+    --source-dir <DE2 DAT DIR> --output-dir /tmp/golden --no-media
+OPENAGE_CONVERTER_BACKEND=lazy   openage convert \
+    --source-dir <DE2 DAT DIR> --output-dir /tmp/lazy   --no-media
+diff -r /tmp/golden /tmp/lazy          # expect: identical
+```
+
+No pre-existing golden is committed: `assets/converted/engine/` is the
+API definition (157 nyan files, .dat-independent, unaffected by this
+refactor) and `assets/test/converted/de2_base/` is an empty skeleton.
+
+Correctness is already covered at the extract layer (T3): units,
+attacks/armors transforms, unit_commands graft, civ override-by-id, and
+effect counts all byte-match legacy eager extraction. The full-pipeline
+golden diff closes the gap end-to-end (gather → emit → write) and is the
+one check that needs the legacy run.
+
