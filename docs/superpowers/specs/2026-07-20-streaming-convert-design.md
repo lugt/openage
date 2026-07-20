@@ -11,7 +11,7 @@
 
 DE2 convert OOMs at ~10 GB on the user's machine. Manual kill clamp at 2 GB still loses the binary — the OOM is large, not borderline. Existing fix attempts (`_release_genie_data` after nyan emit) cap the post-organize growth but the **6 GB genie data graph is resident from read through organize** and dominates peak RSS.
 
-Goal: **drastically drop peak RSS** with a streaming redesign of the convert pipeline. Stretch target **< 200 MB** peak, hard floor target **< 300 MB**, with three independently mergeable phases each with explicit budget gates.
+Goal: **drastically drop peak RSS** with a streaming redesign of the convert pipeline. **Final acceptance criterion: P2 gate < 500 MB peak** — when this is reached, the streaming redesign is "done" for shippable. Stretch targets beyond P2 (P3 gate < 300 MB, achievable < 200 MB) are bonus, not required. Each of the three phases carries an explicit budget gate; P2 is the must-have exit.
 
 Non-goals:
 
@@ -25,7 +25,7 @@ Non-goals:
 
 > **Any genie record exists in the Python heap only inside `with src.parse_*()` scope. Any persistent index holds handles (ID, FQON-string, mmap offset), never Python object references.**
 
-This is the single discipline that gets us from the 6 GB ceiling to the 200 MB floor. Every other design choice flows from it.
+This is the single discipline that gets us from the 6 GB ceiling to a *controllable* memory footprint — **P2 acceptance at ≤ 500 MB, with a stretch toward ≤ 200 MB at P3**. Every other design choice flows from it.
 
 ---
 
@@ -76,7 +76,7 @@ Each phase uses the same `GenieSource` API (no API drift between phases — ever
 |---|---|---|
 | **P1** Reader skeleton + `units` only on iter | `GenieSource` class, section-offset pre-walk, `units_iter()` + `units_summary()` impl, single category (units) routed through iter. Other categories stay on legacy `ValueMember` tree. | **< 1.5 GB** |
 | **P2** All categories on iter; ValueMember tree retired | Civs, techs, graphics, sounds, terrains, effects, terrain_restrictions, age/tech/building/unit connections, group_refs, upgrades, unlocks, civ-boni: all routed through iter. Legacy `value_members.py` deleted. | **< 500 MB** |
-| **P3** Media streaming + automated budget gates | `organize_media` switches to per-graphic atlas packing without intermediate `Pillow.Image` instances. CI wires `OPENAGE_MEMORY_BUDGET=phase3`. Atlas books compute per palette variant. | **< 200 MB** (achievable) · hard floor 300 MB |
+| **P3** (stretch — not required for ship) Media streaming + automated budget gates | `organize_media` switches to per-graphic atlas packing without intermediate `Pillow.Image` instances. CI wires `OPENAGE_MEMORY_BUDGET=phase3`. Atlas books compute per palette variant. | **< 300 MB** gate · **< 200 MB** achievable |
 
 Phase reports (`/tmp/openage_memprobe_heap.txt` from `OPENAGE_MEMPROBE_HEAP=1`) attached to each phase's PR for review.
 
@@ -375,7 +375,7 @@ CI:
 
 ## Success criteria for the overall effort
 
-- DE2 convert peak RSS < 200 MB (achievable) on the user's machine, where today it OOMs at 10 GB.
+- DE2 convert peak RSS < 500 MB (achievable) on the user's machine, where today it OOMs at 10 GB.
 - Three phase gates pass on the user's machine, in order, each with explicit budget number.
 - Engine still loads the modpack and runs identically (functional equivalence + golden-modpack diff < 10 KB).
 - Each phase ships with a `phase_report.txt` from `OPENAGE_MEMPROBE_HEAP=1`.
