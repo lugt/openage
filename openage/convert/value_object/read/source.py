@@ -175,6 +175,11 @@ class RecordHandle:
     offset: int
     cls: type
     args: dict = field(default_factory=dict)
+    # for civ.units entries: the multisubtype tag (unit_type) read at the
+    # array level. Legacy injects this as a member on each unit object; lazy
+    # extraction re-injects it via DynamicLoader.extra so consumers that do
+    # ``unit["unit_type"].value`` resolve it without the struct carrying it.
+    tag: typing.Any = None
 
 
 class _NS:
@@ -279,6 +284,23 @@ class GenieSource:
             info("genie_source: reusing cached raw at %s", cache_path)
         del compressed
 
+        # BfG detection must run on the decompressed bytes: the raw .dat is
+        # zlib-wrapped, so its first bytes are a compression header, not the
+        # versionstr. Detect here (post-decompress) and rebuild game_version
+        # with update_number="BfG" so struct layouts include the BfG +16/+25
+        # byte extensions. Mirrors the legacy check in gamedata.py but on the
+        # correct (decompressed) bytes.
+        if (game_version is not None
+                and game_version.edition.game_id == "AOE2DE"
+                and getattr(game_version, "update_number", None) != "BfG"):
+            with open(cache_path, "rb") as vf:
+                vs = vf.read(8).rstrip(b"\x00").decode("ascii", errors="ignore")
+            if vs == "VER 8.4":
+                from dataclasses import replace
+                game_version = replace(game_version, update_number="BfG")
+                info("genie_source: detected BfG (VER 8.4); "
+                     "update_number -> BfG")
+
         fd = open(cache_path, "rb")
         try:
             mm = mmap.mmap(fd.fileno(), 0, access=mmap.ACCESS_READ)
@@ -347,17 +369,30 @@ class GenieSource:
             id0 = getattr(values, "id0", None)
             if id0 is None:
                 return
+            # unit_type is the civ.units multisubtype tag, read at the array
+            # level and stashed on the child values by _walk_array. Legacy
+            # injects it as a member; lazy extraction re-injects via extra.
+            unit_type = getattr(values, "unit_type", None)
             if civ_idx == 0:
-                self.units[id0] = RecordHandle(offset, cls)
+                self.units[id0] = RecordHandle(offset, cls, tag=unit_type)
             elif civ_idx is not None and civ_idx > 0:
-                self.civ_units[(civ_idx, id0)] = RecordHandle(offset, cls)
+                self.civ_units[(civ_idx, id0)] = RecordHandle(offset, cls, tag=unit_type)
             return
 
         cat = _PATH_CATEGORIES.get(var_name)
         if cat is None:
             return
         table: dict = getattr(self, cat)
-        table[idx] = RecordHandle(offset, cls)
+        # stash passed_args (captured by _walk_array onto child_values) so the
+        # lazily-rebuilt record gets them (e.g. terrain_count for
+        # TerrainRestriction's variable-length arrays).
+        passed = getattr(values, "_passed_args", None)
+        args = {}
+        if passed:
+            for a in passed:
+                if hasattr(values, a):
+                    args[a] = getattr(values, a)
+        table[idx] = RecordHandle(offset, cls, args=args)
 
     def _read_primitive(self, var_type, export, var_name, offset, values):
         if isinstance(var_type, ReadMember):
@@ -433,10 +468,11 @@ class GenieSource:
 
         # capture passed_args from the parent so a lazily-rebuilt record has them
         args_snapshot: dict[str, Any] = {}
+        passed_keys: set = set()
         passed = getattr(var_type, "passed_args", None)
         if passed:
-            keys = {passed} if isinstance(passed, str) else set(passed)
-            for a in keys:
+            passed_keys = {passed} if isinstance(passed, str) else set(passed)
+            for a in passed_keys:
                 if hasattr(parent_values, a):
                     args_snapshot[a] = getattr(parent_values, a)
 
@@ -444,6 +480,9 @@ class GenieSource:
         if passed:
             for a in args_snapshot:
                 setattr(base_child_values, a, args_snapshot[a])
+            # remember which names are passed_args so _maybe_record can stash
+            # them on the RecordHandle (re-injected on lazy rebuild).
+            base_child_values._passed_args = passed_keys
 
         offset_lookup = None
         if var_type.offset_to:
@@ -467,6 +506,10 @@ class GenieSource:
                 off2, _, tag_val = self._read_primitive(
                     sub_var_type, sub_export, sub_name, offset, child_values)
                 offset = off2
+                # legacy stores the raw int for ID/INT storage types (see
+                # genie_structure.py IDMember(var_name, result)); only STRING
+                # storage gets the entry_hook name. unit_type is ID_MEMBER, so
+                # keep the raw int on child_values for _maybe_record to stash.
                 if sub_name:
                     setattr(child_values, sub_name, tag_val)
                 raw_tag = tag_val[0] if isinstance(tag_val, tuple) else tag_val

@@ -57,13 +57,11 @@ def get_gamespec(srcdir: Directory, game_version: GameVersion, pickle_cache: boo
                            f"version {game_version.edition.game_id}")
 
     if get_converter_backend() == "lazy":
-        # BfG detection: 'VER 8.4' inserts extra bytes into unit structs.
+        # BfG detection (VER 8.4) is done inside GenieSource.from_compressed
+        # on the decompressed bytes -- the raw .dat is zlib-wrapped, so its
+        # first bytes are a compression header, not the versionstr.
         with filepath.open('rb') as empiresdat_file:
             compressed = empiresdat_file.read()
-        versionstr = compressed[:8].rstrip(b"\x00").decode("ascii", errors="ignore")
-        if game_version.edition.game_id == "AOE2DE" and versionstr == "VER 8.4":
-            from dataclasses import replace
-            game_version = replace(game_version, update_number="BfG")
         from ...value_object.read.source import GenieSource
         return GenieSource.from_compressed(compressed, game_version, name=filepath.name)
 

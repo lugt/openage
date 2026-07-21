@@ -60,7 +60,10 @@ class _LazyUnitContainer(Mapping):
         if cached is not None:
             return cached
         h = self._handles[id0]
-        dl = DynamicLoader(h.offset, h.cls, h.args, self._src.raw, self._src.gv)
+        from openage.convert.value_object.read.value_members import IDMember
+        extra = _unit_type_extra(h, IDMember)
+        dl = DynamicLoader(h.offset, h.cls, h.args, self._src.raw, self._src.gv,
+                           extra=extra)
         # ContainerMember wraps the lazy member dict, mirroring a unit struct:
         # ``civ["units"][id0]["member"].value`` resolves through the loader.
         unit = ContainerMember(f"unit_{id0}", dl)
@@ -87,6 +90,22 @@ def _civ_units_by_civ(src: "GenieSource") -> dict[int, dict[int, "object"]]:
     return by_civ
 
 
+def _unit_type_extra(h, id_member_cls):
+    """Build the ``{"unit_type": IDMember(...)}`` extra for a unit handle.
+
+    The civ.units multisubtype tag (unit_type) is read at the array level and
+    stashed on the record handle (``h.tag``); legacy injects it as a member on
+    each unit object, so consumers doing ``unit["unit_type"].value`` find it.
+    For base units (civs[0]) the tag is always present; the struct itself does
+    not carry the member.
+    """
+    tag = getattr(h, "tag", None)
+    if tag is None:
+        return None
+    return {"unit_type": id_member_cls("unit_type", tag)}
+
+
+
 # --------------------------------------------------------------------------- #
 # post_build hooks
 # --------------------------------------------------------------------------- #
@@ -105,9 +124,12 @@ def _unit_post_build(src: "GenieSource", unit_id: int):
                 if raw is not None:
                     loader.extra[name] = raw.get_container("type_id",
                                                             merge_field="amount")
-        # unit_commands: grafted from unit_headers (not present on the struct)
+        # unit_commands: grafted from unit_headers (not present on the struct).
+        # unit_type lives in loader.extra (injected by extract), not built yet
+        # (post_build runs before the extra merge).
         if "unit_commands" not in built and "unit_commands" not in loader.extra:
-            unit_type = built["unit_type"].value if "unit_type" in built else 0
+            ut_member = loader.extra.get("unit_type")
+            unit_type = ut_member.value if ut_member is not None else 0
             if unit_type >= 40 and unit_id in src.unit_headers:
                 uh = src.unit_headers[unit_id]
                 uh_dl = DynamicLoader(uh.offset, uh.cls, uh.args,
@@ -173,9 +195,12 @@ def extract_genie_units_lazy(src: "GenieSource",
                              full_data_set: "GenieObjectContainer") -> None:
     from openage.convert.entity_object.conversion.aoc.genie_unit \
         import GenieUnitObject
+    from openage.convert.value_object.read.value_members import IDMember
 
     for unit_id, h in src.units.items():
+        extra = _unit_type_extra(h, IDMember)
         dl = DynamicLoader(h.offset, h.cls, h.args, src.raw, src.gv,
+                           extra=extra,
                            post_build=_unit_post_build(src, unit_id))
         unit = GenieUnitObject(unit_id, full_data_set, members=dl)
         full_data_set.genie_units[unit.get_id()] = unit
@@ -325,5 +350,10 @@ def extract_connections_lazy(src: "GenieSource",
     for handle_table, cls, store in stores_and_classes:
         for conn_id, h in handle_table.items():
             dl = DynamicLoader(h.offset, h.cls, h.args, src.raw, src.gv)
-            connection = cls(conn_id, full_data_set, members=dl)
+            # Key by the connection's real ``id`` field (read from the lazy
+            # loader), NOT the array index. Consumers (e.g. create_unit_lines)
+            # look up connections by the unit/age id stored in *other*
+            # connections' ``other_connected_ids``, so an index key would miss.
+            real_id = dl["id"].value
+            connection = cls(real_id, full_data_set, members=dl)
             store[connection.get_id()] = connection

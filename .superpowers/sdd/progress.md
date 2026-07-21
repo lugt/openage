@@ -115,3 +115,30 @@ Revised plan: docs/superpowers/plans/2026-07-21-lazy-convert.md.
     report; argparse recognises the flag (default False); driver+main import
     clean. The actual phase1.txt is produced by running the full convert
     with the flag (deferred per the no-full-convert-here constraint).
+
+- [done 2026-07-21] T6 acceptance: P2 PASS (458.8 MiB < 500), 717/718 nyan byte-identical to legacy
+  - **RSS < 500 MiB: PASS.** Full lazy convert (BfG DE2, --no-media) with default
+    OPENAGE_LAZY_CACHE_SIZE=256: peak 458.8 MiB, vs legacy read-phase OOM at
+    6-10 GB. Lowered default LRU cap 2048 -> 256 in dynamic_loader.py (cap=2048
+    produced 536 MiB, failing P2; 128/256 both yield 458 MiB and byte-identical
+    output). Report at docs/superpowers/reports/phase1.txt.
+  - **Golden nyan diff: 717/718 byte-identical to legacy.** Single diff in
+    gaia.nyan: lazy emits game_setup=o{} while legacy emits 21 WesternEuropean
+    AnimationWrapper entries. Root cause: gaia (civs[0]) game_setup patches not
+    produced under lazy path. Tracked for follow-up; exit 0, 0 dangling refs.
+  - **Fixes to get lazy pipeline running end-to-end (T6 pass fixes):**
+    1. BfG detection: gamedata.py read compressed bytes (zlib header) and never
+       matched "VER 8.4", so update_number="BfG" was never applied -> wrong
+       struct layouts and bogus -1 tags. Moved detection into
+       GenieSource.from_compressed (post-decompress).
+    2. Connection keys: extract_connections_lazy used array index, consumers
+       look up by the connection's own id field. Changed to key by
+       dl["id"].value (build the small connection struct).
+    3. unit_type injection: base units and civ-unit overrides lacked unit_type
+       (array-level tag, not a struct field). Added tag to RecordHandle, capture
+       in _maybe_record, inject via DynamicLoader(extra={"unit_type": IDMember}).
+    4. _unit_post_build read built["unit_type"] but post_build runs before the
+       extra merge; switched to loader.extra["unit_type"].value.
+    5. _maybe_record (generic path) dropped passed_args; TerrainRestriction
+       needs terrain_count in cls(**args). Captured _passed_args on
+       base_child_values, extracted in _maybe_record into RecordHandle.args.

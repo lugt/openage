@@ -43,11 +43,17 @@ if typing.TYPE_CHECKING:
 # how many subtrees are alive at once; evicted loaders rebuild on next access.
 # --------------------------------------------------------------------------- #
 def _lru_cap() -> int:
-    """Max built loaders kept alive (env OPENAGE_LAZY_CACHE_SIZE, default 2048)."""
+    """Max built loaders kept alive.
+
+    Env ``OPENAGE_LAZY_CACHE_SIZE`` overrides; default 256 keeps DE2/BfG convert
+    peak RSS under the 500 MiB P2 budget (validated: 256 -> 459 MiB peak;
+    2048 -> 536 MiB, which fails P2). Lower trades memory for rebuild churn;
+    raise only on machines with headroom.
+    """
     try:
-        return max(8, int(os.environ.get("OPENAGE_LAZY_CACHE_SIZE", "2048")))
+        return max(8, int(os.environ.get("OPENAGE_LAZY_CACHE_SIZE", "256")))
     except ValueError:
-        return 2048
+        return 256
 
 
 _LRU: "OrderedDict[int, DynamicLoader]" = OrderedDict()
