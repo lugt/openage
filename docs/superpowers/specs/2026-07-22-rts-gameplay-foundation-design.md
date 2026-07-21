@@ -1,30 +1,29 @@
 # openage RTS Gameplay Foundation - Design Spec
 
 **Date**: 2026-07-22
-**Status**: Draft (Phase 1 - vertical slice architecture)
+**Status**: Final (consistency-hardened, locked for implementation)
 **Supersedes/extends**: `~/.claude/plans/peaceful-chasing-mango.md` Phase A-C architecture assumptions
-**Scope**: A reusable, deterministic, AoE2:DE-style RTS gameplay runtime foundation built on openage's existing `activity/`, event, GameEntity, component and system code. Not a full ECS rewrite.
+**Scope**: A reusable, deterministic, AoE2:DE-style RTS gameplay runtime foundation built on openage's existing `activity/`, event, GameEntity, component and system code. Not a full ECS rewrite. Architecture is locked: SimLoop-driven, fixed-timestep, async pathfinding. (Options B/C - EventLoop-as-driver and synchronous Move - are explicitly rejected.)
 
-**Position in the roadmap**: This is spec 1 of 3 for the William Wallace campaign:
-1. **(THIS SPEC)** RTS gameplay foundation - the shared infrastructure (tick SimLoop, registries, typed events, command pipeline, pathfinding/locomotion, combat/damage/death, gather/production, AI, scenario runtime, replay/checksum). Vertical slice = Mission 1 playable end-to-end.
-2. Mission 1 scenario spec - the concrete scenario wiring + Mission 1 trigger (built on this foundation).
+**Position in the roadmap**: spec 1 of 3 for the William Wallace campaign:
+1. **(THIS SPEC)** RTS gameplay foundation - shared infrastructure (tick SimLoop, registries, typed events, command pipeline, pathfinding/locomotion, combat/damage/death, gather/build/production, AI, scenario runtime, replay/checksum). Deliverable = a **Mission-1-equivalent mechanics-complete headless/tutorial harness** verifying gather, objective, AI, scenario effect, and replay. It is NOT the formal Mission 1 scenario.
+2. Mission 1 scenario spec - concrete map, dialogue, unit roster, trigger wiring (formal Mission 1).
 3. Missions 2-5 roadmap - per-mission incremental mechanics (each adds one system/ability; no core rewrite).
 
-Missions 2-5 are NOT detailed here; section 4.6 lists them as extension points.
-
-This spec grounds every design decision in an audit of the current codebase (5 parallel audits: activity framework, event system, pathfinding/move, components/systems, command/determinism). Each section cites what is **reused** vs **new**.
+Grounded in a 5-way audit of the current codebase (activity framework, event system, pathfinding/move, components/systems, command/determinism). Each section cites **reused** vs **new**.
 
 ---
 
 ## 0. Architecture locking summary (confirmed decisions)
 
-1. **SimLoop replaces EventLoop as gameplay main driver.** EventLoop is demoted to a time-scheduling primitive + curve dependency propagation, non-authoritative for gameplay.
+1. **SimLoop is the sole gameplay driver** (mutually exclusive RuntimeMode, see 2.16). EventLoop demoted to a non-authoritative scheduling primitive + curve dependency propagation.
 2. **`tick_id_t` (uint64) is the sole authoritative gameplay time**, 50 ms / 20 Hz (`TICK_DURATION = 50'000'000 ns`). No wall-clock or floating sim time drives gameplay.
 3. **Activity only orchestrates; continuous gameplay is advanced by phase systems.**
-4. **Commands execute at T+1** (issuer observes at T, `execute_tick = T+1`).
+4. **Commands and ScenarioEffects execute at T+1** (issuer observes at T, `execute_tick = T+1`).
 5. **Domain events are sorted and dispatched in one phase** (Phase 9); Activities wake on the **next tick**.
 6. **Both growing central switches are deleted** (`send_command.cpp:67` by command_t, `activity.cpp:127-143` by system_id_t).
-7. **Entity iteration, RNG, fixed-point, command log, replay and checksum** are all part of the foundation refactor.
+7. **Entity iteration, RNG, fixed-point, command/effect log, replay and checksum** are all part of the foundation refactor.
+8. **No dual authoritative state**: deterministic runtime state is authoritative; legacy curves survive only as read-only compatibility mirrors.
 
 ---
 
@@ -33,7 +32,7 @@ This spec grounds every design decision in an audit of the current codebase (5 p
 ### 1.1 Dependency layers (top -> bottom, acyclic, single direction)
 
 ```
-ISSUERS (three command sources, same API for unit behavior)
+ISSUERS
   Player Input │ Scripted AI │ Scenario Runtime
         │              │
         │              │ unit behavior: Command Pipeline
@@ -42,14 +41,19 @@ ISSUERS (three command sources, same API for unit behavior)
         │              │   ScenarioEffectPipeline (deterministic, separate)
         ▼              ▼
 COMMAND PIPELINE / SCENARIO EFFECT PIPELINE
-  validation -> param canonicalization -> queue-mode (Replace/Append/
-  Prepend/Conditional) -> interrupt-priority (Background/Normal/Forced/
-  Uninterruptible) -> CommandLog append -> per-entity queue entry
-  [Command carries issuer + issued_tick + execute_tick + issuer_sequence]
+  CommandIngressQueue  +  ScenarioEffectIngressQueue
+  -> canonicalization
+  -> validation/arbitration
+  -> per-entity operation  (or per-effect operation)
+  -> stage CommandAuditRecord / ScenarioEffectAuditRecord
+  -> Phase 12 commit CommandLog/CommandResultLog + EffectLog
+  [Header carries IssuerRef + issued_tick + execute_tick + issuer_sequence]
+  CommandPriority:    Background / Normal / Forced / SystemCritical
+  ActivityInterruptPolicy: Interruptible / ForcedOnly / SystemCriticalOnly
         │
         ▼
 DETERMINISTIC SIMULATION LOOP  (principle #12)
-  fixed-timestep tick, 13 frozen phases (see 1.3)
+  fixed-timestep tick, 14 frozen phases (see 1.3)
   wall-clock only decides how many sim ticks a render frame runs;
   render interpolates between snapshots, never writes back gameplay state
         │
@@ -59,24 +63,27 @@ GAMEPLAY PHASE SYSTEMS     ACTIVITY GRAPH (control flow, principle #1,#2)
   (PhaseSystemScheduler      nodes: Sequence/XorGate/Condition/RunSystem/
    registers; run per        WaitEvent/WaitUntil/Loop/Transition/Interrupt/End
    TickPhase; continuous)    ActivityRuntimeState: root_graph + frame stack
-  PathfindingSystem           + params + wait_state + generation
+  PathfindingSystem           + params + wait_state + generation (SCALAR, authoritative)
   LocomotionSystem                  │ RunSystem node -> ActivityTaskRegistry
   MovementResolutionSystem          │   -> ActivityTaskResult (variant)
   ProjectileSystem                 ▼   decides branch
   DamageSystem / DeathSystem
-  ProductionSystem
-  DeferredEntityCommitSystem
+  ProductionSystem / EconomySystem
+  BuildSystem / DeferredEntityCommitSystem
         │ read/write (field-level writer matrix, see 1.5)
         ▼
-COMPONENTS (authoritative passive state + curves, principle #3)
-  Position(curve) │ Live(curve HP, scalar life_state) │ CommandQueue(curve) │
-  Activity(curve runtime) │ GathererCargo + ResourceNodeState (scalars) │
-  PlayerResourceLedger (array, scalar) │ PopulationState (scalar) │ ProductionQueue │ Ownership
+COMPONENTS (authoritative passive state; curve OR scalar per 4.7, principle #3)
+  Position(curve) │ Live(curve HP, scalar life_state) │
+  CommandQueue(scalar authoritative; legacy curve::Queue = read-only mirror) │
+  ActivityRuntime(scalar frame stack; legacy current_node curve = read-only mirror) │
+  GathererCargo + ResourceNodeState (scalars) │
+  PlayerResourceLedger (array, scalar) │ PopulationState (scalar) │
+  ProductionQueue │ Ownership
   NO embedded rule logic; NO on_attribute_change callback table (removed)
-        │ curve changes(at) dependency propagation (legacy primitive, non-authoritative)
+        │ curve changes(at) dependency propagation = LEGACY PRIMITIVE, NON-authoritative,
+        │ one-way observer only (legacy callbacks MUST NOT mutate gameplay state)
         ▼
-LEGACY EVENTLOOP (demoted)
-  curve compatibility │ legacy callbacks │ non-authoritative UI observer
+LEGACY EVENTLOOP (demoted, RuntimeMode::LegacyDemo only)
   + AUTHORITATIVE TypedEventQueue (independent of Legacy EventLoop, see 2.6)
 ```
 
@@ -84,38 +91,55 @@ LEGACY EVENTLOOP (demoted)
 
 - **Scenario Runtime boundary is four-way**:
   - Unit behavior (move/attack/gather/build/train commands): **Command Pipeline** (same as Player and AI).
-  - Non-unit behavior (SpawnEntity, ChangeDiplomacy, RevealArea, DeclareVictory, ObjectiveState): **ScenarioEffectPipeline** - independent, deterministic, but still flows through validation -> typed effect -> deferred commit -> replay/checksum. **ScenarioEffect never mutates Components directly.**
+  - Non-unit behavior (SpawnEntity, ChangeDiplomacy, RevealArea, DeclareVictory, ObjectiveState): **ScenarioEffectPipeline** - independent, deterministic, full T+1 ingress/validation/commit/log timing (see 1.3 phases 1/2). **ScenarioEffect never mutates Components directly.** `ShowDialogue` is a presentation effect: its occurrence is logged, but it does NOT modify authoritative gameplay state.
 - **AI only uses the Command Pipeline.** AI never knows Activity internal nodes and never bypasses resource/pop/cooldown/path validation.
 - **Activity does not compute rules.** A RunSystem node only calls an ActivityTaskRegistry handler and branches on ActivityTaskResult.
 - **Components contain no gameplay mutation rules.** All authoritative field writes go through a declared owner system or deterministic mutation pipeline (field-level writer matrix, 1.5).
 - **EventLoop no longer drives gameplay main advance.** SimLoop is the main driver.
 
-### 1.3 Frozen tick phases (13 phases, central definition, NOT registry order)
+### 1.3 Frozen tick phases (14 phases, central definition, NOT registry order)
+
+Phase 1 and Phase 2 process BOTH Command and ScenarioEffect. Renamed to reflect combined intent:
 
 ```
 run_tick(T):
   Phase 0  BeginTick                 (NOT current_tick++ here)
-  Phase 1  CommandIngest              drain CommandIngressQueue, canonical sort
-  Phase 2  CommandValidationAndArbitration  validation + queue-mode + interrupt-priority
+  Phase 1  InputAndIntentIngest       drain CommandIngressQueue + ScenarioEffectIngressQueue,
+                                        canonical sort
+  Phase 2  IntentValidationAndArbitration  validate + queue-placement + CommandPriority-vs-
+                                        ActivityInterruptPolicy; ScenarioEffect validate/canonicalize;
+                                        ProductionCommandHandler atomic enqueue here
   Phase 3  ActivityEvaluation         advance graphs (microstep<=32, control-only;
                                         wait nodes do NOT wake here)
   Phase 4  Pathfinding                request_id round-robin, fixed expansion quantum
-  Phase 5  LocomotionAndSpatial       LocomotionSystem per-tick advance +
+                                        (advances PathSearchStateStore, NOT a work queue)
+  Phase 5  LocomotionAndSpatial      LocomotionSystem per-tick advance +
                                         MovementResolutionSystem result
-  Phase 6  CombatAndProjectile        attack interval / projectile advance
-  Phase 7  DamageAndDeath             DamageSystem armor calc -> Live;
-                                        HP<=0 -> DeathSystem (Dying/Dead)
-  Phase 8  GatherBuildProduction       gather/build/train progress; reserve entity ids
-  Phase 9  DomainEventDispatch        6-tuple sort, dispatch; mark Activity wait satisfied
+  Phase 6  CombatAndProjectile       substeps 6.1 CombatCycle / 6.2 CommitProjectileSpawns /
+                                        6.3 AdvanceExistingProjectiles / 6.4 DetectImpacts
+  Phase 7  DamageAndDeath            substeps 7.1-7.6 (see 2.12)
+  Phase 8  GatherBuildProduction     gather/build/train progress (NO entity_id allocation here)
+  Phase 9  DomainEventDispatch       6-tuple sort, dispatch; mark Activity wait satisfied
                                         (wake next tick T+1)
-  Phase 10 ScenarioAndAIObservation   AI/Scenario observe domain events, issue commands
-                                        (execute_tick = T+1)
-  Phase 11 DeferredEntityCommit       spawn/despawn committed uniformly
-  Phase 12 ChecksumAndReplayRecord    state checksum + append command/replay log
-  Phase 13 EndTick                     current_tick = T + 1
+  Phase 10 ScenarioAndAIObservation  AI/Scenario observe domain events, issue commands/effects
+                                        (execute_tick = T+1); apply diplomacy/objective mutations
+  Phase 11 DeferredEntityCommit     canonical-sort SpawnRequests -> allocate entity_ids ->
+                                        commit spawn; despawn commit (DespawnRequestQueue)
+  Phase 12 ChecksumAndReplayRecord   state checksum + flush CommandLog/CommandResultLog/EffectLog
+  Phase 13 EndTick                   finalize tick T; current_tick = T + 1
 ```
 
-`current_tick = T+1` happens **after EndTick**, never `++` in BeginTick, to avoid off-by-one for tick 0, first command, and checksum.
+`current_tick = T+1` is assigned in **Phase 13 EndTick only**, never in BeginTick, to avoid off-by-one for tick 0, first command, and checksum.
+
+**ScenarioEffect timing (locked)**:
+```
+Phase 10 (T):  Scenario issues effect with execute_tick = T+1
+Phase 1 (T+1): drain ScenarioEffectIngressQueue
+Phase 2 (T+1): validate + canonicalize ScenarioEffect
+owning phase:  apply diplomacy/objective/etc. mutation (Phase 10 for diplomacy; Phase 11 for Spawn/Despawn)
+Phase 11:      commit SpawnEntity/DespawnEntity effects
+Phase 12:      effect log + checksum
+```
 
 ### 1.4 Authority invariants
 
@@ -131,46 +155,28 @@ run_tick(T):
 
 | Component / field      | Allowed writers                                                  |
 | ---------------------- | --------------------------------------------------------------- |
-| Position.current       | LocomotionSystem, SpawnCommitSystem, TeleportSystem             |
-| Live.hp                | DamageSystem, HealSystem, SpawnCommitSystem                      |
-| Live.life_state        | DeathSystem, SpawnCommitSystem                                  |
-| PlayerResources        | EconomySystem, Spawn/Scenario initialization                    |
-| ProductionQueue        | ProductionSystem, CommandArbitrationSystem                     |
+| Position.current       | LocomotionSystem, DeferredEntityCommitSystem, TeleportSystem    |
+| Live.hp                | DamageSystem, HealSystem, DeferredEntityCommitSystem            |
+| Live.life_state        | DeathSystem, DeferredEntityCommitSystem                       |
+| PlayerResourceLedger   | EconomySystem, Spawn/Scenario initialization                    |
+| PopulationState        | ProductionCommandHandler, DeferredEntityCommitSystem          |
+| ProductionQueue        | ProductionCommandHandler, ProductionSystem                     |
 | ActivityRuntime        | ActivitySystem, CommandArbitrationSystem, DeathSystem          |
 | CommandQueue           | CommandPipeline (ingest/arbitration), ScenarioEffect (effects)  |
+| GathererCargo          | GatherSystem (via GatherAllocationTransaction)                |
+| ResourceNodeState      | GatherSystem (via GatherAllocationTransaction)                 |
 
 ---
 
-## 2. Core interface definitions (revised per 11 corrections)
+## 2. Core interface definitions
 
-### 2.1 SimulationClock - no tick/legacy-time mixing
-
-**Strong id types (defined once here, used throughout)** - all are distinct `StrongId` aliases to prevent accidental mixing:
-```cpp
-using tick_id_t        = uint64_t;                                    // authoritative time
-using SystemId          = StrongId<struct SystemTag,          uint32_t>;
-using ActivityTaskId    = StrongId<struct ActivityTaskTag,    uint32_t>;
-using EventTypeId       = StrongId<struct EventTypeTag,      uint32_t>;
-using EventId           = StrongId<struct EventIdTag,         uint64_t>; // assigned post-sort
-using CommandId         = StrongId<struct CommandTag,         uint64_t>;
-using CorrelationId     = StrongId<struct CorrelationTag,   uint64_t>; // request_id/attack_id/production_id
-using request_id_t      = StrongId<struct PathRequestTag,    uint64_t>;
-using entity_id_t       = StrongId<struct EntityTag,         uint64_t>;
-using activity_id_t     = StrongId<struct ActivityTag,       uint32_t>;
-using node_id_t         = StrongId<struct NodeTag,            uint32_t>;
-using player_id_t       = StrongId<struct PlayerTag,         uint32_t>;
-```
-Two distinct generation fields, NOT to be conflated:
-- `activity_generation` (ActivityRuntimeState) - bumped when an Activity is cancelled/replaced; `EventWaitSpec.activity_generation` must match for an event to wake that Activity (prevents a stale event waking a new Activity).
-- `movement_generation` (PathRequest) - bumped on new Move/Repath; `PathReady` carries it and LocomotionSystem validates it (prevents a stale path overwriting a newer Move). Independent of activity_generation.
+### 2.1 SimulationClock + stable id types
 
 ```cpp
-// libopenage/gamestate/sim/simulation_clock.h
-using tick_id_t = uint64_t;
+using tick_id_t = uint64_t;                                    // authoritative time
 
 struct SimulationClock {
     static constexpr std::chrono::nanoseconds TICK_DURATION{50'000'000}; // 50ms, 20Hz
-
     tick_id_t current_tick() const;
 private:
     tick_id_t current = 0;
@@ -180,41 +186,66 @@ private:
 // wall-clock or legacy floating simulation time.
 ```
 
-### 2.2 Two separate registries (NOT one)
+**Stable id types** (distinct StrongId aliases; all assigned from explicit constants / generated schema / stable data ids, NEVER from runtime registration call order; duplicate id -> freeze failure):
+
+```cpp
+using tick_id_t        = uint64_t;
+using SystemId          = StrongId<struct SystemTag,          uint32_t>;
+using ActivityTaskId    = StrongId<struct ActivityTaskTag,    uint32_t>;
+using EventTypeId       = StrongId<struct EventTypeTag,      uint32_t>;
+using EventId           = StrongId<struct EventIdTag,         uint64_t>; // assigned POST-sort
+using PathRequestId     = StrongId<struct PathRequestTag,    uint64_t>;
+using AttackId          = StrongId<struct AttackTag,          uint64_t>;
+using GatherIntentId    = StrongId<struct GatherIntentTag,    uint64_t>;
+using ProductionItemId  = StrongId<struct ProductionItemTag,  uint64_t>;
+using MovementGenerationKey = StrongId<struct MovementGenTag, uint64_t>;
+using entity_id_t      = StrongId<struct EntityTag,         uint64_t>;
+using activity_id_t     = StrongId<struct ActivityTag,       uint32_t>;
+using node_id_t        = StrongId<struct NodeTag,            uint32_t>;
+using player_id_t      = StrongId<struct PlayerTag,         uint32_t>;
+using ResourceTypeId    = StrongId<struct ResourceTypeTag,  uint16_t>;
+using CommandConditionId = StrongId<struct CommandCondTag,   uint32_t>;
+using IssuerStableId    = StrongId<struct IssuerTag,         uint64_t>;
+```
+
+**Two distinct generation fields** (do not conflate):
+- `activity_generation` (ActivityRuntimeState) - bumped on Activity cancel/replacement; `EventWaitSpec.activity_generation` must match for an event to wake that Activity.
+- `movement_generation` (PathRequest) - bumped on new Move/Repath; PathReady carries it; LocomotionSystem validates it. Independent of activity_generation.
+
+### 2.2 Two separate registries
 
 #### PhaseSystemScheduler - per-tick fixed continuous systems
 
 ```cpp
 struct PhaseSystemDescriptor {
-    SystemId id;
+    SystemId id;                        // explicit constant, stable
     TickPhase phase;
-    uint32_t stable_order;           // explicit order WITHIN a phase
-    std::vector<SystemId> runs_after; // optional dependency, topo-resolved at freeze
+    uint32_t stable_order;              // explicit order WITHIN a phase
+    std::vector<SystemId> runs_after;   // optional dependency, topo-resolved at freeze
 };
-
 class PhaseSystemScheduler {
 public:
     void register_system(PhaseSystemDescriptor, std::unique_ptr<IPhaseSystem>);
-    void freeze();                    // topo-sort by runs_after; order fixed after this
+    void freeze();                      // topo-sort by runs_after; tie-break by (stable_order, SystemId);
+                                        // duplicate id or dependency cycle -> freeze FAILS; single canonical order
     void run_phase(TickPhase phase, SimulationContext &ctx);
 };
 ```
-Includes: PathfindingSystem, LocomotionSystem, MovementResolutionSystem, ProjectileSystem, DamageSystem, DeathSystem, ProductionSystem, DeferredEntityCommitSystem. Within a phase, TickPhase alone does not determine order -> explicit `stable_order` or frozen topo order. **Registration call order is never relied upon.**
+Includes: PathfindingSystem, LocomotionSystem, MovementResolutionSystem, ProjectileSystem, DamageSystem, DeathSystem, ProductionSystem, EconomySystem, BuildSystem, DeferredEntityCommitSystem. Within a phase, order is `(stable_order, SystemId)` after topo resolution; multiple legal topo orders still yield one result. **Registration call order is never relied upon.** Registry manifest/hash written to replay header (2.17).
 
 #### ActivityTaskRegistry - Activity RunSystem node handlers
 
 ```cpp
-using ActivityTaskId = StrongId<struct ActivityTaskTag, uint32_t>;
-
+using ActivityTaskId = StrongId<struct ActivityTaskTag, uint32_t>;  // explicit constant, stable
 class ActivityTaskRegistry {
 public:
-    void register_handler(ActivityTaskId, ActivityTaskHandler);
+    void register_handler(ActivityTaskId, ActivityTaskHandler);  // duplicate id -> freeze FAILS
     ActivityTaskResult execute(ActivityTaskId, entity_id_t,
                                 const ActivityTaskParams&, ActivityExecutionContext&) const;
     void freeze();
 };
 ```
-Includes: ValidateTarget, SubmitPathRequest, StartMovementIntent, SubmitAttackIntent, StartGatherIntent. This replaces `activity.cpp::handle_subsystem`. It is NOT merged with `PhaseSystemScheduler`.
+Includes: ValidateTarget, SubmitPathRequest, StartMovementRequest, SubmitAttackRequest, StartGatherRequest, StartBuildRequest. Replaces `activity.cpp::handle_subsystem`. NOT merged with PhaseSystemScheduler.
 
 ### 2.3 ActivityTaskResult - strong typed variant, no strings / 0-sentinel
 
@@ -228,60 +259,56 @@ enum class ActivityTaskFailure : uint16_t {
 enum class ActivityInterruptReason : uint16_t {
     ReplacedByCommand, ForcedCommand, EntityDied, TargetInvalidated, ScenarioOverride
 };
-
 struct TaskCompleted {};
 struct TaskWaitUntil { tick_id_t resume_tick; };
-struct TaskWaitForEvent { EventWaitSpec wait_spec; };
+struct TaskWaitForEvent { EventWaitSpec wait_spec; };   // supports WaitAny, see 2.6
 struct TaskFailed { ActivityTaskFailure reason; };
 struct TaskInterrupted { ActivityInterruptReason reason; };
-
 using ActivityTaskResult = std::variant<
     TaskCompleted, TaskWaitUntil, TaskWaitForEvent, TaskFailed, TaskInterrupted>;
-
-// Waiting for an event stores a MATCH CONDITION, not an ungenerated EventId:
-struct EventWaitSpec {
-    EventTypeId type;
-    std::optional<entity_id_t> source;
-    std::optional<entity_id_t> target;
-    CorrelationId correlation;       // maps to request_id / attack_id / production_id
-    uint32_t activity_generation;    // prevents stale events waking a replaced Activity
-};
 ```
 
-### 2.4 Command - variant with header, not virtual base
+### 2.4 Command - variant with header, no circular id
+
+**Command identity is NOT "assigned after sort then used to sort" (circular).** `RootCommandId` is determinable at issue time; per-entity `EntityCommandId` is derived by canonicalization.
 
 ```cpp
 enum class IssuerKind : uint8_t { Player, AI, Scenario, System };
-enum class QueueMode : uint8_t { Replace, Append, Prepend, Conditional };
 
-// CommandPriority describes the STRENGTH of an incoming command.
-enum class CommandPriority : uint8_t {
-    Background, Normal, Forced, SystemCritical
-};
-// ActivityInterruptPolicy describes whether the CURRENT activity may be interrupted.
-// It is NOT a property of the incoming command (the old "Uninterruptible" misnomer).
-enum class ActivityInterruptPolicy : uint8_t {
-    Interruptible, ForcedOnly, SystemCriticalOnly
+struct IssuerRef {
+    IssuerKind kind;
+    IssuerStableId stable_id;              // NOT player_id; Scenario/System have no player
+    std::optional<player_id_t> acting_player;  // used for OWNERSHIP validation only
 };
 
-// Conditional QueueMode references a schema-defined predicate (NOT a lambda/std::function).
-struct ConditionalQueueSpec {
-    CommandConditionId condition;        // registered, schema-defined
-    TypedConditionParams params;
+struct RootCommandId {
+    IssuerKind kind;
+    IssuerStableId issuer;                  // = IssuerRef.stable_id
+    uint64_t issuer_sequence;               // per-issuer deterministic increment
 };
+struct EntityCommandId { RootCommandId root; entity_id_t subject; };
+```
+
+`IssuerKind::System` is reserved ONLY for internal control instructions that genuinely must enter arbitration (death/despawn are NOT modeled as commands - they use system mutation/work items; see 4.15).
+
+```cpp
+enum class QueuePlacement : uint8_t { Replace, Append, Prepend };  // placement only
+struct CommandExecutionCondition {                              // condition is orthogonal to placement
+    CommandConditionId id;                                       // registered, schema-defined
+    TypedConditionParams params;                                 // NO lambda / std::function
+};
+enum class CommandPriority : uint8_t { Background, Normal, Forced, SystemCritical };
+enum class ActivityInterruptPolicy : uint8_t { Interruptible, ForcedOnly, SystemCriticalOnly };
 
 struct CommandHeader {
-    CommandId id;                        // canonical id (assigned after canonicalization)
-    IssuerKind issuer_kind;
-    player_id_t issuer;
-    tick_id_t issued_tick;              // T (issuer observed)
-    tick_id_t execute_tick;             // T + configured input delay (default T+1)
-    uint64_t issuer_sequence;           // per-issuer deterministic increment
-    QueueMode queue_mode;                // Replace/Append/Prepend/Conditional
-    CommandPriority priority;            // Background/Normal/Forced/SystemCritical
-    std::optional<ConditionalQueueSpec> condition;  // set iff queue_mode == Conditional
+    IssuerRef issuer;
+    tick_id_t issued_tick;                  // T
+    tick_id_t execute_tick;                 // T + configured input delay (default T+1)
+    QueuePlacement placement;               // Replace/Append/Prepend
+    std::optional<CommandExecutionCondition> condition;  // set iff conditional
+    CommandPriority priority;
+    RootCommandId root_id;                   // determinable at issue time
 };
-
 struct MoveCommand    { std::vector<entity_id_t> subjects; scene_pos_t destination; };
 struct AttackCommand  { std::vector<entity_id_t> subjects; entity_id_t target; };
 struct GatherCommand  { std::vector<entity_id_t> subjects; entity_id_t resource; };
@@ -289,108 +316,107 @@ struct BuildCommand   { std::vector<entity_id_t> subjects; nyan::fqon_t game_ent
 struct TrainCommand   { entity_id_t producer; nyan::fqon_t creatable_fqon; };
 struct StopCommand    { std::vector<entity_id_t> subjects; };
 struct IdleCommand    { std::vector<entity_id_t> subjects; };
-
 using CommandPayload = std::variant<
     StopCommand, IdleCommand, MoveCommand, AttackCommand,
     GatherCommand, BuildCommand, TrainCommand>;
-
 struct Command { CommandHeader header; CommandPayload payload; };
 ```
 
-**Arbitration**: the incoming `CommandPriority` is compared against the current `ActivityInterruptPolicy`:
-- `Background` -> only interrupts `Interruptible` activities that have nothing else pending.
-- `Normal` -> interrupts `Interruptible`.
-- `Forced` -> interrupts `Interruptible` and `ForcedOnly`.
-- `SystemCritical` -> interrupts everything (death/despawn internal flow).
+**QueuePlacement semantics**:
+- `Replace`: when interrupt policy allows, cancel current Activity, clear pending queue, execute new command.
+- `Append`: do NOT interrupt current Activity; add to queue tail.
+- `Prepend`: insert at pending-queue head; whether it interrupts current Activity is decided by `CommandPriority` vs `ActivityInterruptPolicy` (placement does not override priority).
+- `Condition`: evaluated in Phase 2 at execute_tick using current authoritative state; false -> explicit rejection/skip result (logged).
 
-`issuer_kind_order` is part of the canonical sort key but does NOT implicitly decide authority. Authority is handled by validation + ownership + explicit `Forced`/`ScenarioOverride`:
-- AI may only control its own player's entities.
-- Player and AI do not simultaneously control one player unless explicitly allowed.
-- Scenario normal commands obey ownership; Scenario forced takeover uses explicit `Forced`/`ScenarioOverride`.
-- `System` commands are for death/despawn internal, non-rejectable flows.
+**Arbitration** (incoming `CommandPriority` vs current `ActivityInterruptPolicy`):
+- `Background` interrupts only `Interruptible` with nothing else pending.
+- `Normal` interrupts `Interruptible`.
+- `Forced` interrupts `Interruptible` and `ForcedOnly`.
+- `SystemCritical` interrupts everything.
 
-**Canonical sort key**:
+`issuer_kind_order` is part of the canonical sort key but does NOT implicitly decide authority; authority is ownership validation + explicit Forced/ScenarioOverride.
+
+**`ActivityInterruptPolicy` authoritative source (locked)**: stored on the **current Activity root/frame metadata** (the Activity graph declares each node's interrupt policy), entered into checksum. CommandArbitration reads it from there - it does NOT guess from implicit node types.
+
+**Canonical sort keys** (NO post-sort-assigned id):
 ```
-(execute_tick, issuer_kind_order, issuer_player_id, issuer_sequence, command_id)
+incoming root commands:   (execute_tick, issuer_kind_order, issuer_stable_id, issuer_sequence)
+per-entity operations:    (execute_tick, issuer_kind_order, issuer_stable_id, issuer_sequence, subject_entity_id)
 ```
-
-**Subjects canonicalization (locked, first version)**: sort -> dedupe -> drop invalid ids at validation -> **per-entity single-subject command entries generated in entity-id order**. (Shared command-group alternative explicitly deferred.) Validation processes per entity in id order.
 
 ### 2.5 CommandIngressQueue vs CommandLog (separated)
 
-Live simulation does NOT drain the command log. The Command Log is an append-only replay artifact, not a runtime queue. **Player input arrives outside the simulation** (render/input thread / platform event loop) into a `RawInputBuffer` / `PlayerCommandSource`; it is drained in Phase 1, NOT Phase 10. AI and Scenario observe in Phase 10.
+Live simulation does NOT drain the command log. The Command Log is an append-only replay artifact, flushed in **Phase 12 only** (single authoritative write point). Player input arrives outside the simulation.
 
 ```
-Player input  -> RawInputBuffer / PlayerCommandSource  (OUTSIDE sim)
+Player input  -> RawInputBuffer / PlayerCommandSource  (OUTSIDE sim, input thread)
 AI            -> (Phase 10 observation)
-Scenario      -> (Phase 10 observation)
+Scenario unit-behavior -> (Phase 10 observation)
                  |
                  v  CommandPipeline::issue()
                  v  CommandIngressQueue
-  Phase 1   canonical sort (execute_tick, issuer_kind_order, issuer_player_id,
-                            issuer_sequence, command_id)
-  Phase 2   validation/arbitration
-            -> Accepted/Rejected result
-            -> append CommandLog + CommandResultLog
+  Phase 1   canonical sort (root sort key above)
+  Phase 2   validation/arbitration -> per-entity operation in id order
+            -> Accepted/Rejected result (CommandResultLog entry STAGED)
+  Phase 12  flush CommandLog + CommandResultLog (single authoritative write)
 ```
 
-Replay mode:
-```
-ReplayCommandSource -> reads CommandLog -> fills CommandIngressQueue (Phase 1)
-```
+Replay: `ReplayCommandSource` reads CommandLog -> fills CommandIngressQueue in Phase 1. Simulation NEVER reads wall-clock input timestamps.
 
-The simulation NEVER reads wall-clock input timestamps. Once real input is assigned to a tick, that tick's commands are written to the command log.
+Sort key never depends on thread arrival or global atomic increment. Global `command_seq` is **only a log index**, never the sim sort key.
 
-Recorded per entry: canonicalized incoming command, validation result, rejection reason, resulting per-entity queue operation. Replay reproduces rejected commands too (divergence audit).
+### 2.6 TypedEventQueue - independent of Legacy EventLoop; WaitAny
 
-**Sort key** (must not depend on thread arrival or global atomic increment):
-```
-(execute_tick, issuer_kind_order, issuer_player_id, issuer_sequence, command_id)
-```
-`issuer_sequence` is per-issuer deterministic increment. Global `command_seq` is **only a log index**, never the sole sim sort key.
-
-### 2.6 TypedEventQueue - independent of Legacy EventLoop
-
-"TypedEvent wraps the existing EventLoop" is rejected - too risky. Legacy EventLoop uses strings, `std::any`, legacy time, heap insertion semantics; it cannot be the authoritative truth.
+TypedEvent does NOT wrap the existing EventLoop (strings/`std::any`/legacy time/heap insertion cannot be authoritative truth).
 
 ```
 Authoritative TypedEventQueue
-  |- DomainEventDispatch uses it
+  |- DomainEventDispatch (Phase 9) uses it
   |- Activity WaitEvent uses it
   |- Replay/checksum use it
   +- one-way bridge to Legacy EventLoop / UI observer
-
-Legacy EventLoop
-  |- curve compatibility
-  +- legacy callbacks (non-authoritative observer)
+Legacy EventLoop  -> curve compatibility + legacy callbacks (NON-authoritative observer; RuntimeMode::LegacyDemo only)
 ```
-Authoritative events MUST NOT enter Legacy EventLoop first and return.
+Authoritative events MUST NOT enter Legacy EventLoop first. Legacy callbacks MUST NOT mutate gameplay state (one-way observer only).
 
 ```cpp
 using EventPayload = std::variant<
-    PathReady, PathFailed, MovementArrived, MovementBlocked,
-    DamageApplied, EntityDied, ResourceDeposited, UnitProduced /* ... */>;
+    PathReady, PathFailed, MovementArrived, MovementBlocked, MovementNeedsRepath, MovementCancelled,
+    AttackNeedsReposition, AttackCancelled, AttackCommitted, AttackPointReached,
+    ProjectileImpact, DamageApplied, DamageIgnored, EntityDied,
+    ResourceGathered, ResourceDeposited, ResourceDepleted,
+    ProductionTimerCompleted, EntitySpawned, UnitProduced, ProductionFailed,
+    BuildingCompleted, BuildingCancelled>;
+struct EventEnvelope { EventHeader header; EventPayload payload; };  // variant, no subclass
+```
 
-struct EventEnvelope {
-    EventHeader header;     // includes origin_phase, producer_system_stable_order,
-                            // source_entity_id, event_type_id, producer_local_sequence
-    EventPayload payload;   // variant, no subclass inheritance
+**EventWaitSpec supports WaitAny** (Activities wait on OR-sets like `PathReady | PathFailed`):
+```cpp
+using CorrelationKey = std::variant<PathRequestId, AttackId, GatherIntentId,
+                                     ProductionItemId, MovementGenerationKey>;
+struct EventMatchSpec {
+    EventTypeId type;
+    std::optional<entity_id_t> source;
+    std::optional<entity_id_t> target;
+    CorrelationKey correlation;
+};
+struct EventWaitSpec {
+    std::vector<EventMatchSpec> any_of;   // canonical sorted; matches if ANY fires
+    uint32_t activity_generation;          // stale-event guard
 };
 ```
-`EventId` is a distinct strong id type; global increment alone does not make it "strong". EventId is assigned after canonical sort, or excluded from sim ordering.
+`EventId` is assigned AFTER canonical sort (post-sort), or excluded from sim ordering.
 
 ### 2.7 EventOriginPhase + strict total order
 
-All events dispatch in Phase 9. So `EventPhase` is misnamed; rename to the **producing** phase:
-
+All events dispatch in Phase 9. `EventPhase` is renamed to the **producing** phase (`EventOriginPhase`):
 ```cpp
 enum class EventOriginPhase : uint8_t {
     Pathfinding, LocomotionAndSpatial, CombatAndProjectile,
     DamageAndDeath, GatherBuildProduction, DeferredEntityCommit
 };
 ```
-
-Strict total order key (the 5-tuple could collide if two systems produce same source+type with local_sequence=0; use the 6-tuple):
+Strict total order key (6-tuple, avoids same-source+type local_sequence=0 collision):
 ```
 ( scheduled_tick,
   origin_phase,
@@ -401,9 +427,9 @@ Strict total order key (the 5-tuple could collide if two systems produce same so
 ```
 `producer_local_sequence` allocated by the centralized phase event buffer in deterministic producer order.
 
-### 2.8 ActivityRuntimeState - frame stack (not single current_node)
+### 2.8 ActivityRuntimeState - scalar frame stack (authoritative), legacy curve = mirror
 
-A single `current_node` cannot hold Sequence/Loop/Transition/Interrupt/sub-Activity state. Explicit runtime frame stack:
+A single `current_node` cannot hold Sequence/Loop/sub-Activity state. Explicit runtime frame stack. **Authoritative state is scalar; the legacy `current_node` curve survives only as a read-only compatibility mirror (no dual authority).**
 
 ```cpp
 struct ActivityFrame {
@@ -412,41 +438,30 @@ struct ActivityFrame {
     uint32_t child_index;
     uint32_t loop_iteration;
 };
-
-struct EventWaitState {
-    EventWaitSpec spec;
-    // bookkeeping for match evaluation
-};
-
+struct EventWaitState { EventWaitSpec spec; /* match bookkeeping */ };
 struct ActivityRuntimeState {
     activity_id_t root_graph;
-    std::vector<ActivityFrame> frames;       // stack
-    ActivityParamBlock params;              // schema-defined typed data, NO std::any
+    std::vector<ActivityFrame> frames;        // stack (SCALAR authoritative)
+    ActivityParamBlock params;               // schema-defined typed data, NO std::any
     std::optional<EventWaitState> wait_state;
-    uint32_t generation;                     // bump on cancel/replacement -> stale events fail
+    uint32_t generation;                      // bump on cancel/replacement
+    ActivityInterruptPolicy interrupt_policy; // from graph metadata, in checksum
 };
+// LegacyActivityNodeCurve: optional read-only compatibility mirror (non-authoritative)
 ```
+Requirements: graph definition immutable; graph/schema has stable version/hash; replay header includes activity graph data hash; ParamBlock schema-defined (no `std::any`); cancel/replacement bumps `generation`; `microsteps_used` lives in `ActivityExecutionContext` (reset per tick, NOT in save/checksum).
 
-Requirements:
-- graph definition immutable;
-- graph/schema has stable version or hash;
-- replay header includes activity graph data hash;
-- ParamBlock is schema-defined typed data (no `std::any`);
-- cancel/replacement bumps `generation`, invalidating stale events.
-- `microsteps_used` lives in `ActivityExecutionContext`, reset per tick, NOT long-term component state (no mid-tick snapshot -> not in save/checksum).
-
-### 2.9 PathRequest - MoveIntoRange + stale-result protection
+### 2.9 PathRequest + MoveIntoRange math (corrected)
 
 ```cpp
 struct PathGoal {
     std::variant<scene_pos_t, entity_id_t> target;   // point or dynamic entity
     phys_t acceptance_radius;                         // for MoveIntoRange
 };
-
 struct PathRequest {
-    request_id_t id;
+    PathRequestId id;
     entity_id_t requester;
-    uint32_t movement_generation;     // bump on new Move/Repath; Locomotion validates
+    uint32_t movement_generation;     // bump on new Move/Repath
     scene_pos_t start;
     PathGoal goal;
     MovementProfileId movement_profile;
@@ -455,114 +470,96 @@ struct PathRequest {
     tick_id_t submit_tick;
 };
 ```
-PathReady/PathFailed carry: request_id, requester, movement_generation, nav_revision, path result. LocomotionSystem validates generation before accepting (prevents stale path overwriting a new Move/Repath).
+PathReady/PathFailed carry: request_id, requester, movement_generation, nav_revision, path result.
 
-**Movement result states** (MovementResolutionSystem output, distinguish):
+**MoveIntoRange distance - CORRECT squared formula** (edge-to-edge):
 ```
-MovementArrived | MovementBlocked | MovementNeedsRepath | MovementCancelled
+center_distance <= source_radius + target_radius + desired_action_range
+// squared comparison (fixed-point):
+center_distance_squared <= square(source_radius + target_radius + desired_action_range)
 ```
+All values fixed-point with defined overflow/rounding policy. `target_displacement_threshold` stored squared is named `target_displacement_threshold_sq`.
+
+**Movement result states**: `MovementArrived | MovementBlocked | MovementNeedsRepath | MovementCancelled`
 - `MovementArrived`: reached goal (point) or within acceptance_radius (MoveIntoRange).
-- `MovementNeedsRepath`: dynamic target moved beyond threshold (see RepathPolicy); Activity re-submits next tick.
-- `MovementCancelled`: an **already-active** movement was cancelled by Stop / new command / death / forced interrupt. (A stale PathReady does NOT produce this - see stale handling below.)
-- `MovementBlocked`: path blocked by terrain/unit.
+- `MovementNeedsRepath`: dynamic target crossed `RepathPolicy` threshold; Activity re-submits next tick.
+- `MovementCancelled`: an **already-active** movement was cancelled (Stop/new command/death/forced interrupt). A stale PathReady does NOT produce this.
+- `MovementBlocked`: path blocked.
 
-**Stale result handling** (critical): a stale PathReady (old movement_generation) MUST NOT generate MovementCancelled. The authoritative path is simply dropped. WaitSpec uses `request_id + movement_generation + activity_generation`; on mismatch the result is discarded from the authoritative path. A non-authoritative diagnostic trace MAY be emitted. `MovementCancelled` only means an active movement was cancelled.
+**Stale result handling**: stale PathReady (old movement_generation, mismatched vs WaitSpec `request_id + movement_generation + activity_generation`) is dropped from the authoritative path (no MovementCancelled); non-authoritative diagnostic trace MAY be emitted.
 
-**Dynamic target repath policy** (don't emit TargetMoved on every coordinate change - moving targets change frequently):
+**RepathPolicy** (don't emit on every coordinate change):
 ```cpp
 struct RepathPolicy {
-    phys_t target_displacement_threshold;   // squared, fixed-point
-    tick_id_t minimum_repath_interval;       // throttle
-    uint32_t maximum_retries;                // then PathFailed
-};
-```
-MovementResolutionSystem emits `MovementNeedsRepath` when the threshold is crossed; Activity re-submits the path next tick.
-
-**MoveIntoRange distance semantics** (MUST be fixed-point, one definition chosen, NOT left to each system):
-```
-edge_to_edge_distance <= desired_action_range
-   where edge_to_edge = center_distance - source_collision_radius - target_collision_radius
-```
-Use **squared distance** to avoid sqrt:
-```cpp
-distance_squared <= effective_range_squared
-```
-
-**Deterministic round-robin (anti-starvation)**: strictly finishing one large request before the next starves. Use:
-```
-requests sorted by request_id
-each active request gets fixed expansion quantum per tick
-total expansion <= global budget
-```
-Must define: per-request quantum, global node budget, request admission limit, PathFailed/PartialPath conditions, and how the flow-field Pathfinder is refactored into a **pausable/resumable search state**. (Phase 4 key technical risk - see 4.3.)
-
-### 2.10 PhaseWorkQueue - typed inter-phase work items
-
-PathRequest, StartMovementRequest, AttackIntentRequest, DamageRequest, SpawnRequest, ResourceTransferRequest, ProductionEnqueueRequest are NOT Domain Events. They are internal work items passed between phases via typed work queues.
-
-```cpp
-template<typename T>
-class PhaseWorkQueue {
-public:
-    void push(T item);
-    std::span<const T> sorted_items() const;   // canonical-sorted, stable
-    void clear();
-private:
-    std::vector<T> items;
+    phys_t target_displacement_threshold_sq;   // squared, fixed-point
+    tick_id_t minimum_repath_interval;
+    uint32_t maximum_retries;                   // repath ONLY; not for single-search failure
 };
 ```
 
-Each work queue type MUST define (in a registry table, see 4.x):
-| Work queue | Producer phase | Consumer phase | Canonical sort key | In checksum | Must be empty at tick end | Cross-tick retention |
-|---|---|---|---|---|---|---|
-| PathRequestQueue | Phase 3 (Activity) | Phase 4 (Pathfinding) | request_id | yes | no | yes (in-flight search) |
-| StartMovementRequestQueue | Phase 3 | Phase 5 (Locomotion) | requester_id | yes | yes | no |
-| AttackIntentRequestQueue | Phase 3 | Phase 6 (Combat) | attacker_id | yes | yes | no |
-| DamageRequestQueue | Phase 6 | Phase 7 (Damage) | (target_id, source_id, attack_id, hit_sequence) | yes | yes | no |
-| ProjectileSpawnRequestQueue | Phase 6 | Phase 6 (Projectile) | projectile_id | yes | no | yes (in-flight) |
-| SpawnRequestQueue | Phase 8 (Production) | Phase 11 (DeferredCommit) | reserved_entity_id | yes | yes | no |
-| ResourceTransferRequestQueue | Phase 8 | Phase 8 (Economy) | (gatherer_id, dropoff_id) | yes | yes | no |
-| ProductionEnqueueRequestQueue | Phase 2 | Phase 8 (Production) | producer_id | yes | yes | no |
+**PathFailed conditions** (NOT `maximum_retries * budget`):
+- goal/start invalid;
+- open set/frontier exhausted (no path);
+- deterministic `max_total_expansions` safety cap;
+- nav_revision invalidated;
+- request explicitly cancelled.
 
-**Rule**: an ActivityTask (e.g. SubmitPathRequest) pushes to a work queue; it does NOT gain arbitrary Component write access by "registering an intent". The owning phase system reads the queue and writes authoritative state via the writer matrix + WorldMutationBuffer.
+`maximum_retries` is for dynamic-target repath only, NOT for judging a single search's no-path result.
 
-Data flow:
-```
-ActivityTask -> typed request/work queue -> owning phase system consumes
-             -> system modifies authoritative state -> system emits typed event
-```
+**Synchronous `get_path` (the existing flow-field Pathfinder) usage - LOCKED**: ONLY for `RuntimeMode::LegacyDemo`, offline oracle comparison, and debug diagnostics. It is NOT a headless-test fallback, NOT a replay fallback, NOT a mission-acceptance fallback, NOT a production deterministic runtime fallback. All authoritative headless tests MUST run the real resumable SearchState.
+
+### 2.10 PhaseWorkQueue vs PersistentStateStore (separated)
+
+Work queues ONLY transfer work between phases; they are NOT persistent state. Persistent in-flight state lives in a system-owned `*StateStore`. Cross-tick retention belongs to the store, not the queue.
+
+| Work queue (transient) | Producer | Consumer | Sort key | In checksum | Must-empty @ tick end |
+|---|---|---|---|---|---|
+| StartMovementRequestQueue | Phase 3 | Phase 5 | requester_id | yes | yes |
+| AttackIntentRequestQueue | Phase 3 | Phase 6.1 | attacker_id | yes | yes |
+| DamageRequestQueue | Phase 6.2 | Phase 7.1 | (target,source,attack_id,hit_seq) | yes | yes |
+| SpawnRequestQueue | Phase 8 / Scenario | Phase 11 | SpawnRequestKey | yes | yes |
+| DespawnRequestQueue | Phase 7 / Scenario | Phase 11 | entity_id | yes | yes |
+| ResourceTransferRequestQueue | Phase 8 | Phase 8 (Economy) | (gatherer_id, dropoff_id) | yes | yes |
+
+| Persistent state store (cross-tick, serialized+checksum) | Owner |
+|---|---|
+| PathSearchStateStore | PathfindingSystem (in-flight search state) |
+| ProjectileStateStore | ProjectileSystem (in-flight projectiles) |
+| PendingSpawnStateStore | DeferredEntityCommitSystem (spawn placement retry state) |
+
+**Work queue rule**: an ActivityTask pushes to a work queue; it does NOT gain Component write access. The owning phase system consumes the queue and writes authoritative state via the writer matrix + WorldMutationBuffer.
+
+**ProductionEnqueueRequestQueue is DELETED** (it contradicted the Phase-2 atomic enqueue). ProductionCommandHandler performs the atomic enqueue transaction entirely within Phase 2's deterministic commit point (see 2.14).
 
 ### 2.11 Attack cycle state + DamageRequest work item
 
-Activity only **starts and stops** an AttackIntent; CombatSystem owns the continuous attack loop. Activity does NOT wait per-AttackPoint (that would force re-submitting intent each cycle or make the wait meaningless).
+Activity only starts/stops an AttackIntent; CombatSystem owns the continuous loop. Activity does NOT wait per-AttackPoint.
 
 ```cpp
 enum class AttackCycleState : uint8_t { Ready, Windup, AttackPoint, Recovery, Cooldown };
-
 struct AttackIntent {
     AttackId id;
     entity_id_t attacker;
     entity_id_t target;
-    uint32_t attack_generation;     // bump on repose/target-change; stale intent dropped
+    uint32_t attack_generation;
     AttackCycleState state;
-    tick_id_t state_until_tick;     // fixed-point tick math
+    tick_id_t state_until_tick;
 };
 // Cycle: Ready -> Windup -> AttackPoint -> Recovery -> Cooldown -> Ready (repeats)
 ```
+At `AttackPoint`: melee -> write DamageRequest to DamageRequestQueue; ranged -> create ProjectileSpawnRequest (committed in 6.2). MAY emit AttackCommitted/AttackPointReached for animation/audio/Scenario (Activity NOT woken).
 
-At `AttackPoint`:
-- melee: write DamageRequest to DamageRequestQueue.
-- ranged: create/submit ProjectileSpawnRequest (ProjectileSystem advances on later ticks).
-- MAY emit `AttackCommitted` / `AttackPointReached` for animation/audio/Scenario observers.
-- Activity is NOT woken on ordinary AttackPoints.
+Activity waits only on: `AttackNeedsReposition | AttackCancelled | TargetInvalidated | AttackerDied`. CombatResolutionSystem emits `AttackNeedsReposition` when target leaves range; CombatSystem stops the intent; Activity next-tick enters MoveIntoRange.
 
-Activity waits only on:
+**Phase 6 substeps (locked, avoids zero-tick projectile flight)**:
 ```
-AttackNeedsReposition | AttackCancelled | TargetInvalidated | AttackerDied
+6.1 CombatCycle              advance AttackIntent cycles; at AttackPoint create DamageRequest / ProjectileSpawnRequest
+6.2 CommitProjectileSpawns   new projectiles enter ProjectileStateStore with spawn_tick = T
+6.3 AdvanceExistingProjectiles   advance projectiles whose spawn_tick < T (NOT newly spawned this tick)
+6.4 DetectProjectileImpacts   impacts -> DamageRequest for next tick's Phase 7
 ```
-`CombatResolutionSystem` emits `AttackNeedsReposition` when the target leaves range; CombatSystem stops the current intent; Activity next-tick enters MoveIntoRange.
 
-**DamageRequest is a work item, NOT a Domain Event**:
+`DamageRequest` is a work item, NOT a Domain Event:
 ```cpp
 struct DamageRequest {
     AttackId attack_id;
@@ -573,29 +570,32 @@ struct DamageRequest {
     fixed_t base_amount;
 };
 ```
-Phase 7 processes by strict order: `(target_entity_id, source_entity_id, attack_id, hit_sequence)`.
 
-### 2.12 Damage phase sub-steps + extensible DamageResolver
+### 2.12 Damage phase sub-steps - sequential working HP
 
-Phase 7 is split into ordered sub-steps to define read-your-writes and commit points:
+Phase 7 split into ordered sub-steps. **Resolve per-target with a working HP** (NOT resolve-all-then-detect - that contradicts "Dying => no further damage").
+
 ```
-7.1 CollectAndSortDamageRequests   (DamageRequestQueue drain + sort)
-7.2 ResolveDamage                  (compute final per DamageProfile)
-7.3 CommitLiveMutations            (WorldMutationBuffer writes Live.hp)
-7.4 DetectDeaths                   (read FINAL committed HP, not stale)
-7.5 CommitLifeStateTransitions     (Alive -> Dying)
-7.6 EmitDamageAndDeathEvents       (DamageApplied per hit; EntityDied once)
+7.1 CollectAndSortDamageRequests   drain DamageRequestQueue; sort (target, source, attack_id, hit_sequence)
+7.2 ResolveDamage (per target, sequential working state):
+      working_hp = committed hp at phase start
+      for DamageRequest in canonical order:
+          if target already marked lethal:
+              emit DamageIgnored{actual=0, reason=AlreadyDying}   // CHOSEN: emit DamageIgnored
+          else:
+              actual = DamageResolver.resolve(profile, armor, mods)
+              working_hp -= actual
+              record DamageApplied{actual}
+              if working_hp <= 0: mark target pending death (lethal)
+7.3 CommitLiveMutations            commit working_hp once per target (WorldMutationBuffer -> Live.hp)
+7.4 DetectDeaths                   read FINAL committed HP
+7.5 CommitLifeStateTransitions     Alive -> Dying (writer: DeathSystem); cancel victim movement/attack/gather intents
+7.6 EmitDamageAndDeathEvents       ordered DamageApplied (+ DamageIgnored) per hit; EntityDied exactly once
 ```
-DeathSystem reads the **already-committed final HP** (after 7.3), not the old component value.
 
-Multiple hits to the same target in one tick:
-- applied in fixed order (7.1 sort);
-- `DamageApplied` records each actual amount;
-- `EntityDied` emitted exactly once;
-- once LifeState = Dying, subsequent damage handling rule is explicit (v1: Dying entities take no further damage);
-- the target's movement/attack/gather active intents are deterministically cancelled in Phase 7.
+**Chosen for post-lethal hits**: emit `DamageApplied{actual=0, reason=AlreadyDying}` (i.e. `DamageIgnored`) so the stream is fully auditable. Dying entities take no further HP loss. DeathSystem reads committed HP (post-7.3), not stale.
 
-**`max(0, attack - armor)` is a v1 placeholder ONLY, NOT a permanent core rule.** Extensible resolver:
+`max(0, attack - armor)` is a **v1 placeholder ONLY**, behind an extensible resolver:
 ```cpp
 struct DamageResolver {
     fixed_t resolve(DamageProfile, ArmorProfile, CombatModifiers);
@@ -606,484 +606,397 @@ struct DamageResolver {
 
 ### 2.13 Resource state (split components, array-backed, NOT FQON-keyed)
 
-Do not use one ambiguous `ResourceStorage` for both cargo and player resources. Split:
 ```cpp
-struct GathererCargo {                // on the gathering entity
-    ResourceTypeId type;
-    resource_amount_t amount;
-    resource_amount_t capacity;
-};
-struct ResourceNodeState {            // on the resource node entity
-    ResourceTypeId type;
-    resource_amount_t remaining;
-};
-struct PlayerResourceLedger {        // on the player
-    std::array<resource_amount_t, RESOURCE_TYPE_COUNT> amounts;  // 4: Food/Wood/Stone/Gold
-};
-struct PopulationState {             // on the player
-    population_t used;
-    population_t reserved;
-    population_t capacity;
-};
+struct GathererCargo { ResourceTypeId type; resource_amount_t amount; resource_amount_t capacity; };
+struct ResourceNodeState { ResourceTypeId type; resource_amount_t remaining; };
+struct PlayerResourceLedger { std::array<resource_amount_t, RESOURCE_TYPE_COUNT> amounts; };  // 4: Food/Wood/Stone/Gold
+struct PopulationState { population_t used; population_t reserved; population_t capacity; };
 ```
-With only 4 resources in v1, use **stable-indexed `std::array`**, NOT `unordered_map<FQON, amount>`. Nyan FQON is used for load-time mapping to a stable `ResourceTypeId` only, never as an unordered hot-path key. Future data-driven resource types use stable ResourceTypeId + sorted flat container + resource registry/data hash in replay header.
+4 resources -> stable-indexed `std::array`, NOT `unordered_map<FQON, amount>`. Nyan FQON = load-time mapping to stable `ResourceTypeId` only. Future data-driven types use stable ResourceTypeId + sorted flat container + resource registry hash in replay header.
 
-**Curve vs scalar**: do NOT force Cargo/PlayerResources into curves just because the old component used curves. An authoritative fixed-tick component may be a plain deterministic scalar. Use curves ONLY when needed: querying historical ticks, render interpolation, legacy dependency propagation. Section 4 lists which state stays curve vs migrates to tick-state scalar.
+**Curve vs scalar**: do NOT force cargo/ledger into curves. Authoritative fixed-tick component may be a plain deterministic scalar. Curves only for historical query / render interpolation / legacy dependency propagation. See 4.7.
 
-### 2.14 Production queue semantics
+### 2.14 Production queue semantics (no off-by-one, atomic enqueue)
 
-Production queue is a building's continuous system-owned state; it is NOT modeled as a `Train Activity -> Wait ProductionCompleted`. Direct data flow:
+Production queue is a building's continuous system-owned state, NOT a `Train Activity -> Wait`. Direct data flow:
 ```
 TrainCommand -> Phase 2 ProductionCommandHandler
             -> validate ownership / queue capacity / resources / population
-            -> atomic enqueue transaction (deduct + reserve pop + append)
+            -> atomic enqueue transaction (ALL within Phase 2 deterministic commit point):
+                 validate cost / queue capacity / population (used+reserved+cost<=capacity)
+                 deduct resources
+                 reserve population (reserved += unit_population_cost)
+                 append ProductionQueue item (uses ProductionItemId as provisional handle)
             -> ProductionQueue
             -> Phase 8 ProductionSystem continuous advance
 ```
+If any step fails, nothing commits. `ProductionEnqueueRequestQueue` deleted (Phase-2 transaction replaces it).
 
-Not every Command must become an entity Activity:
-| Command | Routing |
-|---|---|
-| Move, Attack, Gather, Build | drives an Activity |
-| Train, Research, SetRallyPoint | directly modifies system-owned queue/state (no Activity) |
-| StopProduction, CancelProduction | operates ProductionQueue |
-| Scenario world effect | ScenarioEffectPipeline |
+**Population judgement**: `used + reserved + unit_population_cost <= capacity` (NOT `pop_used + train.queue < pop_cap`).
 
-**Atomic enqueue transaction** (all-or-nothing):
-```
-validate cost
-validate queue capacity
-validate population capacity    (used + reserved + unit_population_cost <= capacity)
-deduct resources
-reserve population              (reserved += unit_population_cost)
-append queue item
-```
-If any step fails, nothing commits.
-
-Population judgement is `used + reserved + unit_population_cost <= capacity` (NOT `pop_used + train.queue < pop_cap`), because unit population cost may be != 1, queue items != population, multiple buildings enqueue same tick, cancel must release reserved, and spawn success transfers reserved->used.
-
-**Spawn placement** (no off-by-one; T Phase 8 enqueue commits same-T Phase 11):
+**Spawn placement (no off-by-one; entity_id allocated in Phase 11, NOT Phase 8)**:
 ```
 T Phase 8:   production timer completes
-             reserve entity_id
-             enqueue SpawnRequest (item -> ReadyToSpawn)
-T Phase 11:  attempt commit spawn
-             success: create full entity; reserved -> used; remove queue item;
-                      enqueue EntitySpawned + UnitProduced, scheduled_tick = T+1
-             failure: item stays ReadyToSpawn; NO UnitProduced emitted;
-                      retry deterministic spawn placement next tick
-T+1 Phase 9: EntitySpawned / UnitProduced dispatched; listeners may safely read the new entity
+             enqueue SpawnRequest{SpawnRequestKey} (item -> ReadyToSpawn)
+             emit ProductionTimerCompleted (timer done, no entity yet)
+             (NO entity_id allocated here)
+T Phase 11:  canonical-sort ALL SpawnRequests by SpawnRequestKey
+             -> validate placement
+             -> allocate entity_ids (in sorted order)
+             -> commit spawn (create full entity; reserved -> used; remove queue item)
+             -> enqueue EntitySpawned THEN UnitProduced (scheduled_tick = T+1)
+             failure (spawn point blocked): item stays ReadyToSpawn in PendingSpawnStateStore;
+                       NO UnitProduced; deterministic retry next tick
+T+1 Phase 9: EntitySpawned -> UnitProduced dispatched (STRICT order); listeners may read entity
 ```
-Listeners read the entity the tick after commit (T+1), NOT T+2.
 
-**Events distinguished**:
-- `ProductionTimerCompleted`: training time ended, entity may not yet have a birth position.
-- `EntitySpawned`: entity actually entered the world.
-- `UnitProduced`: production transaction complete, entity usable by external systems.
-(v1: emit EntitySpawned + UnitProduced together on successful commit.)
+**SpawnRequestKey** (deterministic, pre-id):
+```
+(effect/source kind, owner_player_id, producer_entity_id OR scenario_effect_id,
+ production_queue_index, request_sequence)
+```
 
-Section 4 must define: cancel refund ratio, refund + reservation release on building destruction, spawn-point-blocked handling, population-capacity-drop-during-training handling.
+**Population capacity drop (v1 locked, simple)**: reserved items keep their reservation; capacity drop only blocks NEW enqueue; existing Ready/Training items are NOT auto-cancelled; after spawn, `used` may temporarily exceed `capacity`; new production is rejected until `used + reserved <= capacity`. Auto-cancel, if ever needed, must be a data-driven `PopulationOverflowPolicy` (NOT hardcoded "oldest producer first").
+
+**Spawn blocked result** is NOT `TaskFailed`:
+```
+ReadyToSpawn -> deterministic retry (indefinite by default)
+OR SpawnRetryPolicy{max_retries, failure_action} -> on exhaustion emit ProductionFailed{SpawnPlacementUnavailable}
+```
+
+**Events distinguished**: `ProductionTimerCompleted` (timer ended, may lack birth position) / `EntitySpawned` (entity entered world) / `UnitProduced` (transaction complete, usable). v1 emits EntitySpawned + UnitProduced together on successful commit, in strict order.
+
+Section 4 defines: cancel refund ratio (v1 = full refund before spawn), building-destruction refund + reservation release, spawn-point-blocked handling, capacity-drop handling (above).
+
+### 2.15 Command/event/effect/work-item schema + registry stability
+
+All registries (SystemId, ActivityTaskId, EventTypeId, ResourceTypeId, CommandConditionId) use **stable IDs from explicit constants / generated schema / stable data ids**, NEVER runtime registration call order. Duplicate id -> freeze FAILS. Registry manifest/hash written to replay header (2.17).
+
+### 2.16 RuntimeMode (mutually exclusive)
+
+```cpp
+enum class RuntimeMode { LegacyDemo, DeterministicGameplay, Replay };
+```
+- `LegacyDemo`: old demo uses legacy runtime; does NOT run deterministic gameplay systems.
+- `DeterministicGameplay`: SimLoop is the SOLE gameplay driver; no live player input outside RawInputBuffer.
+- `Replay`: SimLoop + ReplayCommandSource; no live player input.
+- Two loops MUST NOT simultaneously write the same World/GameState. "SimLoop runs alongside Legacy EventLoop" is forbidden.
+
+### 2.17 Replay Manifest + canonical serializer
+
+```cpp
+struct ReplayHeader {
+    uint32_t replay_schema_version;
+    Hash initial_simulation_manifest_hash;
+    Hash game_data_hash;
+    Hash map_scenario_id;  // + seed
+    Hash activity_graph_hash;
+    Hash command_event_effect_workitem_schema_hash;
+    Hash system_scheduler_manifest_hash;
+    Hash resource_registry_hash;
+    std::chrono::nanoseconds tick_duration;
+    RNGStreamStates rng_initial_states;
+};
+```
+`CanonicalStateSerializer` -> schema-defined canonical bytes; `StateChecksum` -> hash; `ChecksumSystem` -> Phase 12 orchestration (single serializer, no duplicate impl in `system/checksum.*` + `state_checksum.*`).
+
+**Replay acceptance (corrected)**: NOT "from empty state". Correct condition:
+```
+identical InitialSimulationManifest + identical data/schema hashes + identical RNG state
++ identical command/effect stream -> identical per-tick checksum
+```
+Hash mismatch -> refuse to load.
+
+### 2.18 RNG stream contract
+
+NOT one global RNG. Stable stream IDs; per-system / per-player / per-scenario streams; stream state in checksum/replay header; gameplay does not depend on whether another system consumed one more random; entity-level randomness uses stable derived streams; wall-clock seed forbidden; unordered iteration MUST NOT decide RNG consumption order.
 
 ---
 
 ## 3. End-to-end data flow (per vertical slice)
 
-Tick-T perspective; every phase labeled. Activities wake the tick **after** their wait is satisfied (next-tick wake rule). Pathfinding may take T+k ticks. The four authoritative pipelines (section 3.6) are the locked summary.
+Tick-T perspective; every phase labeled. Activities wake the tick **after** their wait is satisfied (next-tick wake rule). Pathfinding may take T+k ticks.
 
 ### 3.1 MoveTo + MoveIntoRange (principle #8 async pathing)
 
-Pathfinding does NOT necessarily complete in the same tick as submit, so timing is `T+k`, not default-T.
-
 ```
-T     Phase 3  Activity SubmitPathRequest -> PathRequestQueue
-               WaitForEvent(PathReady(request_id, generation) | PathFailed(request_id, generation))
-T..T+k Phase 4  PathfindingSystem: deterministic round-robin; each request gets fixed
-               expansion quantum; total <= global budget
+T     Phase 3  Activity SubmitPathRequest -> PathRequestQueue (transient) -> PathSearchStateStore
+               WaitForEvent(PathReady | PathFailed)  (WaitAny)
+T..T+k Phase 4  PathfindingSystem: round-robin by request_id; each request fixed expansion quantum;
+               total <= global budget; advances PathSearchStateStore (persistent)
 T+k   Phase 4  search complete -> emit PathReady / PathFailed
-T+k   Phase 9  event dispatch -> matches Activity wait state -> mark next-tick runnable
+T+k   Phase 9  event dispatch -> matches Activity wait -> mark next-tick runnable
 T+k+1 Phase 3  Activity resumes -> enqueue StartMovementRequest -> StartMovementRequestQueue
                WaitForEvent(MovementArrived | MovementBlocked | MovementNeedsRepath | MovementCancelled)
 T+k+1 Phase 5  MovementIntentSystem consumes StartMovementRequest; LocomotionSystem advances
-               every active intent one deterministic step from this phase
+               every active intent one deterministic step; MovementResolutionSystem judges result
 ```
-
-**Stale result handling**: a stale PathReady (old `movement_generation`, mismatched vs WaitSpec `request_id + movement_generation + activity_generation`) is dropped from the authoritative path (no MovementCancelled); a non-authoritative diagnostic trace MAY be emitted. `MovementCancelled` only means an **already-active** movement was cancelled (Stop / new command / death / forced interrupt).
-
-**Dynamic target**: do NOT emit `MovementNeedsRepath` on every coordinate change. MovementResolutionSystem emits `MovementNeedsRepath` only when the target displacement crosses `RepathPolicy.target_displacement_threshold` (and `minimum_repath_interval` has passed, `maximum_retries` not exceeded). Activity re-submits the path next tick.
-
-**MoveIntoRange**: `PathGoal.target = entity_id`, `acceptance_radius = attack/gather range`. Range check uses squared distance, edge-to-edge semantics (section 2.9): `center_dist² - (src_r + tgt_r)² <= effective_range²` (fixed-point). On met: `MovementArrived(in range)` -> Activity proceeds to Attack/Gather.
+Stale PathReady (old movement_generation) dropped from authoritative path (no MovementCancelled). MoveIntoRange uses the corrected squared formula (2.9). RepathPolicy for dynamic targets.
 
 ### 3.2 Attack -> Damage -> Death (principle #4 explicit damage)
 
-Activity only **starts/stops** the AttackIntent; CombatSystem owns the continuous loop. Activity does NOT wait per-AttackPoint.
-
 ```
-T   Phase 3  AttackTarget Activity: ValidateTarget (alive? in range?)
+T   Phase 3  AttackTarget Activity: ValidateTarget
             - out of range: MoveIntoRange(target, attack_range) sub-activity (3.1)
             - in range: enqueue StartAttackRequest -> AttackIntentRequestQueue
             - WaitForEvent(AttackNeedsReposition | AttackCancelled | TargetInvalidated | AttackerDied)
-T   Phase 6  CombatSystem (per-tick, each active AttackIntent): cycle
-              Ready -> Windup -> AttackPoint -> Recovery -> Cooldown -> Ready (repeats)
-            - at AttackPoint, melee: write DamageRequest -> DamageRequestQueue
-                          ranged: create ProjectileSpawnRequest -> ProjectileSpawnRequestQueue
-            - may emit AttackCommitted / AttackPointReached (animation/audio/Scenario; Activity NOT woken)
-            - target left range: CombatResolutionSystem emits AttackNeedsReposition -> stop intent
-T   Phase 7  (sub-steps 7.1-7.6, see 2.12)
-            7.1 CollectAndSortDamageRequests   sort (target, source, attack_id, hit_sequence)
-            7.2 ResolveDamage                  DamageResolver.resolve(profile, armor, mods)
-            7.3 CommitLiveMutations            write Live.hp via WorldMutationBuffer (writer: DamageSystem)
-            7.4 DetectDeaths                   read FINAL committed HP
-            7.5 CommitLifeStateTransitions     Alive -> Dying (writer: DeathSystem)
-            7.6 EmitDamageAndDeathEvents       DamageApplied (per hit) + EntityDied (once)
-            - Dying entity: movement/attack/gather intents deterministically cancelled
-            - enqueue despawn -> SpawnRequestQueue (despawn)
-T   Phase 9  DamageApplied / EntityDied dispatched (6-tuple)
-            - attacker Activity: TargetInvalidated (target died) -> Interrupt(TaskInterrupted{EntityDied})
-T   Phase 10 Scenario/AI may read the dead entity's read-only FINAL state (this tick only)
-T   Phase 11 DeferredEntityCommit: despawn commit; entity leaves active iteration set
-            - after Phase 11, all entity pointers/references are INVALID; listeners hold entity IDs only
+T   Phase 6  CombatSystem (6.1-6.4): AttackIntent cycle; at AttackPoint melee->DamageRequestQueue,
+            ranged->ProjectileSpawnRequest (spawn_tick=T, advanced next tick)
+T   Phase 7  (7.1-7.6, sequential working HP, see 2.12)
+            - DamageApplied per hit; DamageIgnored for post-lethal; EntityDied once
+            - victim intents cancelled in 7.5
+            - enqueue despawn -> DespawnRequestQueue
+T   Phase 9  DamageApplied/DamageIgnored/EntityDied dispatched
+            - attacker Activity: TargetInvalidated -> Interrupt(TaskInterrupted{EntityDied})
+T   Phase 10 Scenario/AI read dead entity's read-only FINAL state (this tick only)
+T   Phase 11 DeferredEntityCommit: despawn commit; entity leaves active set
+            - after Phase 11, entity pointers INVALID; listeners hold entity IDs only
 ```
+Satisfies #4: no on_attribute_change listener; DamageSystem sequential working HP; DeathSystem reads committed HP.
 
-Satisfies #4: no `on_attribute_change` listener (Live callback table removed); DamageSystem explicitly resolves and writes Live via WorldMutationBuffer; HP<=0 detected by DeathSystem reading committed HP. `max(0, attack - armor)` is a v1 placeholder via the extensible `DamageResolver` (2.12).
-
-### 3.3 Gather -> Carry -> Deposit (principle #3 controlled writers, multi-gatherer)
+### 3.3 Gather -> Carry -> Deposit (principle #3, multi-gatherer atomic)
 
 ```
 T   Phase 3  GatherResource Activity: SubmitPathRequest to resource node (MoveIntoRange, 3.1)
 T+...        in range -> enqueue StartGatherRequest -> GatherRequestQueue
             - WaitForEvent(ResourceDepleted | CarryFull)
-T   Phase 8  GatherSystem (per-tick): gather timer (ticks)
-            - multi-gatherer on one node: intents sorted by
-              (resource_node_id, gatherer_entity_id, gather_intent_id)
-              actual_amount = min(gather_rate, cargo_remaining_capacity, node_remaining)
-            - GathererCargo.amount += actual_amount  (writer: EconomySystem via ResourceTransferRequestQueue)
-            - ResourceNodeState.remaining -= actual_amount
-            - buffer ResourceGathered (records ACTUAL amount, not theoretical)
-            - node depleted: ResourceDepleted -> repath to new node OR fail
-            - cargo full: CarryFull -> ReturnResource sub-activity (MoveIntoRange to dropoff)
+T   Phase 8  GatherSystem: gather timer (ticks)
+            - multi-gatherer on one node: intents sorted (resource_node_id, gatherer_entity_id, gather_intent_id)
+              GatherAllocationTransaction (ATOMIC): ResourceNodeState.remaining -= actual
+                                                    AND GathererCargo.amount += actual
+              actual = min(gather_rate, cargo_remaining_capacity, node_remaining)
+            - buffer ResourceGathered (ACTUAL amount)
+            - node depleted: ResourceDepleted -> repath or fail
+            - cargo full: CarryFull -> ReturnResource (MoveIntoRange to dropoff)
 in range at dropoff -> Deposit:
-            - EconomySystem.deposit(): ATOMIC transaction in one Economy commit
-                GathererCargo.amount -= deposited   AND
-                PlayerResourceLedger[type] += deposited
-              (both mutations commit together; validation: ownership, dropoff accepts type,
-               gatherer in range, valid cargo, valid dropoff)
-            - buffer ResourceDeposited; reset cargo; loop back to gather
+            - EconomySystem.deposit(): ATOMIC transaction (ResourceTransferRequestQueue)
+                GathererCargo.amount -= deposited  AND  PlayerResourceLedger[type] += deposited
+              validation: ownership, dropoff accepts type, in-range, valid cargo/dropoff
+            - buffer ResourceDeposited; reset cargo; loop
 ```
+Drop-off "nearest" deterministic tie-break: `(path_cost, geometric_distance, dropoff_entity_id)`.
 
-**Drop-off selection** "nearest dropoff" deterministic tie-break: `(path_cost, geometric_distance, dropoff_entity_id)` - never container iteration order.
-
-4 resources (Food/Wood/Stone/Gold) are stable-indexed `ResourceTypeId` (2.13); nyan FQON is load-time mapping only.
-
-### 3.4 Production (principle #3 + #11 deferred commit, no off-by-one)
-
-TrainCommand does NOT drive an Activity; it goes to a system-owned queue.
+### 3.4 Build (full vertical slice)
 
 ```
-T   Phase 1  TrainCommand ingested (execute_tick=T)
-T   Phase 2  ProductionCommandHandler:
-              atomic enqueue transaction:
-                validate cost / queue capacity / population (used+reserved+cost<=capacity)
-                deduct resources
-                reserve population (reserved += unit_population_cost)
-                append ProductionQueue item
-              (any step fails -> nothing commits; reject logged)
-... Phase 8  ProductionSystem continuous advance: accumulate timer (ticks)
-T   Phase 8  timer completes
-              reserve entity_id
-              enqueue SpawnRequest (item -> ReadyToSpawn)
-              emit ProductionTimerCompleted (timer done, may lack birth position)
-T   Phase 11 attempt commit spawn (SAME tick T, not T+1):
-              success: create full entity; reserved -> used; remove queue item;
-                       enqueue EntitySpawned + UnitProduced, scheduled_tick = T+1
-              failure (spawn point blocked): item stays ReadyToSpawn; NO UnitProduced;
-                       retry deterministic spawn placement next tick
-T+1 Phase 9  EntitySpawned / UnitProduced dispatched; listeners may safely read the new entity
+BuildCommand
+-> Phase 2 validate ownership / placement / resources; atomic resource deduction
+-> SpawnFoundationRequest -> Phase 11 foundation commit (foundation entity, Active=Foundation)
+-> Build Activity: MoveIntoRange(builders -> foundation)
+-> StartBuildRequest -> BuildRequestQueue
+-> Phase 8 BuildSystem accumulates fixed-point contribution (per builder, sorted by builder_entity_id)
+-> BuildingCompleted -> foundation state transitions Foundation -> Active
 ```
+Defined: placement validation; foundation entity state; multiple builders same-tick contribution order (builder_entity_id); builder interrupted/dead (contribution stops, foundation remains); foundation destroyed (refund per policy); completion exactly once; resource refund policy; collision/nav revision update; replay/checksum.
 
-Population judgement is `used + reserved + unit_population_cost <= capacity` (NOT `pop_used + train.queue < pop_cap`). Cancel releases reserved; spawn success transfers reserved->used. Section 4 defines cancel refund ratio, building-destruction refund + reservation release, spawn-point-blocked handling, capacity-drop-during-training.
+### 3.5 Production (principle #3 + #11, no off-by-one)
 
-### 3.5 Command T+1 + unified issuer (principle #7/#10)
+See 2.14 for the full locked flow: Phase 2 atomic enqueue (deduct + reserve pop); Phase 8 timer -> SpawnRequest (no id yet); Phase 11 canonical-sort -> allocate id -> commit; EntitySpawned then UnitProduced scheduled_tick=T+1; spawn-blocked -> PendingSpawnStateStore retry / ProductionFailed.
 
-Player input is NOT in Phase 10 - it arrives outside the simulation.
+### 3.6 Command/Effect T+1 + unified issuer (principle #7/#10/#11)
 
 ```
-EXTERNAL   Player input -> RawInputBuffer / PlayerCommandSource  (render/input thread)
-T   Phase 1  CommandIngest: drain raw input snapshot
-              canonicalize selected entity IDs
-              construct Command; issued_tick = T; execute_tick = T + configured_input_delay (default T+1)
-              push CommandIngressQueue
-T   Phase 10 AI observes snapshot at T -> issue commands (execute_tick=T+1)
-              Scenario observes domain events/state at T -> issue commands/effects (execute_tick=T+1)
-T+1 Phase 1  canonical sort (execute_tick, issuer_kind_order, issuer_player_id, issuer_sequence, command_id)
-T+1 Phase 2  ValidationAndArbitration: per-entity id-order validation, queue-mode,
-              CommandPriority vs ActivityInterruptPolicy -> Activity transition
-              (CommandArbitrationSystem bumps ActivityRuntime generation)
+EXTERNAL   Player input -> RawInputBuffer / PlayerCommandSource (input thread)
+T   Phase 1  InputAndIntentIngest: drain raw input + ScenarioEffectIngressQueue;
+              canonicalize selected entity IDs; construct Command; issued_tick=T; execute_tick=T+input_delay
+T   Phase 10 AI observes snapshot T -> issue (execute_tick=T+1)
+              Scenario observes domain events/state T -> issue command/effect (execute_tick=T+1)
+T+1 Phase 1  canonical sort (root key: execute_tick, issuer_kind_order, issuer_stable_id, issuer_sequence)
+T+1 Phase 2  IntentValidationAndArbitration: per-entity id-order validation, QueuePlacement,
+              CommandPriority vs ActivityInterruptPolicy -> Activity transition (bump generation)
 T+1 Phase 3  Activity advances with the new command's intent
 ```
+ScenarioEffect parallel: Phase 10 issue -> Phase 1 (T+1) drain -> Phase 2 validate/canonicalize -> owning-phase apply -> Phase 11 commit (spawn/despawn) -> Phase 12 effect log + checksum.
 
-Replay: `ReplayCommandSource` injects recorded (execute_tick) commands in Phase 1. The simulation never reads wall-clock input timestamps.
+Eliminates: AI-vs-player ordering (both T+1), Scenario recursive triggers, same-tick system reentry, issuer-order effects. Conflicting commands resolved by canonical arbitration (sort key + CommandPriority vs ActivityInterruptPolicy).
 
-Eliminates: AI-vs-player ordering (both observe at T, execute at T+1), Scenario recursive triggers, same-tick system reentry, issuer-order effects. Conflicting commands from different issuers on the same entity are resolved by canonical arbitration (sort key + CommandPriority vs ActivityInterruptPolicy), not by issuer_kind implicitly.
-
-### 3.6 The four authoritative pipelines (locked summary)
+### 3.7 The five authoritative pipelines (locked summary)
 
 ```
-Move:      Command -> Activity -> PathRequestQueue -> PathfindingSystem -> PathReady
-           -> Activity -> StartMovementRequestQueue -> LocomotionSystem -> MovementResult -> Activity
+Move:       Command -> Activity -> PathRequestQueue/PathSearchStateStore -> PathfindingSystem -> PathReady
+            -> Activity -> StartMovementRequestQueue -> LocomotionSystem -> MovementResult -> Activity
 
-Attack:    Command -> Attack Activity -> StartAttackRequestQueue -> CombatSystem (continuous cycle)
-           -> DamageRequestQueue | ProjectileSpawnRequestQueue -> DamageSystem -> DeathSystem
-           -> DamageApplied / EntityDied -> Activity, AI, Scenario
+Attack:     Command -> Attack Activity -> AttackIntentRequestQueue -> CombatSystem (continuous cycle)
+            -> DamageRequestQueue | ProjectileStateStore -> DamageSystem -> DeathSystem
+            -> DamageApplied/DamageIgnored/EntityDied -> Activity, AI, Scenario
 
-Gather:    Command -> Gather Activity -> Movement -> StartGatherRequestQueue -> GatherSystem
-           -> GathererCargo / ResourceNodeState -> Deposit transaction -> PlayerResourceLedger
-           -> Resource domain events
+Gather:     Command -> Gather Activity -> Movement -> GatherRequestQueue -> GatherSystem
+            -> GatherAllocationTransaction (GathererCargo + ResourceNodeState) -> Deposit transaction
+            -> PlayerResourceLedger -> Resource domain events
 
-Production: TrainCommand -> ProductionCommandHandler -> atomic (deduct + reserve pop) + ProductionQueue
-           -> ProductionSystem -> SpawnRequestQueue -> DeferredEntityCommit
-           -> EntitySpawned / UnitProduced
+Build:      Command -> Phase 2 atomic deduction -> SpawnFoundationRequest -> Phase 11 foundation commit
+            -> Build Activity -> BuildRequestQueue -> BuildSystem -> BuildingCompleted
+
+Production: TrainCommand -> ProductionCommandHandler (Phase 2 atomic) -> ProductionQueue
+            -> ProductionSystem -> SpawnRequestQueue -> Phase 11 (alloc id + commit)
+            -> EntitySpawned -> UnitProduced
 ```
+
+---
 
 ## 4. Migration file list, test gates, compatibility
 
 ### 4.1 New files (greenfield)
 
 **Sim foundation (`libopenage/gamestate/sim/`)**
-- `simulation_clock.{h,cpp}` - tick_id_t, SimulationClock (TICK_DURATION 50ms)
-- `simulation_context.{h,cpp}` - per-tick context (current tick, budget, RNG, mutation buffer, microstep counter)
-- `deterministic_simulation_loop.{h,cpp}` - the 13-phase tick (replaces wall-clock-driven `simulation.cpp:52-54`)
-- `tick_phase.h` - TickPhase enum (13 values)
-- `world_mutation_buffer.{h,cpp}` - staged component mutations committed at fixed phase positions
-- `entity_id_allocator.{h,cpp}` - deterministic, ordered entity id allocation (replaces unordered_map iteration)
+- `simulation_clock.{h,cpp}`; `simulation_context.{h,cpp}`; `deterministic_simulation_loop.{h,cpp}`; `tick_phase.h` (14 values); `world_mutation_buffer.{h,cpp}`; `runtime_mode.h`
 
-**Registries (`libopenage/gamestate/sim/`)**
-- `phase_system_scheduler.{h,cpp}` - PhaseSystemDescriptor + IPhaseSystem + freeze/topo
-- `activity_task_registry.{h,cpp}` - ActivityTaskId + ActivityTaskHandler + freeze
-- `system_result.h` - ActivityTaskResult variant + TaskCompleted/TaskWaitUntil/TaskWaitForEvent/TaskFailed/TaskInterrupted + failure/interrupt enums + EventWaitSpec
+**Entity store (split from allocator)**
+- `entity_id_allocator.{h,cpp}` (allocation in Phase 11 post-sort); `entity_store.{h,cpp}` (hash lookup); `ordered_entity_view.{h,cpp}` (authoritative iteration only)
 
-**Typed events (`libopenage/gamestate/sim/event/`)**
-- `typed_event_queue.{h,cpp}` - authoritative queue (independent of Legacy EventLoop)
-- `event_envelope.{h,cpp}` - EventHeader + EventPayload variant
-- `event_origin_phase.h` - EventOriginPhase enum
-- `event_ordering.{h,cpp}` - 6-tuple strict total order
-- `event_bridge.{h,cpp}` - one-way bridge to Legacy EventLoop / UI observer
-- payloads: `path_ready.h`, `movement_events.h`, `damage_events.h`, `resource_events.h`, `production_events.h`, `spawn_events.h`
+**Registries**
+- `phase_system_scheduler.{h,cpp}`; `activity_task_registry.{h,cpp}`; `system_result.h`; `registry_manifest.{h,cpp}` (stable-id manifest + hash)
 
-**Command pipeline (`libopenage/gamestate/command/`)**
-- `command.{h,cpp}` - CommandHeader + CommandPayload variant (replaces virtual base); IssuerKind, CommandPriority, ActivityInterruptPolicy, QueueMode, ConditionalQueueSpec
-- `command_pipeline.{h,cpp}` - issue() -> CommandIngressQueue
-- `command_ingress_queue.{h,cpp}` - runtime queue (NOT the log)
-- `command_log.{h,cpp}` - append-only replay artifact + CommandResultLog
-- `command_canonicalizer.{h,cpp}` - subjects sort/dedupe/per-entity split
-- `command_arbitration.{h,cpp}` - validation + queue-mode + CommandPriority-vs-ActivityInterruptPolicy -> Activity transition
-- `raw_input_buffer.{h,cpp}` - PlayerCommandSource / RawInputBuffer (thread boundary, outside sim)
-- `production_command_handler.{h,cpp}` - Phase 2 handler for TrainCommand -> atomic enqueue transaction
-- `replay_command_source.{h,cpp}` - reads CommandLog into IngressQueue
+**Typed events**
+- `typed_event_queue.{h,cpp}`; `event_envelope.{h,cpp}`; `event_origin_phase.h`; `event_ordering.{h,cpp}`; `event_bridge.{h,cpp}`; payloads `*.h`
 
-**Phase work queues (`libopenage/gamestate/sim/work_queue/`)**
-- `phase_work_queue.h` - template PhaseWorkQueue<T>
-- `work_queue_registry.{h,cpp}` - registry table: producer/consumer phase, sort key, in-checksum, must-empty, cross-tick retention (the 2.10 table)
-- `path_request_queue.{h,cpp}`, `start_movement_request_queue.{h,cpp}`, `attack_intent_request_queue.{h,cpp}`, `damage_request_queue.{h,cpp}`, `projectile_spawn_request_queue.{h,cpp}`, `spawn_request_queue.{h,cpp}`, `resource_transfer_request_queue.{h,cpp}`, `production_enqueue_request_queue.{h,cpp}`
+**Command pipeline**
+- `command.{h,cpp}`; `command_pipeline.{h,cpp}`; `command_ingress_queue.{h,cpp}`; `command_log.{h,cpp}`; `command_canonicalizer.{h,cpp}`; `command_arbitration.{h,cpp}`; `raw_input_buffer.{h,cpp}`; `production_command_handler.{h,cpp}`; `replay_command_source.{h,cpp}`
 
-**Scenario effect pipeline (`libopenage/gamestate/scenario/`)**
-- `scenario_effect_pipeline.{h,cpp}` - SpawnEntity/ChangeDiplomacy/RevealArea/DeclareVictory/ObjectiveState effects; validation -> typed effect -> deferred commit -> replay/checksum
-- `scenario_runtime.{h,cpp}` - trigger/condition/effect/objective engine; observes domain events; issues commands via CommandPipeline
-- `scenario_trigger_types.h` - UnitEnteredArea/EntityDied/TimerExpired/ResourceReached/ObjectiveCompleted
-- `scenario_effect_types.h` - SpawnEntity/IssueCommand/ChangeDiplomacy/ShowDialogue/EnableTechnology/DeclareVictory
+**Scenario effect pipeline**
+- `scenario_effect_pipeline.{h,cpp}`; `scenario_effect_ingress_queue.{h,cpp}`; `scenario_effect_log.{h,cpp}`; `scenario_effect_canonicalizer.{h,cpp}`; `scenario_effect_result.{h,cpp}`; `scenario_runtime.{h,cpp}`; `scenario_trigger_types.h`; `scenario_effect_types.h`
 
-**AI (`libopenage/gamestate/ai/`)**
-- `scripted_ai.{h,cpp}` - reactive rules; observes domain events; issues via CommandPipeline
+**Phase work queues + persistent stores**
+- `phase_work_queue.h`; `work_queue_registry.{h,cpp}`; `start_movement_request_queue.*`; `attack_intent_request_queue.*`; `damage_request_queue.*`; `spawn_request_queue.*`; `despawn_request_queue.*`; `resource_transfer_request_queue.*`; `build_request_queue.*`
+- `path_search_state_store.{h,cpp}`; `projectile_state_store.{h,cpp}`; `pending_spawn_state_store.{h,cpp}`
+
+**AI**: `scripted_ai.{h,cpp}`
 
 **Phase systems (`libopenage/gamestate/system/`)**
-- `pathfinding.{h,cpp}` - PathfindingSystem (pausable/resumable search state, round-robin budget)
-- `locomotion.{h,cpp}` - LocomotionSystem (per-tick intent advance, generation validation)
-- `movement_intent.{h,cpp}` - MovementIntentSystem (consumes StartMovementRequest)
-- `movement_resolution.{h,cpp}` - MovementResolutionSystem (Arrived/Blocked/NeedsRepath/Cancelled; RepathPolicy)
-- `combat.{h,cpp}` - CombatSystem (AttackIntent + AttackCycleState Ready/Windup/AttackPoint/Recovery/Cooldown; DamageRequest/ProjectileSpawn creation)
-- `combat_resolution.{h,cpp}` - CombatResolutionSystem (AttackNeedsReposition when target leaves range)
-- `projectile.{h,cpp}` - ProjectileSystem (per-tick projectile advance + impact)
-- `damage.{h,cpp}` - DamageSystem (7.1-7.6 sub-steps; DamageResolver)
-- `damage_resolver.{h,cpp}` - extensible DamageResolver (v1: max(0,amount-armor) placeholder; future: classes/bonuses/splash)
-- `death.{h,cpp}` - DeathSystem (reads committed HP; Dying/Dead; despawn enqueue; cancel victim intents)
-- `gather.{h,cpp}` - GatherSystem (multi-gatherer atomic allocation)
-- `build.{h,cpp}` - BuildSystem
-- `production.{h,cpp}` - ProductionSystem (continuous timer; ProductionTimerCompleted; SpawnRequest)
-- `economy.{h,cpp}` - EconomySystem (atomic deposit transaction; cost deduction; population)
-- `deferred_entity_commit.{h,cpp}` - DeferredEntityCommitSystem (spawn/despawn; spawn placement retry)
-- `checksum.{h,cpp}` - ChecksumSystem (state hash per tick)
+- `pathfinding.{h,cpp}`; `locomotion.{h,cpp}` (fixed-point math); `movement_intent.{h,cpp}`; `movement_resolution.{h,cpp}`; `combat.{h,cpp}`; `combat_resolution.{h,cpp}`; `projectile.{h,cpp}`; `damage.{h,cpp}`; `damage_resolver.{h,cpp}`; `death.{h,cpp}`; `gather.{h,cpp}`; `build.{h,cpp}`; `production.{h,cpp}`; `economy.{h,cpp}`; `deferred_entity_commit.{h,cpp}`
 
-**Resource / population state (`libopenage/gamestate/component/api/`)**
-- `gatherer_cargo.{h,cpp}` - GathererCargo (type/amount/capacity; scalar, not curve)
-- `resource_node_state.{h,cpp}` - ResourceNodeState (type/remaining; scalar)
-- `player_resource_ledger.{h,cpp}` - PlayerResourceLedger (std::array<ResourceTypeId>, scalar)
-- `population_state.{h,cpp}` - PopulationState (used/reserved/capacity)
-- `resource_type.{h,cpp}` - ResourceTypeId registry + FQON load-time mapping
+**Resource/population state (`libopenage/gamestate/component/api/`)**
+- `gatherer_cargo.{h,cpp}`; `resource_node_state.{h,cpp}`; `player_resource_ledger.{h,cpp}`; `population_state.{h,cpp}`; `resource_type.{h,cpp}`
 
-**Pathfinding refactor (`libopenage/pathfinding/`)**
-- `search_state.{h,cpp}` - pausable/resumable flow-field search state (extracted from synchronous `pathfinder.cpp`); stepwise continuation of A*+flow-field
+**Pathfinding refactor**: `search_state.{h,cpp}` (pausable/resumable flow-field)
 
-**Determinism (`libopenage/gamestate/sim/determinism/`)**
-- `replay.{h,cpp}` - replay runner (CommandLog -> SimLoop)
-- `state_checksum.{h,cpp}` - canonical state serialization + hash (includes work-queue contents where in-checksum=yes)
-- `deterministic_rng.{h,cpp}` - wires existing `rng::RNG` (xorshift128+, seedable/serializable, currently 0 instantiations) into sim
+**Determinism + replay**
+- `canonical_state_serializer.{h,cpp}`; `replay_header.{h,cpp}`; `simulation_manifest.{h,cpp}`; `schema_hash.{h,cpp}`; `scheduler_manifest.{h,cpp}`; `divergence_report.{h,cpp}`; `checksum_system.{h,cpp}`; `replay.{h,cpp}`; `deterministic_rng.{h,cpp}` (per-system/player/scenario streams)
 
 ### 4.2 Modified files (existing)
 
-- `libopenage/gamestate/simulation.{h,cpp}` - replace wall-clock `reach_time` loop with `DeterministicSimulationLoop::tick`; register phase systems; fix entity iteration to ordered
-- `libopenage/gamestate/system/activity.{h,cpp}` - DELETE central `handle_subsystem` switch (`activity.cpp:123-143`); advance reads ActivityRuntimeState frame stack; microstep budget from ActivityExecutionContext; next-tick wake rule
+- `libopenage/gamestate/simulation.{h,cpp}` - replace wall-clock `reach_time` loop with `DeterministicSimulationLoop::tick`; register phase systems; ordered entity view
+- `libopenage/gamestate/system/activity.{h,cpp}` - DELETE central `handle_subsystem` switch (`activity.cpp:123-143`); advance reads scalar ActivityRuntimeState frame stack; next-tick wake rule
 - `libopenage/gamestate/event/send_command.cpp` - DELETE command_t switch (`:67`); route via CommandPipeline + canonicalizer
-- `libopenage/gamestate/system/move.{h,cpp}` - REWRITE: remove synchronous path-bake into Position curve; Move is now an Activity (SubmitPathRequest -> Wait -> StartMovementRequest). The `move.cpp:112-167` speed/turn math is reused by LocomotionSystem.
-- `libopenage/gamestate/component/internal/activity.h` - extend to ActivityRuntimeState (frame stack, params, wait_state, generation)
-- `libopenage/gamestate/component/api/live.{h,cpp}` - REMOVE `on_attribute_change` callback table + `change_callbacks` map (`live.h:85-105`); death now DeathSystem-driven. Live.hp stays a curve (render interpolation); life_state is a tick scalar.
-- `libopenage/gamestate/component/api/gather.{h,cpp}` - `carried_amount` plain int64 -> split into GathererCargo + ResourceNodeState (scalars; NOT curves - no historical query needed)
-- `libopenage/gamestate/component/api/{build,train,production,resource_storage}.{h,cpp}` - fill in authoritative state (currently skeletons); resource_storage -> PlayerResourceLedger
-- `libopenage/gamestate/component/internal/command_queue.{h,cpp}` - integrate QueueMode + cancel-by-tag (interrupt priority is on CommandHeader, not the queue)
-- `libopenage/gamestate/player.{h,cpp}` - `resources` plain map -> PlayerResourceLedger (std::array, scalar); add PopulationState
-- `libopenage/gamestate/game_state.{h,cpp}` / `libopenage/gamestate/map.cpp` - `unordered_map<entity_id_t,...>` -> ordered container (fixes `map.cpp:24` non-determinism TODO)
-- `libopenage/event/event_loop.{h,cpp}` - demote: keep as time-scheduling primitive + curve dependency propagation; remove gameplay-main-drive role; add LegacyEventLoopAdapter for explicit unit-checked tick/time conversion
-- `libopenage/gamestate/activity/types.h` - extend closed `node_t` enum with Sequence/Loop/Transition/Interrupt (Condition folded into XorGate; WaitEvent/WaitUntil as node types)
-- `libopenage/gamestate/entity_factory.cpp` - rewrite activity graph construction to data-driven node definitions (replace arbitrary-lambda conditions/tasks); register systems/tasks
-- `libopenage/gamestate/api/definitions.h` - ACTIVITY_TASK_SYSTEM_DEFS map -> ActivityTaskRegistry registrations; conditions/primers already const_map registry (reuse pattern)
-- `libopenage/clock/clock.{h,cpp}` - separate sim clock (tick-driven) from render clock (wall-clock); wall-clock decides tick count per frame only
-- `libopenage/main.cpp` / `libopenage/main.h` - `--tutorial` already exists; add `--replay <log>`, `--checksum-every N`, `--input-delay <ticks>`
+- `libopenage/gamestate/system/move.{h,cpp}` - REWRITE: remove synchronous path-bake; Move is an Activity. `move.cpp:112-167` math reused for SEMANTICS/algorithm structure ONLY; authoritative math migrated to fixed-point in LocomotionSystem (no `double` authoritative)
+- `libopenage/gamestate/component/internal/activity.h` - extend to ActivityRuntimeState (scalar frame stack, params, wait_state, generation, interrupt_policy); legacy current_node curve = read-only mirror
+- `libopenage/gamestate/component/api/live.{h,cpp}` - REMOVE on_attribute_change callback table + change_callbacks map (`live.h:85-105`); death DeathSystem-driven. Live.hp stays curve (render interp); life_state scalar.
+- `libopenage/gamestate/component/api/gather.{h,cpp}` - `carried_amount` -> split GathererCargo + ResourceNodeState (scalars)
+- `libopenage/gamestate/component/api/{build,train,production,resource_storage}.{h,cpp}` - fill authoritative state; resource_storage -> PlayerResourceLedger
+- `libopenage/gamestate/component/internal/command_queue.{h,cpp}` - deterministic queue authoritative (QueuePlacement + cancel-by-tag); legacy `curve::Queue` = read-only mirror; `command_in_queue` no longer drives authoritative Activity transition
+- `libopenage/gamestate/player.{h,cpp}` - resources -> PlayerResourceLedger (array, scalar); add PopulationState
+- `libopenage/gamestate/game_state.{h,cpp}` / `libopenage/gamestate/map.cpp` - hash map retained for ID LOOKUP only; authoritative iteration via `ordered_active_ids()` (fixes `map.cpp:24` non-determinism TODO); NO global std::map replacement
+- `libopenage/event/event_loop.{h,cpp}` - demote; LegacyEventLoopAdapter (explicit unit-checked tick/time conversion); legacy callbacks one-way observer only
+- `libopenage/gamestate/activity/types.h` - extend node_t enum (Sequence/Loop/Transition/Interrupt; Condition folded into XorGate; WaitEvent/WaitUntil as nodes)
+- `libopenage/gamestate/entity_factory.cpp` - data-driven activity graph construction (no arbitrary-lambda conditions/tasks); register systems/tasks
+- `libopenage/gamestate/api/definitions.h` - ACTIVITY_TASK_SYSTEM_DEFS -> ActivityTaskRegistry registrations
+- `libopenage/clock/clock.{h,cpp}` - separate sim clock (tick) from render clock (wall-clock)
+- `libopenage/main.cpp` / `libopenage/main.h` - `--tutorial` exists; add `--replay <log>`, `--checksum-every N`, `--input-delay <ticks>`, `--runtime-mode {legacy|deterministic|replay}`
 
 ### 4.3 Phase technical risks
 
-**Phase 4 pathfinding (HIGHEST RISK)**: the flow-field `Pathfinder` (`pathfinder.cpp:24`) is currently a synchronous `get_path` that completes in one call. Refactoring into pausable/resumable `SearchState` that advances a fixed node budget per tick while preserving determinism is the single largest technical risk. Migration plan:
-1. Extract the A* portal stage and flow-field integration stage into a stepwise `SearchState` (continuation, not coroutine) that can be advanced N nodes per call and serialized for cross-tick retention.
-2. Keep the synchronous `get_path` as a non-authoritative fallback for the headless test fixture and the legacy demo bridge.
-3. Define per-request quantum, global node budget, request admission limit; round-robin by request_id (anti-starvation).
-4. Define PathFailed/PartialPath conditions: `OUT_OF_BOUNDS` -> PathFailed immediately; no-path-found within `maximum_retries * budget` -> PathFailed; nav_revision mismatch -> PathFailed.
-5. Gate Phase 4 behind a dedicated test that replays identical request sets and asserts identical PathReady ordering across N runs and across machines.
+**Phase 4 pathfinding (HIGHEST RISK)**: synchronous `get_path` (`pathfinder.cpp:24`) -> pausable/resumable `SearchState`/`PathSearchStateStore`. Migration: (1) extract A* portal + flow-field into stepwise continuation advancing N nodes/call, serializable; (2) sync `get_path` retained ONLY for LegacyDemo/oracle/debug (never authoritative - 2.9); (3) define per-request quantum, global budget, admission limit, round-robin; (4) PathFailed conditions per 2.9; (5) gate behind identical-request-set replay test.
 
-**Activity frame stack**: the current single `current_node` (`activity.h:102`) cannot represent Sequence/Loop/sub-Activity. The new `ActivityRuntimeState` frame stack changes the serialization shape; replay headers must carry the activity graph data hash, and old save files are not compatible (acceptable - this is foundation work).
+**Activity frame stack**: single `current_node` -> scalar frame stack; serialization shape changes; replay headers carry graph hash; old saves incompatible (acceptable foundation work).
 
-**Legacy EventLoop demotion**: many existing `OnceEventHandler` gameplay events (`spawn_entity`/`send_command`/`process_command`/`wait`) and curve `changes(at)` propagation depend on EventLoop. Demotion must preserve curve dependency propagation (still authoritative for curve re-eval) while routing gameplay events through TypedEventQueue. The one-way bridge lets legacy UI observers still function.
+**Legacy EventLoop demotion**: preserve curve dependency propagation; route gameplay events through TypedEventQueue; one-way bridge for UI. RuntimeMode mutual exclusion (2.16).
 
-**Combat attack-cycle state**: storing per-AttackIntent cycle state (Windup/AttackPoint/Recovery/Cooldown) is new persistent sim state; must be in the checksum and serializable. Risk: getting the Activity/CombatSystem split right (Activity must not wait per-AttackPoint).
+**Combat cycle state**: per-AttackIntent cycle state is new persistent sim state (in checksum, serializable). Risk: Activity/CombatSystem split (Activity must not wait per-AttackPoint).
 
-### 4.4 Test gates (per stage, runnable)
+### 4.4 Test gates (per stage, runnable; all authoritative tests use resumable SearchState, never sync fallback)
 
 | Stage | Gate | Pass criterion |
 |---|---|---|
-| S0 Determinism harness | tick 2 ticks with no commands | checksum identical across N runs; RNG stream seeded identical; work queues that must-be-empty are empty at tick end |
-| S1 Move vertical slice | issue MoveCommand, sim N ticks | entity arrives; identical checksum across runs; PathReady -> MovementArrived dispatched; pathfinding takes T+k correctly |
-| S2 Attack->Damage->Death | attack intent, sim until target HP<=0 | AttackCycleState advances; DamageApplied + EntityDied dispatched; no on_attribute_change listener (assert absent); despawn committed Phase 11; victim intents cancelled Phase 7 |
-| S3 Gather->Carry->Deposit | gather to capacity, return to TC | multi-gatherer no over-gather; GathererCargo + PlayerResourceLedger update atomically; ResourceGathered records ACTUAL amount; ResourceDeposited dispatched |
-| S4 Production | TrainCommand with enough resources | atomic enqueue (deduct+reserve); entity spawned same-T Phase 11; EntitySpawned+UnitProduced dispatched T+1; pop cap enforces PopulationLimit |
-| S5 Scripted AI | AI gathers + trains + attacks | AI issues via CommandPipeline only (assert no direct component mutation); execute_tick=T+1 |
-| S6 Scenario Runtime | trigger on EntityDied -> SpawnEntity effect | effect via ScenarioEffectPipeline; deferred commit; checksum stable |
-| S7 Replay + checksum | record command log, replay from empty state | identical state checksum at every tick; rejected commands reproduced; divergence audit passes |
-| S8 Interrupt/edge cases | target dies mid-gather, repath mid-move, insufficient resources, production cancel, spawn-point blocked | each path yields a defined ActivityTaskResult (not silent drop); MovementCancelled / MovementNeedsRepath / TaskFailed{InsufficientResources} / TaskInterrupted{TargetInvalidated}; stale PathReady does NOT produce MovementCancelled (assert) |
-| S9 Mission 1 end-to-end | `bin/run main --tutorial --headless` (or fixture) | gather 50 wood trigger completes; exit 0 |
+| **S0** Determinism harness | (A-L below) | see 4.4.1 |
+| S1 Move vertical slice | issue MoveCommand, sim N ticks | entity arrives; identical checksum across runs; PathReady->MovementArrived; pathfinding T+k |
+| S2 Attack->Damage->Death | attack intent, sim until HP<=0 | AttackCycleState advances; DamageApplied + DamageIgnored + EntityDied; no on_attribute_change (assert absent); despawn committed Phase 11; victim intents cancelled 7.5; no zero-tick projectile flight |
+| S3 Gather->Carry->Deposit | gather to capacity, return to TC | multi-gatherer no over-gather (GatherAllocationTransaction atomic); cargo+ledger atomic; ResourceGathered records ACTUAL; ResourceDeposited |
+| S4 Build | BuildCommand, sim to completion | placement validated; foundation commit Phase 11; multi-builder contribution order; BuildingCompleted exactly once; refund on foundation destroyed |
+| S5 Production | TrainCommand with enough resources | atomic enqueue (deduct+reserve); id allocated Phase 11 post-sort; EntitySpawned strictly before UnitProduced; pop cap -> CommandRejected; blocked spawn -> retry; retry exhausted -> ProductionFailed (NOT TaskFailed); multiple producers same tick; cancellation/refund; producer destroyed; capacity drop; retry does not re-deduct; events exactly once |
+| S6 Scripted AI | AI gathers + trains + attacks | AI issues via CommandPipeline only (assert no direct component mutation); execute_tick=T+1 |
+| S7 Scenario Runtime | trigger on EntityDied -> SpawnEntity effect | effect via ScenarioEffectPipeline; Phase 1/2/11 timing; deferred commit; checksum stable |
+| S8 Replay + checksum | replay from identical InitialSimulationManifest (NOT empty) | identical per-tick checksum; rejected commands/effects reproduced; divergence audit passes; hash mismatch refused |
+| S9 Interrupt/edge cases | (layered results, see 4.4.2) | each path yields a LAYERED result per 4.4.2 |
+| S10 Mission-1-equivalent foundation harness | `bin/run main --tutorial --headless` (or fixture) | gather 50 wood objective completes via Scenario Runtime; AI active; scenario effect fires; replay passes; exit 0 |
+
+#### 4.4.1 S0 expanded (determinism)
+A. empty world 10,000 ticks, multi-run checksum identical
+B. headless / 30 / 60 / 144 FPS / multi-tick catch-up identical
+C. unordered container reserve/bucket count changed -> identical
+D. command ingress arrival order shuffled -> canonical result identical
+E. event/work-buffer memory layout changed -> dispatch order identical
+F. RNG stream isolation (per-system/player/scenario independent)
+G. duplicate registry ID -> freeze FAILS
+H. scheduler dependency cycle -> freeze FAILS
+I. tick 0 / T+1 / delayed command boundary tests
+J. work queue must-empty assertion at Phase 12
+K. replay schema/hash mismatch -> refused
+L. debug/release fixed-point results identical
+
+#### 4.4.2 S8 layered failure results (NOT all ActivityTaskResult)
+| Condition | Result type |
+|---|---|
+| Move failure | ActivityTaskFailed / movement event |
+| Train resources insufficient | CommandRejected |
+| Population limit | CommandRejected |
+| Production cancelled | ProductionCancelled |
+| Spawn blocked | ReadyToSpawn retry |
+| Spawn retry exhausted | ProductionFailed{SpawnPlacementUnavailable} |
+| Scenario effect invalid | ScenarioEffectRejected |
+| stale PathReady | silent authoritative drop + optional diagnostic |
 
 ### 4.5 Compatibility with existing code
 
-- **Existing demo (`libopenage/main/demo/`)**: keeps using Legacy EventLoop via the one-way bridge; not broken by the SimLoop (sim runs alongside; demo opts out of tick-driven systems).
-- **Existing `Move`/`Idle` systems**: `Idle` reused as a phase system; `Move` rewritten (old synchronous behavior removed). The `move.cpp:112-167` speed/turn math is reused by LocomotionSystem.
-- **Existing flow-field Pathfinder**: reused as the algorithmic core; wrapped in `SearchState` for pausable/resumable execution. Synchronous `get_path` retained for non-authoritative fallback only.
-- **Existing components (Position/CommandQueue/Activity/Ownership/Live)**: kept as curve-backed authoritative state; only `Live` loses its callback table; `Gather` splits into GathererCargo + ResourceNodeState (scalars); PlayerResources becomes the std::array PlayerResourceLedger (scalar).
-- **Existing nyan data (tutorial_data.nyan, mission scenarios, APIScenario)**: unchanged at the schema level; the new systems consume the same nyan FQONs. Mission 2-5 scenario nyan files are added as their mechanics land.
-- **Streaming convert output (`/tmp/openage_bfg_lazy256`)**: orthogonal; the de2_base modpack is consumable by the runtime once Mission scenarios point at real GameEntity FQONs (post-vertical-slice).
+- `RuntimeMode::LegacyDemo`: old demo keeps legacy runtime; does NOT run deterministic systems (mutual exclusion 2.16).
+- `Idle` reused as an **Activity / default no-intent state**, NOT a continuous phase system.
+- Existing flow-field Pathfinder: algorithmic core reused in `SearchState`; sync `get_path` ONLY LegacyDemo/oracle/debug.
+- Existing components (Position/CommandQueue/Activity/Ownership/Live): kept; Live loses callback table; Gather splits; PlayerResources -> PlayerResourceLedger. No dual authority: deterministic queue + ActivityRuntimeState scalar stack are authoritative; legacy curves = read-only mirrors.
+- Existing nyan data (tutorial_data.nyan, mission scenarios, APIScenario): unchanged schema; new systems consume same FQONs.
+- Streaming convert output (`/tmp/openage_bfg_lazy256`): orthogonal; consumed once Mission scenarios point at real GameEntity FQONs.
 
 ### 4.6 Known limitations and extension points
 
-**Limitations (first version)**
-- No projectiles visual fidelity (ranged attack uses placeholder; ProjectileSystem advances logically but visual is minimal).
-- No Resistance full结算 (v1 DamageResolver is `max(0, amount - armor)` placeholder; Resistance component parsed but not fully consumed).
-- No save/mid-tick snapshot (Activity microsteps are not in checksum).
-- Single AI personality (scripted reactive rules only).
-- Mission 2-5 scenarios not authored (only Mission 1 in vertical slice).
-- No multi-threaded pathfinding (single-threaded round-robin; the 4 multi-threading invariants are specified for the future).
+**Limitations (v1)**
+- No projectile visual fidelity (ProjectileSystem advances logically; visual minimal).
+- v1 DamageResolver = `max(0, amount - armor)` placeholder (Resistance parsed, not fully consumed).
+- No save/mid-tick snapshot (Activity microsteps not in checksum).
+- Single AI personality (scripted reactive rules).
+- Formal Mission 1 + Missions 2-5 not authored here (spec 2/3).
+- No multi-threaded pathfinding (single-threaded round-robin; 4 multi-threading invariants specified for future).
 
-**Extension points (no core rewrite needed)**
-- Projectiles: ProjectileSystem already exists as a phase system; visual projectile rendering plugs into existing WorldObject.
-- Tech/research: ResearchSystem is a registered phase system (enum slot reserved); patch apply via existing libnyan Transaction API (plan A1-A4 already wired `add_player` patch consumption).
-- Garrison / formations / diplomacy: each is a new phase system + Activity sub-graph; the registry/variant/frame-stack model accommodates them without central-switch edits.
-- More campaign missions: each mission = a scenario nyan + a `create_mission_N_trigger` factory (pattern already in `trigger.h`); Scenario Runtime triggers/effects are extensible via the typed effect registry.
+**Extension points (no core rewrite)**
+- Projectiles, tech/research (libnyan Transaction; plan A1-A4 wired), garrison/formations/diplomacy (new phase system + Activity sub-graph), more campaign missions (scenario nyan + `create_mission_N_trigger`).
 
 ### 4.7 Curve vs tick-state scalar (migration decisions)
 
-Use curves ONLY when needed: querying historical ticks, render interpolation, legacy dependency propagation. Otherwise authoritative fixed-tick component is a plain deterministic scalar.
+Curves ONLY for historical query / render interpolation / legacy dependency propagation.
 
 | State | Type | Reason |
 |---|---|---|
-| Position.current | curve | render interpolation between ticks |
+| Position.current | curve | render interpolation |
 | Live.hp | curve | render interpolation; legacy dependency |
-| Live.life_state | scalar | tick-transition only |
-| CommandQueue | curve::Queue | legacy dependent-event propagation (`command_in_queue.cpp`) |
-| ActivityRuntime.current_node | curve::Discrete | legacy dependent-event propagation |
+| Live.life_state | scalar | tick-transition |
+| CommandQueue | scalar authoritative | deterministic; legacy `curve::Queue` = read-only mirror |
+| ActivityRuntime | scalar frame stack | deterministic; legacy current_node curve = read-only mirror |
 | Ownership.owner | curve::Discrete | legacy |
-| GathererCargo | scalar | no historical query; no render interp (UI reads current) |
+| GathererCargo | scalar | no historical query |
 | ResourceNodeState.remaining | scalar | same |
-| PlayerResourceLedger | scalar | UI reads current; no interp |
+| PlayerResourceLedger | scalar | UI reads current |
 | PopulationState | scalar | tick-transition |
-| AttackIntent.cycle state | scalar | tick-transition; in checksum |
+| AttackIntent cycle state | scalar | tick-transition; in checksum |
 | ProductionQueue | scalar (ordered) | tick-transition |
 
 ### 4.8 PhaseWorkQueue checksum strategy
 
-Each work queue declares `in_checksum` (yes/no) per the 2.10 table. Queues marked `in_checksum = yes` are serialized into the tick checksum in their canonical-sorted form (stable ordering). Queues with `cross-tick retention = yes` (PathRequestQueue in-flight, ProjectileSpawnRequestQueue in-flight) are also serialized so mid-search state is replay-identical. Queues with `must-be-empty at tick end = yes` are asserted empty at Phase 12 (a non-empty queue at checksum is a determinism bug -> test failure).
+Each work queue declares `in_checksum` (per 2.10 table). Queues serialized in canonical-sorted form. Queues with `must-empty at tick end = yes` are asserted empty at Phase 12 (non-empty = determinism bug -> test failure). Persistent stores (`PathSearchStateStore`, `ProjectileStateStore`, `PendingSpawnStateStore`) are serialized+checksummed (in-flight state replay-identical).
 
-### 4.9 Combat attack-cycle state migration
+### 4.9 Acceptance criteria (from the brief, mapped)
 
-`AttackIntent` persistent state (AttackCycleState, state_until_tick, attack_generation) is new sim state. Stored in a system-owned `std::vector<AttackIntent>` sorted by attacker_id (deterministic iteration). It is a tick scalar, included in the checksum, serializable. The Activity/CombatSystem split: Activity enqueues StartAttackRequest and waits only on AttackNeedsReposition/AttackCancelled/TargetInvalidated/AttackerDied; CombatSystem owns the repeating cycle and emits DamageRequest/ProjectileSpawn at AttackPoint WITHOUT waking the Activity.
-
-### 4.10 Damage phase internal commit order
-
-Phase 7 sub-steps 7.1-7.6 (2.12) define read-your-writes: ResolveDamage (7.2) reads committed profiles; CommitLiveMutations (7.3) writes Live.hp via WorldMutationBuffer; DetectDeaths (7.4) reads the FINAL committed HP (post-7.3, not stale); CommitLifeStateTransitions (7.5) writes life_state; EmitDamageAndDeathEvents (7.6) emits after all commits. Multiple hits same target same tick: applied in 7.1 sort order `(target, source, attack_id, hit_sequence)`; DamageApplied per hit; EntityDied once; once Dying, v1 rule = no further damage; victim active intents cancelled in Phase 7.
-
-### 4.11 Resource node multi-gatherer atomic allocation
-
-In Phase 8, gather intents on one node are sorted `(resource_node_id, gatherer_entity_id, gather_intent_id)` and allocated sequentially: `actual_amount = min(gather_rate, cargo_remaining_capacity, node_remaining)`. ResourceGathered records ACTUAL amount. This prevents over-gather (node_remaining decremented before the next gatherer reads it). Deposit is an atomic Economy transaction (GathererCargo.amount -= deposited AND PlayerResourceLedger[type] += deposited commit together).
-
-### 4.12 Production population reservation
-
-`PopulationState{used, reserved, capacity}`. Enqueue atomic transaction (4.1 production_command_handler): validate `used + reserved + unit_population_cost <= capacity`, then deduct resources + `reserved += unit_population_cost` + append queue item (all-or-nothing). Spawn success: `reserved -= cost; used += cost`. Cancel: `reserved -= cost` + refund resources (ratio defined below). Edge cases to define in implementation:
-- **Cancel refund ratio**: v1 = full refund (cancel anytime before spawn).
-- **Building destroyed with queued items**: full refund of all queue items + release reserved population.
-- **Spawn point blocked**: item stays ReadyToSpawn, retry next tick (no UnitProduced emitted); define `max_spawn_retries` -> refund + TaskFailed if exhausted.
-- **Population capacity drops during training** (e.g. house destroyed): if `used + reserved + ongoing > new_capacity`, the lowest-priority queue items are cancelled + refunded (define deterministic selection: oldest producer_id first).
-
-### 4.13 Spawn placement failure and retry
-
-Phase 11 DeferredEntityCommit attempts spawn commit for each ReadyToSpawn item in `(reserved_entity_id)` order. Success -> create entity, reserved->used, remove queue item, enqueue EntitySpawned+UnitProduced (scheduled_tick=T+1). Failure (spawn point blocked by unit/terrain) -> item stays ReadyToSpawn, NO UnitProduced emitted, retry deterministic spawn placement next tick. After `max_spawn_retries`, refund + TaskFailed (production item fails). Deterministic spawn-point selection (not container order): rotate around the building's rally/exit point by a fixed offset.
-
-### 4.14 RawInputBuffer and simulation ingress thread boundary
-
-Player input arrives on the render/input thread (platform event loop), OUTSIDE the DeterministicSimulationLoop. `RawInputBuffer` / `PlayerCommandSource` is the thread boundary: input is pushed from the input thread and snapshotted in Phase 1. The simulation NEVER reads wall-clock input timestamps; once real input is assigned to tick T (drained in Phase 1), T's commands are written to the command log. Thread safety: RawInputBuffer is a single-producer (input thread) / single-consumer (sim Phase 1) queue with a snapshot copy. AI and Scenario issue directly in Phase 10 (same thread as sim), so no thread boundary for them.
-
-### 4.15 Activity-driven vs direct-system command classification
-
-| Command | Routing | Rationale |
-|---|---|---|
-| Move, Attack, Gather, Build | Activity (SubmitXRequest -> WaitEvent) | entity-level behavior with phases (move-then-act) |
-| Train, Research, SetRallyPoint | direct system-owned queue (Phase 2 handler) | continuous system state, no per-entity control flow |
-| StopProduction, CancelProduction | operates ProductionQueue (Phase 2) | queue mutation |
-| Stop, Idle | Activity interrupt (CommandPriority vs ActivityInterruptPolicy) | cancels current activity |
-| Scenario world effect (Spawn/Diplomacy/Reveal/Victory/Objective) | ScenarioEffectPipeline | non-unit, but still validation/typed/deferred/replay |
-| System (death/despawn internal) | SystemCritical, non-rejectable | internal flow |
-
-### 4.16 Replay divergence tests per vertical slice
-
-Each vertical slice has a dedicated replay divergence test (beyond S7 generic):
-
-| Slice | Replay test | Divergence assertion |
-|---|---|---|
-| Move | record MoveCommand log, replay | identical Position.current at every tick; identical PathReady order; identical movement_generation sequence |
-| Attack | record AttackCommand log, replay | identical DamageApplied sequence (amounts + order); identical EntityDied timing; identical AttackCycleState transitions |
-| Gather | record GatherCommand log, replay | identical ResourceGathered ACTUAL amounts; identical node_remaining depletion sequence; identical PlayerResourceLedger at every tick |
-| Production | record TrainCommand log, replay | identical entity_id allocation; identical spawn commit timing; identical PopulationState transitions; identical refund events |
-| Interrupt/edge | record mixed log with target-death-mid-gather, repath, cancel | identical ActivityTaskResult sequence; identical MovementCancelled vs stale-PathReady-drop distinction; identical TaskInterrupted{TargetInvalidated} timing |
-
-All replay tests assert: identical state checksum at every tick (Phase 12), rejected commands reproduced, divergence audit (CommandResultLog comparison) passes.
-
-### 4.17 Acceptance criteria (from the brief, mapped)
-
-- Activity Graph and gameplay rules have no responsibility confusion (RunSystem only orchestrates; phase systems compute; Activity does not wait per-AttackPoint). - 1.2, 2.2, 2.11, 3.2
-- Damage does not depend on a generic attribute-change listener (`on_attribute_change` removed; DamageSystem/DeathSystem explicit 7.1-7.6). - 2.12, 3.2, 4.2
-- Player, AI, Scenario use the same command pipeline (Scenario non-unit effects use ScenarioEffectPipeline but still validation/typed/deferred/replay). - 1.2, 2.4, 3.5, 4.15
-- New behavior does not require editing a growing central switch (two switches deleted; registries + variants + PhaseWorkQueue). - 4.2
-- Interrupt, target-death, path-failure, insufficient-resources, production-cancel paths have defined results (ActivityTaskResult variant; stale PathReady dropped not MovementCancelled; spawn-point retry). - 2.3, 3.x, 4.4 S8, 4.13
-- Identical command log + identical initial state -> identical checksum (per-tick; work queues in-checksum serialized). - 4.4 S7, 4.8, 4.16
-- Architecture extends to projectiles, tech, garrison, formations, diplomacy, more missions without core rewrite. - 4.6
+- Activity Graph vs gameplay rules: no confusion (RunSystem only orchestrates; phase systems compute; Activity not wait per-AttackPoint). - 1.2, 2.2, 2.11, 3.2
+- Damage no generic attribute-change listener (removed; 7.1-7.6 sequential working HP). - 2.12, 3.2, 4.2
+- Player/AI/Scenario same command pipeline (Scenario non-unit effects via ScenarioEffectPipeline, still validation/typed/deferred/replay). - 1.2, 2.4, 3.6, 4.15
+- New behavior needs no growing central switch (two deleted; registries + variants + PhaseWorkQueue). - 4.2
+- Interrupt/target-death/path-failure/insufficient-resources/production-cancel/spawn-blocked paths have LAYERED defined results. - 2.3, 3.x, 4.4.2
+- Identical InitialSimulationManifest + command/effect stream -> identical per-tick checksum. - 4.4 S8, 4.8, 2.17
+- Extends to projectiles/tech/garrison/formations/diplomacy/more missions without core rewrite. - 4.6
+- 14 phases, no Uninterruptible term, no circular id, ScenarioEffect full T+1 timing, work queue vs persistent store separated, spawn id allocated Phase 11 post-sort, MoveIntoRange correct squared formula, Damage sequential working HP, Build full slice + gate, authoritative tests no sync pathfinder fallback, RuntimeMode mutually exclusive, Replay uses InitialSimulationManifest, no dual authoritative state, stable registry/RNG/schema/scheduler ids+hashes. - throughout
