@@ -16,14 +16,29 @@ namespace openage::engine {
 Engine::Engine(mode mode,
                const util::Path &root_dir,
                const std::vector<std::string> &mods,
-               const renderer::window_settings &window_settings) :
+               const renderer::window_settings &window_settings,
+               bool tutorial,
+               const std::string &tutorial_player_setup_fqon,
+               const std::string &tutorial_scenario_fqon) :
 	running{true},
 	run_mode{mode},
 	root_dir{root_dir},
+	tutorial{tutorial},
+	tutorial_player_setup_fqon{tutorial ? tutorial_player_setup_fqon : std::string{}},
+	tutorial_scenario_fqon{tutorial ? tutorial_scenario_fqon : std::string{}},
 	threads{} {
 	log::log(INFO
 	         << "launching engine with root directory"
 	         << root_dir);
+
+	if (this->tutorial) {
+		log::log(INFO
+		         << "tutorial mode enabled; player setup FQON = '"
+		         << this->tutorial_player_setup_fqon
+		         << "', scenario FQON = '"
+		         << this->tutorial_scenario_fqon
+		         << "'");
+	}
 
 	// read and apply the configuration files
 	this->cvar_manager = std::make_shared<cvar::CVarManager>(this->root_dir["cfg"]);
@@ -35,7 +50,9 @@ Engine::Engine(mode mode,
 	// game simulation
 	this->simulation = std::make_shared<gamestate::GameSimulation>(this->root_dir,
 	                                                               this->cvar_manager,
-	                                                               this->time_loop);
+	                                                               this->time_loop,
+	                                                               this->tutorial_player_setup_fqon,
+	                                                               this->tutorial_scenario_fqon);
 	this->simulation->set_modpacks(mods);
 
 	// presenter (optional)

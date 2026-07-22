@@ -53,7 +53,13 @@ int run_game(const main_arguments &args) {
 	win_settings.mode = wmode;
 	win_settings.debug = args.gl_debug;
 
-	openage::engine::Engine engine{run_mode, args.root_path, args.mods, win_settings};
+	openage::engine::Engine engine{run_mode,
+	                               args.root_path,
+	                               args.mods,
+	                               win_settings,
+	                               args.tutorial,
+	                               args.tutorial_player_setup_fqon,
+	                               args.tutorial_scenario_fqon};
 
 	engine.loop();
 

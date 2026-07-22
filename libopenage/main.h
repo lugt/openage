@@ -43,6 +43,9 @@ struct window_arguments {
  *     Path root_path
  *     bool gl_debug
  *     bool headless
+ *     bool tutorial
+ *     string tutorial_player_setup_fqon
+ *     string tutorial_scenario_fqon
  *     vector[string] mods
  *     window_arguments window_args
  */
@@ -50,6 +53,9 @@ struct main_arguments {
 	util::Path root_path;
 	bool gl_debug;
 	bool headless;
+	bool tutorial;
+	std::string tutorial_player_setup_fqon;
+	std::string tutorial_scenario_fqon;
 	std::vector<std::string> mods;
 	window_arguments window_args;
 };

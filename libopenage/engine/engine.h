@@ -74,11 +74,27 @@ public:
 	 * @param root_dir openage root directory.
 	 * @param mods The mods to load.
 	 * @param window_settings The settings to customize the display window (e.g. size, display mode, vsync).
+	 * @param tutorial When true, the engine launches in tutorial mode: a
+	 *                 tutorial PlayerSetup FQON is forwarded to the
+	 *                 simulation so a single tutorial slot is created.
+	 *                 Empty FQON strings disable the tutorial overlay even
+	 *                 when this is true (allows forcing a debug/observer
+	 *                 slot via CLI).
+	 * @param tutorial_player_setup_fqon PlayerSetup FQON the tutorial
+	 *                                    player slot should use. Empty
+	 *                                    means observer/debug slot.
+	 * @param tutorial_scenario_fqon Scenario FQON to load when the
+	 *                               simulation starts. Empty falls back to
+	 *                               the simulation's default procedural
+	 *                               terrain.
 	 */
 	Engine(mode mode,
 	       const util::Path &root_dir,
 	       const std::vector<std::string> &mods,
-	       const renderer::window_settings &window_settings = {});
+	       const renderer::window_settings &window_settings = {},
+	       bool tutorial = false,
+	       const std::string &tutorial_player_setup_fqon = "",
+	       const std::string &tutorial_scenario_fqon = "");
 
 	// engine should not be copied or moved
 	Engine(const Engine &) = delete;
@@ -121,6 +137,25 @@ private:
 	 * openage root directory.
 	 */
 	util::Path root_dir;
+
+	/**
+	 * Whether the engine was started in tutorial mode.
+	 *
+	 * Propagated to the GameSimulation at construction so the simulation
+	 * can choose the tutorial PlayerSetup / scenario instead of the
+	 * hardcoded empty / debug defaults.
+	 */
+	bool tutorial;
+
+	/**
+	 * PlayerSetup FQON for the tutorial player slot. Empty = observer/debug.
+	 */
+	std::string tutorial_player_setup_fqon;
+
+	/**
+	 * Scenario FQON to load for the tutorial. Empty = default procedural terrain.
+	 */
+	std::string tutorial_scenario_fqon;
 
 	/**
 	 * The threads used by the engine.

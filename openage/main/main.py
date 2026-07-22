@@ -25,6 +25,35 @@ def init_subparser(cli: ArgumentParser):
         help="run without displaying graphics")
 
     cli.add_argument(
+        "--tutorial", action='store_true', dest='tutorial',
+        help="launch in tutorial mode: a tutorial PlayerSetup FQON and "
+             "scenario FQON are forwarded to the engine so the C++ "
+             "simulation can wire up the tutorial slot instead of the "
+             "hardcoded empty / debug defaults.")
+
+    cli.add_argument(
+        "--tutorial-player-setup-fqon", type=str,
+        default="engine.util.setup.tutorial_setup.TutorialPlayerSetup",
+        dest='tutorial_player_setup_fqon',
+        help="FQON of the nyan PlayerSetup used for the tutorial slot. "
+             "Defaults to the engine modpack's TutorialPlayerSetup so "
+             "`--tutorial` alone is enough to run the campaign tutorial. "
+             "Pass an empty string to keep the slot as a debug/observer "
+             "with no civ patches or starting resources. Combined with "
+             "--tutorial; ignored otherwise.")
+
+    cli.add_argument(
+        "--tutorial-scenario-fqon", type=str,
+        default="engine.util.scenario.mission_1.Mission1",
+        dest='tutorial_scenario_fqon',
+        help="FQON of the nyan Scenario loaded by the simulation on "
+             "start. Defaults to the engine modpack's Mission1 (16x16 "
+             "grass map, 1 villager + 1 town center; teaches gather wood). "
+             "Pass an empty string to keep the simulation's hardcoded "
+             "procedural terrain. Combined with --tutorial; ignored "
+             "otherwise.")
+
+    cli.add_argument(
         "--modpacks", nargs="+", type=str,
         help="list of modpacks to load")
 
@@ -103,15 +132,20 @@ def main(args, error):
     if args.show_prompts and wanna_convert():
         convert_assets(asset_path, args)
 
-    available_modpacks = enumerate_modpacks(asset_path / "converted", exclude={"engine"})
-    if len(available_modpacks) == 0:
+    available_modpacks = enumerate_modpacks(asset_path / "converted")
+    playable_modpacks = {
+        name: version
+        for name, version in available_modpacks.items()
+        if name != "engine"
+    }
+    if len(playable_modpacks) == 0:
         info("No modpacks have been found")
         if not args.modpacks:
             info("Starting bare 'engine' mode")
             args.modpacks = ["engine"]
 
     # check if the converted modpacks are up to date
-    check_updates(available_modpacks, args.cfg_dir / "converter" / "games")
+    check_updates(playable_modpacks, args.cfg_dir / "converter" / "games")
 
     # pass modpacks to engine
     if args.modpacks:
@@ -124,12 +158,12 @@ def main(args, error):
         args.modpacks = [modpack.encode("utf-8") for modpack in args.modpacks]
 
     elif args.show_prompts:
-        args.modpacks = [query_modpack(list(available_modpacks.keys())).encode("utf-8")]
+        args.modpacks = [query_modpack(list(playable_modpacks.keys())).encode("utf-8")]
 
     else:
         # prompts disabled and no modpacks specified: select the first
         # available modpack automatically (or fall back to bare engine mode)
-        proposals = sorted(available_modpacks.keys())
+        proposals = sorted(playable_modpacks.keys())
         if proposals:
             info("No modpacks specified; selecting %s", proposals[0])
             args.modpacks = [proposals[0].encode("utf-8")]
@@ -144,6 +178,18 @@ def main(args, error):
         "vsync": args.vsync,
         "window_mode": args.window_mode,
     }
+
+    # Normalise tutorial CLI args. ``args.tutorial`` is the bool flag;
+    # the two FQON strings are always present (defaulted to the engine
+    # modpack's TutorialPlayerSetup / Tutorial1 above) and the C++ side
+    # decides whether to use them based on the bool. Pass --tutorial
+    # alone to use the bundled tutorial, or override the FQONs to swap
+    # to a different scenario.
+    args.tutorial = bool(getattr(args, "tutorial", False))
+    args.tutorial_player_setup_fqon = str(
+        getattr(args, "tutorial_player_setup_fqon", "") or "")
+    args.tutorial_scenario_fqon = str(
+        getattr(args, "tutorial_scenario_fqon", "") or "")
 
     # start the game, continue in main_cpp.pyx!
     return run_game(args, root)
