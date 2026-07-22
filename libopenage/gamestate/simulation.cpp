@@ -17,12 +17,15 @@
 // TODO
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
+#include "gamestate/tutorial/trigger.h"
 
 namespace openage::gamestate {
 
 GameSimulation::GameSimulation(const util::Path &root_dir,
                                const std::shared_ptr<cvar::CVarManager> &cvar_manager,
-                               const std::shared_ptr<openage::time::TimeLoop> time_loop) :
+                               const std::shared_ptr<openage::time::TimeLoop> time_loop,
+                               const std::string &tutorial_player_setup_fqon,
+                               const std::string &tutorial_scenario_fqon) :
 	running{false},
 	root_dir{root_dir},
 	cvar_manager{cvar_manager},
@@ -32,7 +35,9 @@ GameSimulation::GameSimulation(const util::Path &root_dir,
 	terrain_factory{std::make_shared<gamestate::TerrainFactory>()},
 	mod_manager{std::make_shared<assets::ModManager>(this->root_dir / "assets" / "converted")},
 	spawner{std::make_shared<gamestate::event::Spawner>(this->event_loop)},
-	commander{std::make_shared<gamestate::event::Commander>(this->event_loop)} {
+	commander{std::make_shared<gamestate::event::Commander>(this->event_loop)},
+	tutorial_player_setup_fqon{tutorial_player_setup_fqon},
+	tutorial_scenario_fqon{tutorial_scenario_fqon} {
 	auto mods = mod_manager->enumerate_modpacks(root_dir / "assets" / "converted");
 	for (const auto &mod : mods) {
 		this->mod_manager->register_modpack(mod);
@@ -47,8 +52,63 @@ void GameSimulation::run() {
 	while (this->running) {
 		time::time_t current_time = this->time_loop->get_clock()->get_time();
 		this->event_loop->reach_time(current_time, this->game->get_state());
+
+		// Tick the tutorial trigger once per simulation step. The
+		// trigger polls its current step's predicate and advances when
+		// the player has completed it. When the trigger finishes, log
+		// the victory so a HUD layer (Phase D) can later surface it.
+		if (this->tutorial_trigger) {
+			this->tutorial_trigger->on_update(current_time);
+			if (this->tutorial_trigger->is_finished()) {
+				// Mission complete - the trigger stops advancing past
+				// this point. Phase D will hook into is_finished() to
+				// render the victory banner.
+				static bool logged_completion = false;
+				if (!logged_completion) {
+					log::log(MSG(info) << "Tutorial mission completed!");
+					logged_completion = true;
+				}
+			}
+		}
 	}
 	log::log(MSG(info) << "Game simulation loop exited");
+}
+
+std::shared_ptr<TutorialTrigger> GameSimulation::create_tutorial_trigger() {
+	const auto &state = this->game->get_state();
+
+	// Suffix-match the scenario FQON against the 5 known mission names.
+	// This way the simulation doesn't need a separate "mission id" CLI
+	// flag - the scenario's name encodes the mission.
+	auto pick = [&](const std::string &suffix, auto factory) -> std::shared_ptr<TutorialTrigger> {
+		if (this->tutorial_scenario_fqon.find(suffix) != std::string::npos) {
+			return factory(state);
+		}
+		return nullptr;
+	};
+
+	if (auto t = pick(".mission_1.Mission1", &create_mission_1_trigger)) {
+		return t;
+	}
+	if (auto t = pick(".mission_2.Mission2", &create_mission_2_trigger)) {
+		return t;
+	}
+	if (auto t = pick(".mission_3.Mission3", &create_mission_3_trigger)) {
+		return t;
+	}
+	if (auto t = pick(".mission_4.Mission4", &create_mission_4_trigger)) {
+		return t;
+	}
+	if (auto t = pick(".mission_5.Mission5", &create_mission_5_trigger)) {
+		return t;
+	}
+
+	// Default: Mission 1. Lets the user run `--tutorial` with whatever
+	// scenario FQON they have and still get a working (if simplistic)
+	// trigger, instead of a silent no-op.
+	log::log(MSG(info) << "create_tutorial_trigger: no mission suffix matched; "
+	                   << "falling back to Mission 1");
+	return create_mission_1_trigger(state);
 }
 
 
@@ -57,17 +117,36 @@ void GameSimulation::start() {
 
 	this->init_event_handlers();
 
-	// TODO: wait for presenter to initialize before starting?
-	// TODO(a5-followup): replace the empty vector with the player's chosen
-	// setup FQON when the menu system (out of tutorial scope) exists.
+	// Build the initial player list. When tutorial mode provides a
+	// PlayerSetup FQON, use it as the slot's civ; otherwise fall back to
+	// the debug/observer slot (empty FQON → no civ patches, no starting
+	// resources).
+	nyan::fqon_t player_setup_fqon = this->tutorial_player_setup_fqon.empty()
+		? nyan::fqon_t{""}
+		: nyan::fqon_t{this->tutorial_player_setup_fqon};
 	std::vector<gamestate::PlayerDescriptor> players{
-		gamestate::PlayerDescriptor{""},
+		gamestate::PlayerDescriptor{player_setup_fqon},
 	};
+
+	// Scenario FQON: empty falls back to the default procedural terrain.
+	// B3 will thread this into the actual Game::load_scenario() call.
+	nyan::fqon_t scenario_fqon = this->tutorial_scenario_fqon.empty()
+		? nyan::fqon_t{""}
+		: nyan::fqon_t{this->tutorial_scenario_fqon};
+
 	this->game = std::make_shared<gamestate::Game>(event_loop,
 	                                               this->mod_manager,
 	                                               this->entity_factory,
 	                                               this->terrain_factory,
-	                                               players);
+	                                               players,
+	                                               scenario_fqon);
+
+	// Build the tutorial trigger once the Game (and therefore GameState)
+	// exists. The trigger stays null in non-tutorial runs.
+	if (not this->tutorial_player_setup_fqon.empty() or
+	    not this->tutorial_scenario_fqon.empty()) {
+		this->tutorial_trigger = this->create_tutorial_trigger();
+	}
 
 	this->running = true;
 

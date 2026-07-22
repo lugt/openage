@@ -33,6 +33,8 @@ class EntityFactory;
 class Game;
 class TerrainFactory;
 
+class TutorialTrigger;
+
 namespace event {
 class Commander;
 class Spawner;
@@ -51,10 +53,16 @@ public:
 	 * @param root_dir openage root directory.
 	 * @param cvar_manager Environment variable manager.
 	 * @param time_loop Time management loop.
+	 * @param tutorial_player_setup_fqon PlayerSetup FQON the tutorial slot
+	 *                                   should use (empty = observer/debug).
+	 * @param tutorial_scenario_fqon Scenario FQON to load at start (empty
+	 *                               = default procedural terrain).
 	 */
 	GameSimulation(const util::Path &root_dir,
 	               const std::shared_ptr<cvar::CVarManager> &cvar_manager,
-	               const std::shared_ptr<openage::time::TimeLoop> time_loop);
+	               const std::shared_ptr<openage::time::TimeLoop> time_loop,
+	               const std::string &tutorial_player_setup_fqon = "",
+	               const std::string &tutorial_scenario_fqon = "");
 
 	// game simulation should not be copied or moved
 	GameSimulation(const GameSimulation &copy) = delete;
@@ -195,6 +203,36 @@ private:
 
 	// TODO: The game run by the engine
 	std::shared_ptr<gamestate::Game> game;
+
+	/**
+	 * PlayerSetup FQON for the tutorial slot. Empty means the simulation
+	 * starts without any civ patches / starting resources (debug slot).
+	 *
+	 * Populated from the CLI / Engine; consumed by start() when
+	 * constructing the initial PlayerDescriptor.
+	 */
+	std::string tutorial_player_setup_fqon;
+
+	/**
+	 * Scenario FQON for the tutorial. Empty means the simulation falls back
+	 * to the default procedural terrain (B3 will plumb this into Game).
+	 */
+	std::string tutorial_scenario_fqon;
+
+	/**
+	 * TutorialTrigger for the active tutorial mission. Constructed in
+	 * start() by matching tutorial_scenario_fqon against the known
+	 * mission FQONs (Mission1..Mission5). Ticked from run() once per
+	 * simulation step.
+	 */
+	std::shared_ptr<TutorialTrigger> tutorial_trigger;
+
+	/**
+	 * Pick the right mission trigger factory by suffix-matching the
+	 * scenario FQON against the 5 known mission names. Falls back to
+	 * Mission 1 if no match is found.
+	 */
+	std::shared_ptr<TutorialTrigger> create_tutorial_trigger();
 
 	/**
 	 * Mutex for thread-safe access to the simulation.

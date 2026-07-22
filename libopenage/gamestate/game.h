@@ -6,9 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace nyan {
-class Database;
-}
+#include <nyan/nyan.h>
 
 namespace openage {
 
@@ -53,15 +51,23 @@ public:
 	 * @param event_loop Event simulation loop for the gamestate.
 	 * @param mod_manager Mod manager.
 	 * @param entity_factory Factory for creating entities. Used for creating the players.
+	 * @param terrain_factory Factory for creating terrain chunks.
 	 * @param players Per-slot configuration; one Player is created per
 	 *                entry in the order given. Empty means no players are
 	 *                added (debug modes only).
+	 * @param scenario_fqon Optional FQON of a nyan Scenario object. When
+	 *                      non-empty, the terrain and initial entities
+	 *                      are loaded from the scenario via load_scenario().
+	 *                      When empty, falls back to the hardcoded
+	 *                      generate_terrain() layout (debug / no-scenario
+	 *                      paths).
 	 */
 	Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 	     const std::shared_ptr<assets::ModManager> &mod_manager,
 	     const std::shared_ptr<EntityFactory> &entity_factory,
 	     const std::shared_ptr<TerrainFactory> &terrain_factory,
-	     const std::vector<PlayerDescriptor> &players);
+	     const std::vector<PlayerDescriptor> &players,
+	     const nyan::fqon_t &scenario_fqon = "");
 	~Game() = default;
 
 	/**
@@ -77,6 +83,24 @@ public:
 	 *                       communication.
 	 */
 	void attach_renderer(const std::shared_ptr<renderer::RenderFactory> &render_factory);
+
+	/**
+	 * Load a scenario by FQON.
+	 *
+	 * Resolves the Scenario nyan object, builds a Terrain from its chunk
+	 * layouts, creates a Map for the game state, and spawns any initial
+	 * entities declared by the scenario.
+	 *
+	 * Used both by the Game constructor when a scenario_fqon is supplied
+	 * and can be invoked separately to swap scenarios on the fly (the
+	 * map is replaced wholesale; existing terrain/entities are not
+	 * preserved).
+	 *
+	 * @param terrain_factory Factory for creating terrain chunks.
+	 * @param scenario_fqon FQON of the Scenario nyan object to load.
+	 */
+	void load_scenario(const std::shared_ptr<TerrainFactory> &terrain_factory,
+	                   const nyan::fqon_t &scenario_fqon);
 
 private:
 	/**
@@ -109,6 +133,17 @@ private:
 	 * @param terrain_factory Factory for creating terrain objects.
 	 */
 	void generate_terrain(const std::shared_ptr<TerrainFactory> &terrain_factory);
+
+	/**
+	 * Event loop passed into Game. Held to give scenario-spawned entities
+	 * the same loop as entities created via the EntityFactory.
+	 */
+	std::shared_ptr<openage::event::EventLoop> event_loop;
+
+	/**
+	 * Factory used to spawn initial entities when loading a scenario.
+	 */
+	std::shared_ptr<EntityFactory> entity_factory;
 
 	/**
 	 * Nyan game data database.

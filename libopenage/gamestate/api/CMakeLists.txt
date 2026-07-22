@@ -6,6 +6,7 @@ add_sources(libopenage
     patch.cpp
     player_setup.cpp
     property.cpp
+    scenario.cpp
     sound.cpp
     terrain.cpp
     types.cpp

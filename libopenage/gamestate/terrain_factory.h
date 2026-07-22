@@ -4,6 +4,9 @@
 
 #include <memory>
 #include <shared_mutex>
+#include <vector>
+
+#include <nyan/nyan.h>
 
 #include "coord/tile.h"
 #include "util/vector.h"
@@ -50,6 +53,28 @@ public:
 	std::shared_ptr<TerrainChunk> add_chunk(const std::shared_ptr<GameState> &gstate,
 	                                        const util::Vector2s size,
 	                                        const coord::tile_delta offset);
+
+	/**
+	 * Create a new terrain chunk from a list of tile FQONs.
+	 *
+	 * One FQON per tile, in row-major order. The number of entries must
+	 * equal \p size[0] * \p size[1]; otherwise an Error is thrown.
+	 * Each FQON resolves to a nyan Terrain object which provides the
+	 * tile's graphic path via APITerrain.
+	 *
+	 * @param gstate Game state for nyan database view access.
+	 * @param size Size of the chunk (width x height in tiles).
+	 * @param offset Offset of the chunk relative to the terrain origin.
+	 * @param tile_fqons FQONs of the Terrain nyan object for each tile
+	 *                   (row-major order, length == size[0] * size[1]).
+	 *
+	 * @return New terrain chunk populated with the given tiles.
+	 */
+	std::shared_ptr<TerrainChunk> add_chunk_with_tiles(
+		const std::shared_ptr<GameState> &gstate,
+		const util::Vector2s size,
+		const coord::tile_delta offset,
+		const std::vector<nyan::fqon_t> &tile_fqons);
 
 	// TODO: Add tiles
 	// std::shared_ptr<TerrainTile> add_tile(const std::shared_ptr<openage::event::EventLoop> &loop,

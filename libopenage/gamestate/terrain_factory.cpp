@@ -259,6 +259,85 @@ std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk(const std::shared_ptr<Ga
 	return chunk;
 }
 
+std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk_with_tiles(
+	const std::shared_ptr<GameState> &gstate,
+	const util::Vector2s size,
+	const coord::tile_delta offset,
+	const std::vector<nyan::fqon_t> &tile_fqons) {
+	// Ensure test_terrains list is populated so we can fall back when a tile
+	// FQON is missing or doesn't resolve to a terrain. Mirrors add_chunk().
+	if (test_terrains.empty()) {
+		build_test_terrains(gstate);
+	}
+
+	const size_t expected = size[0] * size[1];
+	if (tile_fqons.size() != expected) {
+		throw Error(MSG(err) << "add_chunk_with_tiles: tile_fqons count "
+		                     << tile_fqons.size()
+		                     << " does not match chunk size "
+		                     << size[0] << "x" << size[1]
+		                     << " (" << expected << " tiles expected)");
+	}
+
+	auto db_view = gstate->get_db_view();
+
+	std::vector<TerrainTile> tiles{};
+	tiles.reserve(expected);
+
+	for (const auto &tile_fqon : tile_fqons) {
+		nyan::Object terrain_obj;
+		std::string terrain_info_path;
+		bool resolved = false;
+
+		// Try to resolve the FQON through the nyan database first. Missing
+		// FQONs (e.g. placeholder in a WIP scenario) fall back to a default
+		// test terrain so the chunk still renders something.
+		if (not tile_fqon.empty()) {
+			try {
+				terrain_obj = db_view->get_object(tile_fqon);
+				if (api::APITerrain::is_terrain(terrain_obj)) {
+					if (has_graphics) {
+						terrain_info_path = api::APITerrain::get_terrain_path(terrain_obj);
+					}
+					resolved = true;
+				}
+			}
+			catch (const std::exception &) {
+				// FQON didn't resolve; fall through to default.
+			}
+		}
+
+		if (not resolved) {
+			// Fallback to first available test terrain (matches behaviour of
+			// the legacy add_chunk when no nyan tile data is available).
+			if (test_terrains.empty()) {
+				throw Error(MSG(err) << "add_chunk_with_tiles: no fallback terrain available for tile "
+				                     << tile_fqon);
+			}
+			terrain_obj = db_view->get_object(test_terrains.front());
+			if (has_graphics) {
+				terrain_info_path = api::APITerrain::get_terrain_path(terrain_obj);
+			}
+			else {
+				terrain_info_path = test_terrain_paths.front();
+			}
+		}
+
+		tiles.push_back({terrain_obj, terrain_info_path, terrain_elevation_t::zero()});
+	}
+
+	auto chunk = std::make_shared<TerrainChunk>(size, offset, std::move(tiles));
+
+	if (this->render_factory) {
+		auto render_entity = this->render_factory->add_terrain_render_entity(size, offset);
+		chunk->set_render_entity(render_entity);
+
+		chunk->render_update(time::TIME_ZERO);
+	}
+
+	return chunk;
+}
+
 void TerrainFactory::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &render_factory) {
 	std::unique_lock lock{this->mutex};
 
