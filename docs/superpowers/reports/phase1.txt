@@ -1,0 +1,24 @@
+openage convert - Phase 1 memory budget test
+============================================================
+Generated: 2026-07-21 11:53:35
+Backend: lazy
+LRU built/live=256 cap=256
+
+Peak RSS:              458.8 MiB  (at <sampling>)
+P2 budget (<500 MiB):  PASS  (release gate)
+P3 budget (<300 MiB):  FAIL  (stretch)
+
+Stage RSS trajectory:
+  convert-metadata-start                         83.5 MiB
+  after metadata read (gamespec)                297.8 MiB
+  after nyan conversion                         458.8 MiB
+  after export of de2_base                      458.8 MiB
+  after all exports                             458.8 MiB
+
+Notes:
+  - Peak sampled every 0.25s via /proc/self/status VmRSS.
+  - Compare against legacy backend by unsetting OPENAGE_CONVERTER_BACKEND and rerunning without --memory-budget-test (legacy read phase OOMs on DE2).
+
+Reproduce:
+  OPENAGE_CONVERTER_BACKEND=lazy openage convert \
+      --memory-budget-test --source-dir <DAT> --output-dir <OUT> --no-media

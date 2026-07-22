@@ -20,6 +20,7 @@ from openage.convert.value_object.read.media.blendomatic import Blendomatic
 from openage.convert.value_object.read.media_types import MediaType
 from openage.log import dbg, info, get_loglevel
 from openage.util.strings import format_progress
+from openage.convert.tool.memprobe import snapshot
 
 if typing.TYPE_CHECKING:
     from argparse import Namespace
@@ -63,9 +64,13 @@ class MediaExporter:
         cache_info = {}
         if args.game_version.edition.media_cache:
             cache_info = load_media_cache(args.game_version.edition.media_cache)
+        snapshot(f"media-export:after-load-media-cache "
+                 f"requests={sum(len(v) for v in export_requests.values())}")
 
         for media_type in export_requests.keys():
             cur_export_requests = export_requests[media_type]
+            snapshot(f"media-export:before-type {media_type.name} "
+                     f"count={len(cur_export_requests)}")
 
             # Function for reading the source file data
             read_data_func = None
@@ -93,12 +98,24 @@ class MediaExporter:
                 info("-- Exporting graphics files...")
 
             elif media_type is MediaType.SOUNDS:
-                read_data_func = MediaExporter._get_sound_data
-                export_func = _export_sound
-                itargs = tuple()
-                kwargs["debugdir"] = args.debugdir
-                kwargs["loglevel"] = args.debug_info
-                info("-- Exporting sound files...")
+                # DE2 Wwise: source_filename is a wem_id (decimal int as str),
+                # and the .wem bytes live inside a .pck under $OPENAGE_WWISE_PCK_DIR.
+                # We dispatch to the Wwise path when that env var is set,
+                # otherwise we fall back to the AoC loose-wav path.
+                if os.environ.get("OPENAGE_WWISE_PCK_DIR"):
+                    read_data_func = MediaExporter._get_wwise_data
+                    export_func = _export_wwise_sound
+                    kwargs["pck_dir"] = Path(os.environ["OPENAGE_WWISE_PCK_DIR"])
+                    kwargs["map_path"] = os.environ.get(
+                        "OPENAGE_WWISE_MAP_PATH", "/tmp/openage_wwise_mapping.json")
+                    info("-- Exporting Wwise sound files (DE2) "
+                         "from %s ...", kwargs["pck_dir"])
+                else:
+                    read_data_func = MediaExporter._get_sound_data
+                    export_func = _export_sound
+                    kwargs["debugdir"] = args.debugdir
+                    kwargs["loglevel"] = args.debug_info
+                    info("-- Exporting sound files (AoC loose .wav) ...")
 
             elif media_type is MediaType.TERRAIN:
                 read_data_func = MediaExporter._get_terrain_data
@@ -107,6 +124,7 @@ class MediaExporter:
                 info("-- Exporting terrain files...")
 
             if args.jobs == 1:
+                snapshot(f"media-export:start-singlethreaded {media_type.name}")
                 MediaExporter._export_singlethreaded(
                     cur_export_requests,
                     sourcedir,
@@ -119,6 +137,8 @@ class MediaExporter:
                 )
 
             else:
+                snapshot(f"media-export:start-multithreaded {media_type.name} "
+                         f"workers={args.jobs}")
                 MediaExporter._export_multithreaded(
                     cur_export_requests,
                     sourcedir,
@@ -131,6 +151,7 @@ class MediaExporter:
                     args.jobs,
                     args.dll_manager,
                 )
+                snapshot(f"media-export:end-multithreaded {media_type.name}")
 
         if args.debug_info > 5:
             cachedata = {}
@@ -250,8 +271,17 @@ class MediaExporter:
         """
         worker_count = job_count
         if worker_count is None:
-            # Small optimization that saves some time for small exports
-            worker_count = min(multiprocessing.cpu_count(), len(requests))
+            # Cap default workers at 4. Reason: on 14 GB RAM machines, default
+            # multiprocessing.cpu_count() (e.g. 24) forks enough workers that
+            # each loads large sprite atlases / .pck files into memory, OOM-
+            # killing workers and silently exiting 0 with partial output. Set
+            # OPENAGE_MEDIA_JOBS to override.
+            env_cap = os.environ.get("OPENAGE_MEDIA_JOBS")
+            if env_cap is not None and env_cap.isdigit():
+                default_cap = int(env_cap)
+            else:
+                default_cap = 4
+            worker_count = min(default_cap, multiprocessing.cpu_count(), len(requests))
 
         def error_callback(exception: Exception):
             """
@@ -690,6 +720,70 @@ def _export_sound(
     outqueue.put(request_id)
 
 
+# ---------------------------------------------------------------------------
+# Wwise (DE2) sound export
+# ---------------------------------------------------------------------------
+#
+# Source: .pck files (DIDX/DATA chunks) under $OPENAGE_WWISE_PCK_DIR.
+# Pipeline: .pck -> .wem bytes -> vgmstream-cli -> .wav -> ffmpeg/libopus -> .opus.
+#
+# source_filename on the MediaExportRequest is the wem_id as a decimal string
+# (e.g. "608798452"). We look it up via DIDX, decode through the Wwise module,
+# and write the final .opus to target_path.
+
+_wwise_buf_cache: dict = {}  # path -> bytes, module-level so workers share via fork
+
+
+def _get_wwise_data(
+    request: MediaExportRequest,
+    sourcedir: Path,
+    **kwargs
+) -> bytes | None:
+    """
+    Get the raw .wem bytes for a wem_id stored in a Wwise .pck soundbank.
+
+    The wem_id is encoded in ``request.source_filename`` as a decimal string.
+    """
+    pck_dir: Path = kwargs["pck_dir"]
+    try:
+        wem_id = int(request.source_filename)
+    except (TypeError, ValueError):
+        return None
+
+    # Lazy import to avoid a hard dep on the wwise tool module at import time.
+    from openage.convert.tool.wwise.extract import find_wem_bytes
+    # We share the buf_cache via a module-global so the workers (forked
+    # from the parent) all see the parent's already-read .pck buffers.
+    global _wwise_buf_cache
+    return find_wem_bytes(pck_dir, wem_id, buf_cache=_wwise_buf_cache)
+
+
+def _export_wwise_sound(
+    request_id: int,
+    wem_bytes: bytes,
+    outqueue: multiprocessing.Queue,
+    dll_manager: DllDirectoryManager,
+    source_filename: str,  # pylint: disable=unused-argument
+    target_path: Path,
+    **kwargs
+) -> None:
+    """
+    Convert a .wem (Wwise) byte buffer to .opus @ 96 kbps VBR and write to target_path.
+    """
+    if sys.platform == "win32" and dll_manager is not None:
+        dll_manager.add_directories()
+
+    from openage.convert.tool.wwise.extract import extract_wem_to_opus_bytes
+    opus_bytes = extract_wem_to_opus_bytes(wem_bytes)
+    if isinstance(opus_bytes, (str, int)):
+        raise RuntimeError(f"Wwise extract failed for {source_filename}: {opus_bytes}")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    with target_path.open("wb") as outfile:
+        outfile.write(opus_bytes)
+
+    outqueue.put(request_id)
+
+
 def _export_terrain(
     request_id: int,
     graphics_data: bytes,
@@ -826,6 +920,10 @@ def _export_texture(
     )
     metadata = (request_id, texture.get_metadata().copy())
     outqueue.put(metadata)
+    # texture held until function returns; let Pillow release the atlas
+    # buffer so peak stays bounded across thousands of requests
+    del texture
+    del image
 
 
 def _save_png(

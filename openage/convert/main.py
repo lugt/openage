@@ -7,6 +7,7 @@ Entry point for all of the asset conversion.
 from __future__ import annotations
 
 from datetime import datetime
+import os
 import typing
 
 from ..log import info, warn

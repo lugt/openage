@@ -9,6 +9,7 @@ import typing
 
 
 from ....log import info
+from ...tool.memprobe import snapshot
 from .data_exporter import DataExporter
 from .generate_manifest_hashes import generate_hashes
 from .media_exporter import MediaExporter
@@ -40,12 +41,14 @@ class ModpackExporter:
         modpack_dir = exportdir.joinpath(f"{modpack.info.packagename}")
 
         info("Starting export...")
+        snapshot("modpack-export:start")
         info("Dumping info file...")
 
         # Modpack info file
         DataExporter.export([modpack.info], modpack_dir)
 
         info("Dumping data files...")
+        snapshot("modpack-export:after-data-files")
 
         # Data files
         DataExporter.export(modpack.get_data_files(), modpack_dir)
@@ -55,9 +58,11 @@ class ModpackExporter:
             return
 
         info("Exporting media files...")
+        snapshot("modpack-export:before-media")
 
         # Media files
         MediaExporter.export(modpack.get_media_files(), sourcedir, modpack_dir, args)
+        snapshot("modpack-export:after-media")
 
         info("Dumping metadata files...")
 
@@ -67,3 +72,4 @@ class ModpackExporter:
         # Manifest file
         generate_hashes(modpack, modpack_dir)
         DataExporter.export([modpack.manifest], modpack_dir)
+        snapshot("modpack-export:done")

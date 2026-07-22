@@ -87,6 +87,13 @@ def _civ_units_by_civ(src: "GenieSource") -> dict[int, dict[int, "object"]]:
     by_civ: dict[int, dict[int, "object"]] = {}
     for (c, id0), h in src.civ_units.items():
         by_civ.setdefault(c, {})[id0] = h
+    # civs[0] (gaia) unit overrides live in src.units (the civ_idx==0 branch of
+    # GenieSource._maybe_record), NOT in src.civ_units. Without this, gaia's
+    # civ["units"] is empty, so the ability_subprocessor graphics-set loop skips
+    # gaia and its *WesternEuropean*AnimationWrapper game_setup patches are never
+    # produced -- the only nyan diff vs legacy (gaia.nyan game_setup = o{}).
+    for id0, h in src.units.items():
+        by_civ.setdefault(0, {})[id0] = h
     return by_civ
 
 
@@ -280,8 +287,13 @@ def extract_genie_graphics_lazy(src: "GenieSource",
             dl.evict()
             continue
         graphic = GenieGraphic(graphic_id, full_data_set, members=dl)
-        slp_id = dl["slp_id"].value if "slp_id" in dl else None
-        if str(slp_id) not in full_data_set.existing_graphics:
+        # Match legacy extract_genie_graphics (de2/processor.py): existing_graphics
+        # is a set of *filename stems* (register_media.get_existing_graphics does
+        # args.srcdir[GRAPHICS].iterdir() -> filepath.stem), NOT slp ids. Checking
+        # str(slp_id) (a numeric id) against that filename set never matches, so
+        # every graphic was marked exists=False -> CombinedSprite.get_graphics()
+        # filtered them all out -> 0 media export requests. Use filename instead.
+        if filename not in full_data_set.existing_graphics:
             graphic.exists = False
         dl.evict()
         full_data_set.genie_graphics[graphic.get_id()] = graphic

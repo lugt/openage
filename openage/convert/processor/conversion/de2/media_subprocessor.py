@@ -6,17 +6,43 @@ Convert media information to metadata definitions and export
 requests. Subroutine of the main DE2 processor.
 """
 from __future__ import annotations
+import json
+import os
 import typing
+from pathlib import Path
 
 from ....entity_object.export.formats.sprite_metadata import LayerMode
 from ....entity_object.export.media_export_request import MediaExportRequest
 from ....entity_object.export.metadata_export import SpriteMetadataExport
 from ....entity_object.export.metadata_export import TextureMetadataExport
+from openage.log import info
 from ....value_object.read.media_types import MediaType
 
 if typing.TYPE_CHECKING:
     from openage.convert.entity_object.conversion.aoc.genie_object_container\
         import GenieObjectContainer
+
+
+# Default location of the Wwise mapping JSON produced by
+# openage/convert/tool/wwise/mapping.py. Override via OPENAGE_WWISE_MAP_PATH.
+DEFAULT_WWISE_MAP_PATH = "/tmp/openage_wwise_mapping.json"
+
+
+def _load_wwise_mapping(path: str | None = None) -> dict[str, list[int]]:
+    """Load the {wwise_sound_id: [wem_id, ...]} JSON cache.
+
+    Returns {} if the file is missing or invalid (the caller should then
+    fall back to building it via openage.convert.tool.wwise.mapping.build_mapping).
+    """
+    path = path or os.environ.get("OPENAGE_WWISE_MAP_PATH", DEFAULT_WWISE_MAP_PATH)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data.get("wwise_sound_id_to_wem_ids", {})
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 class DE2MediaSubprocessor:
@@ -121,5 +147,61 @@ class DE2MediaSubprocessor:
     def create_sound_requests(full_data_set: GenieObjectContainer) -> None:
         """
         Create export requests for sounds referenced by CombinedSound objects.
+
+        DE2 audio is in Wwise .pck soundbanks (not AoC's loose .wav + .opus
+        path). The pipeline is:
+          1. Build {graphic.wwise_sound_id -> [wem_id, ...]} from the .pck HIRC
+             via openage.convert.tool.wwise.mapping (cached as JSON).
+          2. For every distinct (wwise_sound_id, wem_id) used by a graphic,
+             emit one MediaExportRequest with source_filename = str(wem_id).
+          3. media_exporter.py's Wwise branch reads .wem bytes via DIDX lookup,
+             decodes via vgmstream-cli, and encodes to .opus @ 96 kbps VBR.
+
+        The .opus file is placed in the shared sounds directory (same as AoC
+        so the engine's audio loader doesn't need a separate code path).
+        Naming: {wwise_sound_id}_{wem_id}.opus to allow multiple wem_ids per
+        event (e.g. random/sequence containers).
         """
-        # TODO: Sound exports (Wwise files)
+        # Load pre-built mapping. If absent, skip (the run-level driver is
+        # expected to call build_mapping before invoking convert()).
+        wwise_map = _load_wwise_mapping()
+        if not wwise_map:
+            info("DE2 sound exports: no wwise mapping at %s; "
+                 "run openage.convert.tool.wwise.mapping first to enable audio.",
+                 os.environ.get("OPENAGE_WWISE_MAP_PATH", DEFAULT_WWISE_MAP_PATH))
+            return
+
+        # Collect (wwise_sound_id, wem_id) pairs from graphics. The graphic's
+        # wwise_sound_id is the event_ulID in HIRC; the mapping resolves it
+        # to one or more wem_ids (random/sequence containers have several).
+        seen: set[tuple[int, int]] = set()
+        # DE2 doesn't have a flat `graphics` dict; graphics are reached via
+        # combined_sprites -> GenieGraphic -> graphic["wwise_sound_id"].
+        for sprite in full_data_set.combined_sprites.values():
+            for graphic in sprite.get_graphics():
+                try:
+                    wid = graphic["wwise_sound_id"].value
+                except (KeyError, AttributeError):
+                    continue
+                if wid == 0:
+                    continue
+                wem_ids = wwise_map.get(str(wid), [])
+                for wem_id in wem_ids:
+                    key = (wid, wem_id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    targetdir = "data/game_entity/shared/sounds/"
+                    source_filename = str(wem_id)
+                    target_filename = f"{wid}_{wem_id}.opus"
+                    export_request = MediaExportRequest(
+                        MediaType.SOUNDS,
+                        targetdir,
+                        source_filename,
+                        target_filename,
+                    )
+                    full_data_set.sound_exports.update(
+                        {f"{wid}_{wem_id}": export_request})
+
+        info("DE2 sound exports: %d requests from %d mapped wwise_sound_ids",
+            len(full_data_set.sound_exports), len({k[0] for k in seen}))

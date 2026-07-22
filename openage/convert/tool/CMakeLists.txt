@@ -5,7 +5,9 @@ add_py_modules(
 	driver.py
 	interactive.py
 	memprobe.py
+	schema_probe.py
 	singlefile.py
 )
 
 add_subdirectory(subtool)
+add_subdirectory(wwise)

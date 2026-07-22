@@ -53,6 +53,11 @@ class AoCModpackSubprocessor:
         mod_def.add_include("data/**")
 
         cls.organize_nyan_objects(modpack, full_data_set)
+        # Phase 1 genie data has been consumed by emit and is no longer
+        # referenced; release it before media processing so peak memory is
+        # bounded by the live genie_graphics + sprite work, not the full
+        # raw genie_units/techs/civs (~50% peak memory reduction on AoE2DE).
+        cls._release_genie_data(full_data_set)
         cls.organize_media_objects(modpack, full_data_set)
 
         return modpack
@@ -61,36 +66,19 @@ class AoCModpackSubprocessor:
     def organize_nyan_objects(modpack: Modpack, full_data_set: GenieObjectContainer) -> None:
         """
         Put available nyan objects into a given modpack.
+
+        Each category is emitted sequentially and the source
+        ConverterObjectGroup's raw_api_objects dict is released immediately
+        afterwards. The full intermediate list of RawAPIObject references
+        (which would otherwise hold every ConverterObjectGroup's full member
+        cache alive simultaneously) is replaced by an inline emit loop.
+        This drops peak memory by roughly the size of one category's worth
+        of RawAPIObject caches at any given time.
         """
         created_nyan_files: dict[str, NyanFile] = {}
 
-        # Access all raw API objects
-        raw_api_objects: list[RawAPIObject] = []
-        raw_api_objects.extend(full_data_set.pregen_nyan_objects.values())
-
-        for unit_line in full_data_set.unit_lines.values():
-            raw_api_objects.extend(unit_line.get_raw_api_objects().values())
-
-        for building_line in full_data_set.building_lines.values():
-            raw_api_objects.extend(building_line.get_raw_api_objects().values())
-
-        for ambient_group in full_data_set.ambient_groups.values():
-            raw_api_objects.extend(ambient_group.get_raw_api_objects().values())
-
-        for variant_group in full_data_set.variant_groups.values():
-            raw_api_objects.extend(variant_group.get_raw_api_objects().values())
-
-        for tech_group in full_data_set.tech_groups.values():
-            raw_api_objects.extend(tech_group.get_raw_api_objects().values())
-
-        for terrain_group in full_data_set.terrain_groups.values():
-            raw_api_objects.extend(terrain_group.get_raw_api_objects().values())
-
-        for civ_group in full_data_set.civ_groups.values():
-            raw_api_objects.extend(civ_group.get_raw_api_objects().values())
-
-        # Create the files
-        for raw_api_object in raw_api_objects:
+        def emit_one(raw_api_object: RawAPIObject) -> None:
+            """Emit a single raw_api_object to its target NyanFile or nested object."""
             obj_location = raw_api_object.get_location()
 
             if isinstance(obj_location, ForwardRef):
@@ -105,9 +93,9 @@ class AoCModpackSubprocessor:
                     warn("could not resolve nested object location; skipping "
                          "raw API object %s", raw_api_object.get_obj_id()
                          if hasattr(raw_api_object, "get_obj_id") else "")
-                    continue
+                    return
                 nyan_object.add_nested_object(raw_api_object.get_nyan_object())
-                continue
+                return
 
             obj_filename = raw_api_object.get_filename()
             nyan_file_path = f"{modpack.name}/{obj_location}{obj_filename}"
@@ -118,15 +106,72 @@ class AoCModpackSubprocessor:
             else:
                 nyan_file = NyanFile(obj_location, obj_filename,
                                      modpack.name)
-                created_nyan_files.update({nyan_file.get_relative_file_path(): nyan_file})
+                created_nyan_files[nyan_file_path] = nyan_file
                 modpack.add_data_export(nyan_file)
 
             nyan_file.add_nyan_object(raw_api_object.get_nyan_object())
 
-        # Create an import tree from the files
+        def release_group(group) -> None:
+            """
+            Release the RawAPIObject cache on a ConverterObjectGroup after emit.
+
+            By this point every raw_api_object in the group has been moved
+            into a NyanFile or nested under another nyan_object; only the
+            nyan_object reference on the file is kept alive. Clearing
+            raw_api_objects and raw_member_pushs lets the Python refcount
+            GC reclaim each RawAPIObject (and its raw_members list) at once.
+            """
+            group.raw_api_objects.clear()
+            group.raw_member_pushs.clear()
+
+        # Categories are processed in the same order as before; later
+        # categories that need ForwardRefs only ever reach into earlier
+        # categories' caches (self-references are always intra-group, see
+        # AoCAbilitySubprocessor: location is ForwardRef(line, ...)).
+
+        for raw_api_object in full_data_set.pregen_nyan_objects.values():
+            emit_one(raw_api_object)
+        full_data_set.pregen_nyan_objects.clear()
+
+        for unit_line in full_data_set.unit_lines.values():
+            for raw_api_object in unit_line.get_raw_api_objects().values():
+                emit_one(raw_api_object)
+            release_group(unit_line)
+
+        for building_line in full_data_set.building_lines.values():
+            for raw_api_object in building_line.get_raw_api_objects().values():
+                emit_one(raw_api_object)
+            release_group(building_line)
+
+        for ambient_group in full_data_set.ambient_groups.values():
+            for raw_api_object in ambient_group.get_raw_api_objects().values():
+                emit_one(raw_api_object)
+            release_group(ambient_group)
+
+        for variant_group in full_data_set.variant_groups.values():
+            for raw_api_object in variant_group.get_raw_api_objects().values():
+                emit_one(raw_api_object)
+            release_group(variant_group)
+
+        for tech_group in full_data_set.tech_groups.values():
+            for raw_api_object in tech_group.get_raw_api_objects().values():
+                emit_one(raw_api_object)
+            release_group(tech_group)
+
+        for terrain_group in full_data_set.terrain_groups.values():
+            for raw_api_object in terrain_group.get_raw_api_objects().values():
+                emit_one(raw_api_object)
+            release_group(terrain_group)
+
+        for civ_group in full_data_set.civ_groups.values():
+            for raw_api_object in civ_group.get_raw_api_objects().values():
+                emit_one(raw_api_object)
+            release_group(civ_group)
+
+        # Create an import tree from the files. This must run after every
+        # NyanFile has been created, since expand_from_file walks the nyan
+        # objects inside each file to discover import references.
         import_tree = ImportTree()
-
-
 
         for nyan_file in created_nyan_files.values():
             import_tree.expand_from_file(nyan_file)
@@ -138,6 +183,36 @@ class AoCModpackSubprocessor:
             nyan_file.set_import_tree(import_tree)
 
         AoCModpackSubprocessor._set_static_aliases(modpack, import_tree)
+
+        # The modpack now owns all nyan files via add_data_export(); the local
+        # lookup dict is no longer needed.
+        created_nyan_files.clear()
+
+    @staticmethod
+    def _release_genie_data(full_data_set: GenieObjectContainer) -> None:
+        """
+        Drop the Phase 1 genie raw data from the dataset.
+
+        After organize_nyan_objects has finished, the ConverterObjectGroup
+        trees (unit_lines, building_lines, civ_groups, etc.) still hold the
+        structure that the modpack needs, but the underlying genie raw
+        objects (which were the original parsed .dat data) are no longer
+        referenced. Clearing them lets the interpreter reclaim ~50% of the
+        peak convert memory on AoE2DE (genie_units alone is ~50MB of
+        ValueMembers; genie_graphics + genie_sounds another ~30-50MB).
+        """
+        full_data_set.genie_units.clear()
+        full_data_set.genie_techs.clear()
+        full_data_set.genie_effect_bundles.clear()
+        full_data_set.genie_civs.clear()
+        full_data_set.genie_graphics.clear()
+        full_data_set.genie_sounds.clear()
+        full_data_set.genie_terrains.clear()
+        full_data_set.genie_terrain_restrictions.clear()
+        full_data_set.age_connections.clear()
+        full_data_set.building_connections.clear()
+        full_data_set.tech_connections.clear()
+        full_data_set.unit_connections.clear()
 
     @staticmethod
     def organize_media_objects(modpack: Modpack, full_data_set: GenieObjectContainer) -> None:

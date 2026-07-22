@@ -725,8 +725,34 @@ class DE2NyanSubprocessor:
         sound_location = ForwardRef(terrain_group, terrain_name)
         sound_raw_api_object.set_location(sound_location)
 
-        # TODO: Sounds
+        # DE2 audio: resolve terrain.wwise_sound_id -> wem_ids via the Wwise
+        # mapping (built by openage.convert.tool.wwise.mapping) and create a
+        # CombinedSound per wem_id. The MediaExportRequest for each wem_id is
+        # produced by DE2MediaSubprocessor.create_sound_requests and the
+        # .opus file is written to data/game_entity/shared/sounds/ by
+        # media_exporter's Wwise branch.
         sounds = []
+        try:
+            wwise_id = terrain_group.terrain["wwise_sound_id"].value
+        except (KeyError, AttributeError):
+            wwise_id = 0
+        if wwise_id:
+            from .media_subprocessor import _load_wwise_mapping
+            from ....entity_object.conversion.combined_sound import CombinedSound
+            wem_ids = _load_wwise_mapping().get(str(wwise_id), [])
+            for wem_id in wem_ids:
+                if wem_id in dataset.combined_sounds:
+                    sound = dataset.combined_sounds[wem_id]
+                else:
+                    sound = CombinedSound(
+                        head_sound_id=wwise_id,
+                        file_id=wem_id,
+                        filename=f"wwise_{wwise_id}_{wem_id}",
+                        full_data_set=dataset,
+                    )
+                    dataset.combined_sounds.update({wem_id: sound})
+                sound.add_reference(sound_raw_api_object)
+                sounds.append(sound)
 
         sound_raw_api_object.add_raw_member("play_delay",
                                             0,

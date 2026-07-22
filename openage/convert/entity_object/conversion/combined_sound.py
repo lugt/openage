@@ -48,7 +48,14 @@ class CombinedSound:
         self.filename = filename
         self.data = full_data_set
 
-        self.genie_sound = self.data.genie_sounds[self.head_sound_id]
+        # For AoC the head_sound_id is a small genie sound index into
+        # data.genie_sounds. For DE2 the head_sound_id is a 32-bit Wwise
+        # event hash that has no genie_sound counterpart (audio lives in
+        # .pck soundbanks), so we tolerate the missing key.
+        try:
+            self.genie_sound = self.data.genie_sounds[self.head_sound_id]
+        except KeyError:
+            self.genie_sound = None
 
         # Depending on the amounts of references:
         # 0 = do not convert;
