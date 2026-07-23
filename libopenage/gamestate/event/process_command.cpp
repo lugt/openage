@@ -3,6 +3,8 @@
 #include "process_command.h"
 
 #include "gamestate/manager.h"
+#include "log/log.h"
+#include "log/message.h"
 
 
 namespace openage::gamestate::event {
@@ -21,6 +23,8 @@ void ProcessCommandHandler::invoke(openage::event::EventLoop & /* loop */,
                                    const time::time_t &time,
                                    const param_map &params) {
 	auto mgr = std::dynamic_pointer_cast<openage::gamestate::GameEntityManager>(target);
+	log::log(MSG(info) << "ProcessCommandHandler: invoke entity=" << mgr->id()
+	                   << " at t=" << time);
 	mgr->run_activity_system(time, params);
 }
 

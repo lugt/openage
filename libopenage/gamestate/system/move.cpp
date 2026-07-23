@@ -51,8 +51,15 @@ std::vector<coord::phys3> find_path(const std::shared_ptr<path::Pathfinder> &pat
 	};
 	auto tile_path = pathfinder->get_path(request);
 
+	log::log(DBG << "Move::find_path: grid_id=" << grid_id
+	             << " start_tile=(" << start_tile.ne << "," << start_tile.se << ")"
+	             << " end_tile=(" << end_tile.ne << "," << end_tile.se << ")"
+	             << " status=" << static_cast<int>(tile_path.status));
+
 	if (tile_path.status != path::PathResult::FOUND) {
 		// No path found
+		log::log(MSG(warn) << "Move::find_path: NO PATH FOUND (status="
+		                   << static_cast<int>(tile_path.status) << ")");
 		return {};
 	}
 
@@ -123,8 +130,14 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 	// Find path
 	auto map = state->get_map();
 	auto pathfinder = map->get_pathfinder();
+	log::log(DBG << "Move::move_default: entity=" << entity->get_id()
+	             << " path_type=" << move_path_grid->get_name()
+	             << " current=(" << current_pos.ne << "," << current_pos.se << ")"
+	             << " dest=(" << destination.ne << "," << destination.se << ")");
 	auto grid_id = map->get_grid_id(move_path_grid->get_name());
 	auto waypoints = find_path(pathfinder, grid_id, current_pos, destination, start_time);
+	log::log(DBG << "Move::move_default: grid_id=" << grid_id
+	             << " waypoints=" << waypoints.size() << " total_time_so_far=0");
 
 	// use waypoints for movement
 	double total_time = 0;

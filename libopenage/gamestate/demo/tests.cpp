@@ -6,6 +6,7 @@
 #include "log/message.h"
 
 #include "gamestate/demo/demo_0.h"
+#include "gamestate/demo/move_demo.h"
 
 
 namespace openage::gamestate::tests {
@@ -14,6 +15,14 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	switch (demo_id) {
 	case 0:
 		simulation_demo_0(path);
+		break;
+
+	case 1:
+		simulation_demo_1(path);
+		break;
+
+	case 2:
+		simulation_demo_2(path);
 		break;
 
 	default:

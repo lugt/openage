@@ -8,6 +8,8 @@
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/manager.h"
+#include "log/log.h"
+#include "log/message.h"
 
 
 namespace openage::gamestate::activity {
@@ -24,6 +26,9 @@ std::shared_ptr<openage::event::Event> primer_command_in_queue(const time::time_
 	                             // event is not executed until a command is available
 	                             time::TIME_MAX,
 	                             params);
+	log::log(MSG(info) << "primer_command_in_queue: created process_command event "
+	                   << "for entity " << entity->get_id()
+	                   << " (TIME_MAX, awaiting command)");
 	auto entity_queue = std::dynamic_pointer_cast<component::CommandQueue>(
 		entity->get_component(component::component_t::COMMANDQUEUE));
 	auto &queue = entity_queue->get_queue();

@@ -38,6 +38,7 @@ import engine.util.language
 import engine.util.language.translated
 import engine.util.move_mode
 import engine.util.path_type
+import engine.util.selection_box
 import engine.util.terrain
 import engine.util.terrain_type
 import engine.util.variant
@@ -180,6 +181,20 @@ TutorialMove(engine.ability.type.Move):
 TutorialTurn(engine.ability.type.Turn):
     Turn.turn_speed = 6.0
 
+# Selectable ability + an empty SelectionBox (schema is `pass`). This mounts
+# the SELECTABLE component in entity_factory (see entity_factory.cpp
+# "engine.ability.type.Selectable" branch), which DragSelectHandler requires
+# (drag_select.cpp skips any entity without SELECTABLE). Without it the
+# villager is invisible to drag-select: the box is drawn but
+# controller->get_selected() stays empty, so right-click Move commands carry
+# an empty entity_ids list and nothing moves. This was the root cause of
+# "units can be selected but don't move on right-click" (Phase 0.5 bug #13).
+TutorialSelectionBox(engine.util.selection_box.SelectionBox):
+    pass
+
+TutorialSelectable(engine.ability.type.Selectable):
+    Selectable.selection_box = TutorialSelectionBox
+
 # Idle for buildings (town center): uses the tank animation.
 TutorialBuildingIdle(engine.ability.type.Idle):
     Ability.properties = {ability_prop.Animated : TutorialBuildingAnimated}
@@ -187,14 +202,15 @@ TutorialBuildingIdle(engine.ability.type.Idle):
 
 # -- GameEntity definitions (villager + town center) ----------------------------
 
-# The tutorial villager: Idle + Move + Turn abilities. Lives in the engine
-# modpack namespace because de2_base doesn't exist on disk yet.
+# The tutorial villager: Idle + Move + Turn + Selectable abilities. Lives in
+# the engine modpack namespace because de2_base doesn't exist on disk yet.
 TutorialVillager(engine.util.game_entity.GameEntity):
     GameEntity.types = {TutorialUnitType}
     GameEntity.abilities = {
         TutorialIdle,
         TutorialMove,
-        TutorialTurn
+        TutorialTurn,
+        TutorialSelectable
     }
     GameEntity.modifiers = {}
     GameEntity.variants = {}

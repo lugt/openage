@@ -8,6 +8,8 @@
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/manager.h"
+#include "log/log.h"
+#include "log/message.h"
 #include "renderer/render_factory.h"
 #include "time/time.h"
 
@@ -22,6 +24,8 @@ World::World(const std::shared_ptr<GameState> &state) :
 void World::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &render_factory) {
 	this->render_factory = render_factory;
 
+	log::log(MSG(info) << "World::attach_renderer: kicking activity for "
+	                   << state->get_game_entities().size() << " entities");
 	for (auto entity_ref : state->get_game_entities()) {
 		auto world_render_entity = this->render_factory->add_world_render_entity();
 		entity_ref.second->set_render_entity(world_render_entity);
@@ -34,6 +38,8 @@ void World::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &rend
 		// draws nothing (entities were invisible). This mirrors what the
 		// spawn_entity event does for runtime-spawned entities. t=0 matches
 		// the scenario spawn time used by Game::load_scenario.
+		log::log(MSG(info) << "World::attach_renderer: run_activity_system(0) for entity "
+		                   << entity_ref.second->get_id());
 		entity_ref.second->get_manager()->run_activity_system(time::time_t{0});
 	}
 }

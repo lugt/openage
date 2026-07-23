@@ -68,13 +68,16 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 		case component::command::command_t::IDLE:
 			command_queue->add_command(time, std::make_shared<component::command::IdleCommand>());
 			break;
-		case component::command::command_t::MOVE:
+		case component::command::command_t::MOVE: {
+			auto target = params.get("target", coord::phys3{0, 0, 0});
+			log::log(MSG(info) << "SendCommandHandler: MOVE for " << ids.size()
+			                   << " entities at t=" << time
+			                   << " dest=(" << target.ne << "," << target.se << ")");
 			command_queue->add_command(
 				time,
-				std::make_shared<component::command::MoveCommand>(
-					params.get("target",
-			                   coord::phys3{0, 0, 0})));
+				std::make_shared<component::command::MoveCommand>(target));
 			break;
+		}
 
 		// TODO(Phase A6/C1-C4): construct the matching command class for each
 		// type. We intentionally log instead of silently dropping so test
