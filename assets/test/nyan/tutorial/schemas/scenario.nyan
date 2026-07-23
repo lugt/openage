@@ -1,0 +1,33 @@
+# NYAN FILE
+!version 0.2.0
+# =============================================================================
+# HAND-WRITTEN MVP STOPGAP SCHEMA - NOT A CONVERTER PRODUCT.
+# Source of truth: assets/test/nyan/tutorial/schemas/scenario.nyan
+# Installed to:      assets/converted/engine/util/scenario.nyan   (by install.sh, OVERLAYS
+#                   the api_export-generated base schema where applicable).
+# This file contains hand-authored schema additions (PlacedEntity / Scenario /
+# TerrainChunkLayout / Size) that api_export does NOT emit. It is a stopgap for
+# the Phase 0 tutorial scenario, NOT a converter product. See
+# assets/test/nyan/tutorial/README.md for the install/reproducibility flow.
+# =============================================================================
+
+
+import engine.util.game_entity
+import engine.util.language.translated.type
+import engine.util.terrain
+
+import engine.root as root
+
+# Top-level scenario description used by Game::load_scenario.
+# - name: human-readable name (e.g. "Tutorial 1")
+# - size: total playable map size in tiles (see engine.util.terrain.Size)
+# - terrain_chunks: ordered layout of terrain chunks (render order matches
+#   array order; tile offsets are computed from each chunk's offset+size)
+# - initial_entities: entities spawned at scenario load time (villagers,
+#   town centers, scripted enemies, ...). The runtime uses each entity's
+#   position field to place it on the map.
+Scenario(root.Object):
+    name : engine.util.language.translated.type.TranslatedString
+    size : engine.util.terrain.Size
+    terrain_chunks : orderedset(engine.util.terrain.TerrainChunkLayout)
+    initial_entities : orderedset(engine.util.game_entity.PlacedEntity)

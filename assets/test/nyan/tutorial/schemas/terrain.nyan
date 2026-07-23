@@ -1,0 +1,56 @@
+# NYAN FILE
+!version 0.2.0
+# =============================================================================
+# HAND-WRITTEN MVP STOPGAP SCHEMA - NOT A CONVERTER PRODUCT.
+# Source of truth: assets/test/nyan/tutorial/schemas/terrain.nyan
+# Installed to:      assets/converted/engine/util/terrain.nyan   (by install.sh, OVERLAYS
+#                   the api_export-generated base schema where applicable).
+# This file contains hand-authored schema additions (PlacedEntity / Scenario /
+# TerrainChunkLayout / Size) that api_export does NOT emit. It is a stopgap for
+# the Phase 0 tutorial scenario, NOT a converter product. See
+# assets/test/nyan/tutorial/README.md for the install/reproducibility flow.
+# =============================================================================
+
+
+import engine.util.game_entity
+import engine.util.graphics
+import engine.util.language.translated.type
+import engine.util.path_type
+import engine.util.sound
+import engine.util.terrain
+import engine.util.terrain_type
+
+import engine.root as root
+
+Terrain(root.Object):
+    types : set(children(engine.util.terrain_type.TerrainType))
+    name : engine.util.language.translated.type.TranslatedString
+    terrain_graphic : engine.util.graphics.Terrain
+    sound : engine.util.sound.Sound
+    ambience : set(engine.util.terrain.TerrainAmbient)
+    path_costs : dict(children(engine.util.path_type.PathType), int)
+
+TerrainAmbient(root.Object):
+    object : engine.util.game_entity.GameEntity
+    max_density : int
+
+# 2D size expressed as a pair of tile counts (x = columns, y = rows).
+# nyan has no tuple type, so size is encoded as a nested object with
+# explicit x/y members. Lives in the terrain module because both
+# Scenario and TerrainChunkLayout need it; scenario.nyan imports it
+# from here.
+Size(root.Object):
+    x : int
+    y : int
+
+# Describes the layout of a single terrain chunk inside a Scenario.
+# - offset: position of the chunk's top-left tile within the whole map
+# - size: chunk dimensions in tiles (each side <= MAX_CHUNK_WIDTH/HEIGHT)
+# - tile_fqons: ordered list of terrain FQONs, length == size.x * size.y,
+#   row-major (tile (0,0) is top-left of the chunk).
+#
+# Used by Scenario.terrain_chunks to drive TerrainFactory::load_chunks().
+TerrainChunkLayout(root.Object):
+    offset : engine.util.terrain.Size
+    size : engine.util.terrain.Size
+    tile_fqons : orderedset(text)

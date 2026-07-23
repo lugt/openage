@@ -1,0 +1,38 @@
+# NYAN FILE
+!version 0.2.0
+# =============================================================================
+# HAND-WRITTEN MVP STOPGAP SCHEMA - NOT A CONVERTER PRODUCT.
+# Source of truth: assets/test/nyan/tutorial/schemas/game_entity.nyan
+# Installed to:      assets/converted/engine/util/game_entity.nyan   (by install.sh, OVERLAYS
+#                   the api_export-generated base schema where applicable).
+# This file contains hand-authored schema additions (PlacedEntity / Scenario /
+# TerrainChunkLayout / Size) that api_export does NOT emit. It is a stopgap for
+# the Phase 0 tutorial scenario, NOT a converter product. See
+# assets/test/nyan/tutorial/README.md for the install/reproducibility flow.
+# =============================================================================
+
+
+import engine.ability
+import engine.modifier
+import engine.util.game_entity_type
+import engine.util.terrain
+import engine.util.variant
+
+import engine.root as root
+
+GameEntity(root.Object):
+    types : set(children(engine.util.game_entity_type.GameEntityType))
+    abilities : set(engine.ability.Ability)
+    modifiers : set(engine.modifier.Modifier)
+    variants : set(engine.util.variant.Variant)
+
+# A GameEntity plus a tile coordinate where it should be placed at
+# scenario load time. Consumed by Scenario.initial_entities so that a
+# scenario can stamp villagers, town centers, scripted enemies, ... at
+# fixed positions on the map without spawning them from a runtime event.
+#
+# - entity: the nyan game entity (must inherit engine.util.game_entity.GameEntity)
+# - position: tile coordinate inside the scenario map
+PlacedEntity(root.Object):
+    entity : engine.util.game_entity.GameEntity
+    position : engine.util.terrain.Size
