@@ -271,12 +271,24 @@ std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk_with_tiles(
 	}
 
 	const size_t expected = size[0] * size[1];
-	if (tile_fqons.size() != expected) {
-		throw Error(MSG(err) << "add_chunk_with_tiles: tile_fqons count "
-		                     << tile_fqons.size()
-		                     << " does not match chunk size "
-		                     << size[0] << "x" << size[1]
-		                     << " (" << expected << " tiles expected)");
+	// nyan orderedset(text) de-duplicates, so a chunk whose every tile
+	// shares one terrain (the common tutorial case: an all-grass map)
+	// collapses to a single FQON. Accept that and broadcast the lone FQON
+	// across the whole chunk; any other count must still be per-tile.
+	std::vector<nyan::fqon_t> effective_fqons;
+	if (tile_fqons.size() == 1) {
+		effective_fqons.assign(expected, tile_fqons[0]);
+	}
+	else {
+		effective_fqons = tile_fqons;
+		if (effective_fqons.size() != expected) {
+			throw Error(MSG(err) << "add_chunk_with_tiles: tile_fqons count "
+			                     << effective_fqons.size()
+			                     << " does not match chunk size "
+			                     << size[0] << "x" << size[1]
+			                     << " (" << expected << " tiles expected; "
+			                     << "use a single FQON for a uniform chunk)");
+		}
 	}
 
 	auto db_view = gstate->get_db_view();
@@ -284,7 +296,7 @@ std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk_with_tiles(
 	std::vector<TerrainTile> tiles{};
 	tiles.reserve(expected);
 
-	for (const auto &tile_fqon : tile_fqons) {
+	for (const auto &tile_fqon : effective_fqons) {
 		nyan::Object terrain_obj;
 		std::string terrain_info_path;
 		bool resolved = false;
@@ -298,6 +310,15 @@ std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk_with_tiles(
 				if (api::APITerrain::is_terrain(terrain_obj)) {
 					if (has_graphics) {
 						terrain_info_path = api::APITerrain::get_terrain_path(terrain_obj);
+					}
+					else {
+						// No graphical assets in this modpack (e.g. the
+						// schema-only 'engine' modpack used by the tutorial):
+						// fall back to the bundled test terrain texture, which
+						// the renderer resolves relative to assets/converted
+						// (-> assets/test/textures/test_terrain.terrain). Mirrors
+						// the legacy add_chunk() path for non-graphical modpacks.
+						terrain_info_path = test_terrain_paths.front();
 					}
 					resolved = true;
 				}

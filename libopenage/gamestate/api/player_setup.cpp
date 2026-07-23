@@ -49,7 +49,7 @@ const std::vector<nyan::Object> APIPlayerSetup::get_patches(const nyan::Object &
 	std::vector<nyan::Object> result;
 
 	auto db_view = player_setup.get_view();
-	auto patches = player_setup.get_set("PlayerSetup.game_setup");
+	auto patches = player_setup.get_orderedset("PlayerSetup.game_setup");
 	for (auto &patch_val : patches) {
 		auto patch_obj_val = std::dynamic_pointer_cast<nyan::ObjectValue>(patch_val.get_ptr());
 		auto patch_obj = db_view->get_object(patch_obj_val->get_name());

@@ -55,20 +55,10 @@ void GameSimulation::run() {
 
 		// Tick the tutorial trigger once per simulation step. The
 		// trigger polls its current step's predicate and advances when
-		// the player has completed it. When the trigger finishes, log
-		// the victory so a HUD layer (Phase D) can later surface it.
+		// the player has completed it. Phase D will hook into
+		// TutorialTrigger::is_finished() to surface the victory banner.
 		if (this->tutorial_trigger) {
 			this->tutorial_trigger->on_update(current_time);
-			if (this->tutorial_trigger->is_finished()) {
-				// Mission complete - the trigger stops advancing past
-				// this point. Phase D will hook into is_finished() to
-				// render the victory banner.
-				static bool logged_completion = false;
-				if (!logged_completion) {
-					log::log(MSG(info) << "Tutorial mission completed!");
-					logged_completion = true;
-				}
-			}
 		}
 	}
 	log::log(MSG(info) << "Game simulation loop exited");

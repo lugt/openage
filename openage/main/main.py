@@ -148,6 +148,18 @@ def main(args, error):
     check_updates(playable_modpacks, args.cfg_dir / "converter" / "games")
 
     # pass modpacks to engine
+    #
+    # Tutorial mode uses the self-contained 'engine' modpack unless the user
+    # explicitly requested other modpacks. Tutorial data lives entirely under
+    # engine.util.tutorial_data / engine.util.scenario.mission_1 and does not
+    # depend on de2_base. Loading de2_base here would instead abort startup:
+    # its converter-generated civ data (e.g. burgundians.nyan:597 references
+    # the unresolved name 'HusbandryResearchable.HusbandryCost.FoodAmount')
+    # contains nyan name-resolution errors that pre-date this tutorial work.
+    if getattr(args, "tutorial", False) and not args.modpacks:
+        info("Tutorial mode: using 'engine' modpack (self-contained tutorial data)")
+        args.modpacks = ["engine"]
+
     if args.modpacks:
         # ensure that specified modpacks are available
         for modpack in args.modpacks:

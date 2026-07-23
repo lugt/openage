@@ -214,26 +214,28 @@ void Game::load_scenario(const std::shared_ptr<TerrainFactory> &terrain_factory,
 		// field names are part of the contract between APIScenario
 		// (created in parallel) and this consumer; they intentionally
 		// mirror APIScenario's getter names for grep-ability.
+		// TerrainChunkLayout schema (engine/util/terrain.nyan): offset and
+		// size are nested engine.util.terrain.Size objects; tile_fqons is an
+		// orderedset(text) of terrain FQONs, row-major, length == size.x*size.y.
+		// nyan memberids are flat (not nested), so Size.x/y are read off the
+		// Size object returned by get_object -- mirroring APIScenario::read_size.
+		auto chunk_size_obj = chunk_layout.get_object("TerrainChunkLayout.size");
 		util::Vector2s chunk_size{
-			static_cast<size_t>(chunk_layout.get_int("TerrainChunkLayout.size.x")),
-			static_cast<size_t>(chunk_layout.get_int("TerrainChunkLayout.size.y"))};
+			static_cast<size_t>(chunk_size_obj.get_int("Size.x")),
+			static_cast<size_t>(chunk_size_obj.get_int("Size.y"))};
+		auto chunk_offset_obj = chunk_layout.get_object("TerrainChunkLayout.offset");
 		coord::tile_delta chunk_offset{
-			chunk_layout.get_int("TerrainChunkLayout.offset.x"),
-			chunk_layout.get_int("TerrainChunkLayout.offset.y")};
+			static_cast<coord::tile_t>(chunk_offset_obj.get_int("Size.x")),
+			static_cast<coord::tile_t>(chunk_offset_obj.get_int("Size.y"))};
 
-		// Collect tile FQONs into a flat vector (row-major). APIScenario
-		// is expected to expose the tile set as an orderedset of objects
-		// each carrying a TerrainChunkLayout.tile_fqon field. If the
-		// schema instead exposes an OrderedSet of fqons directly we adjust
-		// here once the parallel module lands; the rest of the pipeline
-		// is agnostic.
 		std::vector<nyan::fqon_t> tile_fqons;
-		auto raw_tiles = chunk_layout.get_set("TerrainChunkLayout.tiles");
+		auto raw_tiles = chunk_layout.get_orderedset("TerrainChunkLayout.tile_fqons");
 		tile_fqons.reserve(raw_tiles.size());
 		for (const auto &tile_val : raw_tiles) {
-			auto tile_obj_val = std::dynamic_pointer_cast<nyan::ObjectValue>(tile_val.get_ptr());
-			auto tile_obj = this->state->get_db_view()->get_object(tile_obj_val->get_name());
-			tile_fqons.push_back(tile_obj.get<nyan::ObjectValue>("TerrainChunkTile.terrain")->get_name());
+			// tile_fqons is orderedset(text): each element is a Text value
+			// holding a terrain FQON string.
+			auto fqon_val = std::dynamic_pointer_cast<nyan::Text>(tile_val.get_ptr());
+			tile_fqons.push_back(fqon_val->get());
 		}
 
 		chunks.push_back(terrain_factory->add_chunk_with_tiles(
@@ -257,15 +259,27 @@ void Game::load_scenario(const std::shared_ptr<TerrainFactory> &terrain_factory,
 	log::log(MSG(info) << "load_scenario: " << scenario_fqon
 	                   << " initial_entities=" << initial.size());
 
-	const time::time_t now = time::TIME_MIN; // scenario spawns pre-tick
+	// Spawn at the simulation start time (Clock initial sim_time == 0, see
+	// clock.cpp: get_time() returns sim_time/1000). Do NOT use time::TIME_MIN
+	// here: every curve's KeyframeContainer seeds a default keyframe at
+	// TIME_MIN (= -INF), and Position::set_position -> Continuous::set_last
+	// runs `while (get(hint).time() == at) hint--;` to skip same-time entries;
+	// with at == TIME_MIN that underflows the size_t hint and throws
+	// std::out_of_range. The spawner event (spawn_entity.cpp) likewise passes
+	// a real (>= 0) sim time, never TIME_MIN.
+	const time::time_t now = time::time_t{0}; // scenario spawns pre-tick
 
 	for (const auto &placed : initial) {
 		nyan::fqon_t entity_fqon = placed.get<nyan::ObjectValue>("PlacedEntity.entity")->get_name();
-		int64_t owner_id = placed.get_int("PlacedEntity.owner");
-		coord::phys3 pos{
-			static_cast<coord::phys_t>(placed.get_int("PlacedEntity.position.x")),
-			static_cast<coord::phys_t>(placed.get_int("PlacedEntity.position.y")),
-			coord::phys_t::zero()};
+		// PlacedEntity schema has no owner member; the tutorial is single-
+		// player so every initial entity belongs to player 0. A PlacedEntity.
+		// owner member should be added in Phase 1 once scripted enemies
+		// (owner != 0) appear in later missions.
+		int64_t owner_id = 0;
+		auto pos_obj = placed.get_object("PlacedEntity.position");
+		coord::phys3 pos = coord::tile{
+			static_cast<coord::tile_t>(pos_obj.get_int("Size.x")),
+			static_cast<coord::tile_t>(pos_obj.get_int("Size.y"))}.to_phys3();
 
 		auto entity = this->entity_factory->add_game_entity(
 			this->event_loop, this->state,
