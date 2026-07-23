@@ -27,6 +27,7 @@
 
 import engine.ability
 import engine.ability.property
+import engine.ability.property.type as ability_prop
 import engine.ability.type
 import engine.modifier
 import engine.modifier.property
@@ -94,6 +95,36 @@ TutorialSound(engine.util.sound.Sound):
     Sound.play_delay = 0.0
     Sound.sounds = o{}
 
+# Animation sprites for idle/move rendering. test_gaben.sprite for villagers,
+# test_tank.sprite for the town center. Both live in assets/test/textures.
+#
+# The path is relative, and APIAnimation::get_animation_path -> resolve_file_path
+# prepends the nyan object's namespace dir (engine/util for objects in this
+# file). The renderer then resolves it under the asset base dir
+# (assets/converted). So the effective lookup is:
+#   assets/converted/engine/util/<path>
+# To reach assets/test/textures/<file> from there we need three ../ to escape
+# engine/util -> engine -> assets/converted -> assets, then test/textures/.
+# This is fragile (depends on the nyan namespace depth); Phase 1 should source
+# sprites from the converter or a proper engine asset dir instead.
+TutorialVillagerAnimation(engine.util.graphics.Animation):
+    Animation.sprite = "../../../test/textures/test_gaben.sprite"
+
+TutorialBuildingAnimation(engine.util.graphics.Animation):
+    Animation.sprite = "../../../test/textures/test_tank.sprite"
+
+# Animated ability property carrying the animation. Idle::idle and Move::move
+# only call GameEntity::render_update when the ability has an ANIMATED property
+# with a non-empty animation set; without it the render entity is never
+# populated and WorldObject::fetch_updates draws nothing (the villager was
+# invisible). dict key is the AbilityProperty subclass FQON, value is the
+# concrete property object (mirrors de2 bombard_tower_projectiles.nyan).
+TutorialVillagerAnimated(ability_prop.Animated):
+    Animated.animations = {TutorialVillagerAnimation}
+
+TutorialBuildingAnimated(ability_prop.Animated):
+    Animated.animations = {TutorialBuildingAnimation}
+
 
 # -- Variants + Modifiers (empty defaults) --------------------------------------
 
@@ -131,19 +162,27 @@ GrassName(engine.util.language.translated.type.TranslatedString):
 
 # -- Abilities (Idle, Move, Turn) ----------------------------------------------
 
-# Idle is empty per ability/type.nyan:25 - just need the parent.
+# Idle carries an ANIMATED property so Idle::idle calls render_update and the
+# villager becomes visible. Uses the gaben idle animation.
 TutorialIdle(engine.ability.type.Idle):
-    pass
+    Ability.properties = {ability_prop.Animated : TutorialVillagerAnimated}
 
 # Move needs speed + modes + path_type per ability/type.nyan:174-178.
+# ANIMATED property so Move::move calls render_update (else the position
+# curve updates but the render entity doesn't, so movement is invisible).
 TutorialMove(engine.ability.type.Move):
     Move.speed = 3.0
     Move.modes = {TutorialGroundMove}
     Move.path_type = TutorialGroundPath
+    Ability.properties = {ability_prop.Animated : TutorialVillagerAnimated}
 
 # Turn needs turn_speed per ability/type.nyan:191.
 TutorialTurn(engine.ability.type.Turn):
     Turn.turn_speed = 6.0
+
+# Idle for buildings (town center): uses the tank animation.
+TutorialBuildingIdle(engine.ability.type.Idle):
+    Ability.properties = {ability_prop.Animated : TutorialBuildingAnimated}
 
 
 # -- GameEntity definitions (villager + town center) ----------------------------
@@ -160,13 +199,12 @@ TutorialVillager(engine.util.game_entity.GameEntity):
     GameEntity.modifiers = {}
     GameEntity.variants = {}
 
-# The tutorial town center: same abilities (Idle + Move only, Turn is
-# optional for buildings but harmless). The placeholder is shared with the
-# villager to keep the data file compact.
+# The tutorial town center: a single building Idle ability carrying the tank
+# animation. Buildings don't move, so no Move/Turn abilities.
 TutorialTownCenter(engine.util.game_entity.GameEntity):
     GameEntity.types = {TutorialBuildingType}
     GameEntity.abilities = {
-        TutorialIdle
+        TutorialBuildingIdle
     }
     GameEntity.modifiers = {}
     GameEntity.variants = {}
