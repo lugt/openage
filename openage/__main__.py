@@ -63,6 +63,17 @@ def add_dll_search_paths(dll_paths: list[str]):
     return manager
 
 
+def _validate_nyan_entry(args, _error) -> int:
+    """Subcommand entry for `openage validate-nyan`."""
+    from .validate_nyan.main import validate_nyan
+    return validate_nyan(
+        args.modpacks,
+        json_path=args.json_path,
+        continue_on_error=args.continue_on_error,
+        strict=args.strict,
+    )
+
+
 def main(argv=None):
     """ Top-level argparsing; invokes subparser for all submodules. """
     cli = argparse.ArgumentParser(
@@ -147,6 +158,21 @@ def main(argv=None):
     init_subparser(subparsers.add_parser(
         "codegen",
         parents=[global_cli]))
+
+    # Sprint A / Task 2: validate-nyan subcommand.
+    validate_nyan = subparsers.add_parser(
+        "validate-nyan",
+        parents=[global_cli],
+        help="Static-validate .nyan modpack(s) without launching the engine.",
+    )
+    validate_nyan.add_argument("--modpacks", action="append", required=True,
+                              help="Path to a modpack directory (repeatable).")
+    validate_nyan.add_argument("--json", dest="json_path", default=None,
+                              help="Write a JSON report to this path.")
+    validate_nyan.add_argument("--continue-on-error", dest="continue_on_error",
+                              action="store_true", default=True)
+    validate_nyan.add_argument("--strict", action="store_true", default=False)
+    validate_nyan.set_defaults(entrypoint=_validate_nyan_entry)
 
     args, remaining_args = cli.parse_known_args(argv)
 
