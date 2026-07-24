@@ -3,6 +3,8 @@
 #include "game.h"
 
 #include <vector>
+#include <chrono>
+#include <algorithm>
 
 #include <nyan/nyan.h>
 
@@ -35,6 +37,44 @@
 #include "coord/tile.h"
 
 namespace openage::gamestate {
+
+// Phase 0.5G startup instrumentation. Counters survive until process exit so
+// tests can scrape them via --print-startup-stats (or read the log).
+struct StartupCounters {
+    std::atomic<uint64_t> files_seen{0};
+    std::atomic<uint64_t> files_loaded{0};
+    std::atomic<uint64_t> duplicate_parse_attempts{0};
+    std::atomic<uint64_t> openat_calls{0};
+    std::atomic<uint64_t> manifest_reads{0};
+    std::atomic<uint64_t> fqon_lookups{0};
+};
+static StartupCounters &startup_counters() {
+    static StartupCounters c;
+    return c;
+}
+static auto perf_t0() {
+    return std::chrono::steady_clock::now();
+}
+static double perf_since(auto t0) {
+    auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration<double>(t1 - t0).count();
+}
+// Slowest files observed (process-local rolling top-N).
+struct SlowFile { double sec; std::string path; };
+static std::mutex slow_mutex;
+static std::vector<SlowFile> slow_files;
+static void record_slow_file(double sec, const std::string &path) {
+    if (sec < 0.001) return;
+    std::lock_guard<std::mutex> lk{slow_mutex};
+    slow_files.push_back({sec, path});
+    // Cap to top 20 by duration desc.
+    if (slow_files.size() > 200) {
+        std::sort(slow_files.begin(), slow_files.end(),
+                  [](const SlowFile &a, const SlowFile &b){ return a.sec > b.sec; });
+        slow_files.resize(20);
+    }
+}
+const std::vector<SlowFile> &get_slow_files() { return slow_files; }
 
 Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
            const std::shared_ptr<assets::ModManager> &mod_manager,
@@ -85,11 +125,16 @@ void Game::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &rende
 }
 
 void Game::load_data(const std::shared_ptr<assets::ModManager> &mod_manager) {
+	auto t0_load_data = perf_t0();
 	auto load_order = mod_manager->get_load_order();
+	log::log(MSG(info) << "[PERF] load_data modpacks=" << load_order.size());
 
 	for (auto &mod_id : load_order) {
+		auto t_mod = perf_t0();
 		auto mod = mod_manager->get_modpack(mod_id);
 		auto info = mod->get_info();
+		startup_counters().manifest_reads++;
+		auto t_after_manifest = perf_t0();
 
 		auto includes = info.includes;
 		for (const auto &include : includes) {
@@ -114,7 +159,18 @@ void Game::load_data(const std::shared_ptr<assets::ModManager> &mod_manager) {
 
 			this->load_path(info.path.get_parent(), info.path.get_name(), search, recursive);
 		}
+		double sec_total = perf_since(t_mod);
+		log::log(MSG(info) << "[PERF] mod=" << mod_id
+		                   << " includes=" << includes.size()
+		                   << " files_seen_cum=" << startup_counters().files_seen.load()
+		                   << " files_loaded_cum=" << startup_counters().files_loaded.load()
+		                   << " elapsed=" << sec_total << "s");
 	}
+	double sec_total = perf_since(t0_load_data);
+	log::log(MSG(info) << "[PERF] load_data TOTAL=" << sec_total << "s "
+	                   << "files_seen=" << startup_counters().files_seen.load()
+	                   << " files_loaded=" << startup_counters().files_loaded.load()
+	                   << " duplicate_parse=" << startup_counters().duplicate_parse_attempts.load());
 }
 
 void Game::load_path(const util::Path &base_dir,
@@ -125,11 +181,17 @@ void Game::load_path(const util::Path &base_dir,
 	auto search_path = base_dir / mod_dir / search;
 
 	auto fileload_func = [&base_path](const std::string &filename) {
+		startup_counters().files_seen++;
+		auto t_f = perf_t0();
 		// nyan wants a string filepath, so we have to construct it from the
 		// path and subpath parameters
 		log::log(INFO << "Loading .nyan file: " << filename);
 		auto loc = base_path + "/" + filename;
-		return std::make_shared<nyan::File>(loc);
+		auto file = std::make_shared<nyan::File>(loc);
+		startup_counters().files_loaded++;
+		startup_counters().openat_calls++;
+		record_slow_file(perf_since(t_f), filename);
+		return file;
 	};
 
 	// file loading
