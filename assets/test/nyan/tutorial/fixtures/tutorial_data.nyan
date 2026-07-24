@@ -178,16 +178,12 @@ TutorialMove(engine.ability.type.Move):
     Ability.properties = {ability_prop.Animated : TutorialVillagerAnimated}
 
 # Turn needs turn_speed per ability/type.nyan:191.
-# Phase 0.5B fix #13 follow-up: 6 deg/s was a design-level move-pause-turn
-# (villager rotates to face path *before* moving). With real AoE click
-# cadence (~0.2-1 s between right-clicks) any non-trivial angle difference
-# left the villager stuck mid-rotate for 15+ seconds while every new
-# command erased the in-flight destination keyframe (Continuous::set_last
-# erases "all elements that follow at a later time").
-# 720 deg/s = 2 s for a full 360 turn, so the rotate-before-move pause is
-# effectively instant while still respecting the ability schema.
+# Phase 0.5C: turn_time is capped at 0.5 s in move_default (gamestate/system/move.cpp)
+# so a 90 deg diff only burns 0.5 s of "rotate first" pause regardless of turn_speed.
+# We restore the reasonable 6 deg/s value -- the cap, not an inflated turn_speed,
+# keeps rapid-click movement responsive.
 TutorialTurn(engine.ability.type.Turn):
-    Turn.turn_speed = 720.0
+    Turn.turn_speed = 6.0
 
 # Selectable ability + an empty SelectionBox (schema is `pass`). This mounts
 # the SELECTABLE component in entity_factory (see entity_factory.cpp

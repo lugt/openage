@@ -379,4 +379,130 @@ void simulation_demo_3(const util::Path &/*path*/) {
 	log::log(MSG(info) << "========== END REAL-CAMERA PICKING TEST ==========");
 }
 
+void simulation_demo_4(const util::Path &path) {
+	log::log(MSG(info) << "========== RAPID-CLICK MOVE TEST (demo 4) ==========");
+	log::log(MSG(info) << "Queues 5 MoveCommands at 0.2 s intervals to 4 different destinations. "
+	                   << "After 12 s of sim time the villager must rest near the "
+	                   << "LAST destination (not stuck at spawn, not parked at any "
+	                   << "earlier dest). This is the Phase 0.5C regression for bug #13 "
+	                   << "follow-up: with capped turn_time, set_last's natural "
+	                   << "\"newest command wins\" semantics must keep working under "
+	                   << "rapid input.");
+
+	auto cvar = std::make_shared<cvar::CVarManager>(path);
+	auto time_loop = std::make_shared<time::TimeLoop>();
+	auto simulation = std::make_shared<GameSimulation>(
+		path, cvar, time_loop,
+		"engine.util.setup.tutorial_setup.TutorialPlayerSetup",
+		"engine.util.scenario.mission_1.Mission1");
+	simulation->set_modpacks({"engine"});
+	simulation->start();
+
+	auto game = simulation->get_game();
+	auto state = game->get_state();
+	auto event_loop = simulation->get_event_loop();
+	auto commander = simulation->get_commander();
+
+	auto &entities = state->get_game_entities();
+	entity_id_t villager_id = 0;
+	std::shared_ptr<GameEntity> villager;
+	std::shared_ptr<component::Position> pos_comp;
+	coord::phys3 start_pos = coord::tile{0, 0}.to_phys3();
+	bool found = false;
+	for (auto &[id, entity] : entities) {
+		if (entity->has_component(component::component_t::MOVE)) {
+			villager_id = id;
+			villager = entity;
+			pos_comp = std::dynamic_pointer_cast<component::Position>(
+				entity->get_component(component::component_t::POSITION));
+			start_pos = pos_comp->get_positions().get(time::time_t{0});
+			found = true;
+			break;
+		}
+	}
+	if (not found) {
+		log::log(MSG(err) << "FAIL: no movable entity spawned.");
+		return;
+	}
+	log::log(MSG(info) << "villager id=" << villager_id << " start=("
+	                   << start_pos.ne.to_double() << "," << start_pos.se.to_double() << ")");
+
+	// HEADLESS: kick the activity so primer_command_in_queue builds the
+	// process_command event. Same rationale as demo 1/2.
+	villager->get_manager()->run_activity_system(time::time_t{0});
+
+	// Four destinations, queued 0.2 s apart. The villager must end near
+	// the LAST one (10, 10), not at any earlier one and not at spawn.
+	struct Click { double t; coord::phys3 dest; };
+	std::vector<Click> clicks = {
+		{0.2, coord::tile{10,  9}.to_phys3()},  // first cmd
+		{0.4, coord::tile{11, 10}.to_phys3()},
+		{0.6, coord::tile{10, 11}.to_phys3()},
+		{0.8, coord::tile{12, 12}.to_phys3()},
+		{1.0, coord::tile{10, 10}.to_phys3()},  // last cmd (must win)
+	};
+	for (auto &c : clicks) {
+		openage::event::EventHandler::param_map::map_t params{
+			{"type", component::command::command_t::MOVE},
+			{"target", c.dest},
+			{"entity_ids", std::vector<entity_id_t>{villager_id}},
+		};
+		event_loop->create_event(
+			"game.send_command",
+			commander,
+			state,
+			time::time_t::from_double(c.t),
+			params);
+		log::log(MSG(info) << "queued MoveCommand t=" << c.t << " -> tile ("
+		                   << c.dest.ne.to_double() << "," << c.dest.se.to_double() << ")");
+	}
+
+	// Wait long enough for the LAST move to complete (3-4 tile path at
+	// move_speed 3 ~= 1.3 s, plus 0.5 s turn cap = ~1.8 s from the last
+	// cmd at t=1). Use 12 s as a generous bound.
+	log::log(MSG(info) << "Advancing simulation to t=12s...");
+	event_loop->reach_time(time::time_t::from_double(12.0), state);
+
+	auto final_pos = pos_comp->get_positions().get(time::time_t::from_double(12.0));
+	log::log(MSG(info) << "final_pos=(" << final_pos.ne.to_double()
+	                   << "," << final_pos.se.to_double() << ")");
+
+	int pass = 0, fail = 0;
+
+	// ---- CHECK 1: villager is NOT at spawn. ----
+	double moved_ne = std::abs(final_pos.ne.to_double() - start_pos.ne.to_double());
+	double moved_se = std::abs(final_pos.se.to_double() - start_pos.se.to_double());
+	double moved_dist = std::sqrt(moved_ne * moved_ne + moved_se * moved_se);
+	if (moved_dist > 1.0) {
+		log::log(MSG(info) << "PASS: villager moved (dist=" << moved_dist
+		                   << " from spawn, must be > 1 tile)");
+		pass++;
+	} else {
+		log::log(MSG(err) << "FAIL: villager did NOT move from spawn (dist="
+		                  << moved_dist << ")");
+		fail++;
+	}
+
+	// ---- CHECK 2: villager is close to LAST destination (not a previous one). ----
+	// Last dest was tile (10, 10); the villager must be within 0.5 tiles of
+	// that. Earlier destinations (10,9), (11,10), (10,11), (12,12) are all
+	// 1+ tile away from (10,10) -- if the villager rests there the test
+	// fails and we know the unit is executing an older plan.
+	double dx_last = final_pos.ne.to_double() - 10.0;
+	double dy_last = final_pos.se.to_double() - 10.0;
+	double dist_to_last = std::sqrt(dx_last * dx_last + dy_last * dy_last);
+	if (dist_to_last < 0.5) {
+		log::log(MSG(info) << "PASS: villager near LAST dest (dist=" << dist_to_last
+		                   << ", must be < 0.5 tiles)");
+		pass++;
+	} else {
+		log::log(MSG(err) << "FAIL: villager not near LAST dest (dist=" << dist_to_last
+		                  << ", expected < 0.5 tiles; villager resting on an earlier cmd?)");
+		fail++;
+	}
+
+	log::log(MSG(info) << "==== demo 4 summary: " << pass << " pass, " << fail << " fail ====");
+	log::log(MSG(info) << "========== END RAPID-CLICK MOVE TEST ==========");
+}
+
 } // namespace openage::gamestate::tests

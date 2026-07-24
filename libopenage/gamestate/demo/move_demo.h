@@ -56,4 +56,15 @@ void simulation_demo_2(const util::Path &path);
  */
 void simulation_demo_3(const util::Path &path);
 
+/**
+ * Headless rapid-click MoveCommand regression (demo id 4).
+ *
+ * Queues 5 MoveCommands at 0.2 s intervals to different destinations,
+ * advances 12 s, asserts the villager ends (1) not at spawn and
+ * (2) within 0.5 tile of the LAST command. Fails if the unit is parked
+ * on an older command's destination, indicating that a pause-then-move
+ * turn bug or wrong-position curve keyframes let an earlier plan win.
+ */
+void simulation_demo_4(const util::Path &path);
+
 } // namespace openage::gamestate::tests

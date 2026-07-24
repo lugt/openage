@@ -51,7 +51,7 @@ std::vector<coord::phys3> find_path(const std::shared_ptr<path::Pathfinder> &pat
 	};
 	auto tile_path = pathfinder->get_path(request);
 
-	log::log(DBG << "Move::find_path: grid_id=" << grid_id
+	log::log(MSG(info) << "Move::find_path: grid_id=" << grid_id
 	             << " start_tile=(" << start_tile.ne << "," << start_tile.se << ")"
 	             << " end_tile=(" << end_tile.ne << "," << end_tile.se << ")"
 	             << " status=" << static_cast<int>(tile_path.status));
@@ -130,18 +130,20 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 	// Find path
 	auto map = state->get_map();
 	auto pathfinder = map->get_pathfinder();
-	log::log(DBG << "Move::move_default: entity=" << entity->get_id()
+	log::log(MSG(info) << "Move::move_default: entity=" << entity->get_id()
 	             << " path_type=" << move_path_grid->get_name()
 	             << " current=(" << current_pos.ne << "," << current_pos.se << ")"
 	             << " dest=(" << destination.ne << "," << destination.se << ")");
 	auto grid_id = map->get_grid_id(move_path_grid->get_name());
 	auto waypoints = find_path(pathfinder, grid_id, current_pos, destination, start_time);
-	log::log(DBG << "Move::move_default: grid_id=" << grid_id
+	log::log(MSG(info) << "Move::move_default: grid_id=" << grid_id
 	             << " waypoints=" << waypoints.size() << " total_time_so_far=0");
 
 	// use waypoints for movement
 	double total_time = 0;
 	pos_component->set_position(start_time, current_pos);
+	log::log(MSG(info) << "Move::move_default: move_speed.get()=" << move_speed.get()
+	                   << " move_speed->is_infinite_positive()=" << move_speed->is_infinite_positive());
 	for (size_t i = 1; i < waypoints.size(); ++i) {
 		auto prev_waypoint = waypoints[i - 1];
 		auto cur_waypoint = waypoints[i];
@@ -162,10 +164,27 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 				angle_diff = angle_diff * -1;
 			}
 
-			// Set an intermediate position keyframe to halt the game entity
-			// until the rotation is done
 			double turn_time = angle_diff.to_double() / turn_speed->get();
+			// Phase 0.5C fix #13 follow-up: cap turn_time so a large angle diff
+			// does not pause the unit for many seconds. With a 90 deg difference
+			// and the default turn_speed=6 deg/s the pause would be 15 s; during
+			// that interval every new right-click wiped the in-flight destination
+			// (Continuous::set_last erases all later keyframes), so the villager
+			// stayed parked in place for the entire turn. Capping turn_time bounds
+			// the pause and lets move_time dominate total_time, after which the
+			// unit steps its angle to the path direction at dest time.
+			//
+			// This is intentionally simple -- proper rotate-while-move would need a
+			// Continuous angle curve (current Segmented step is discontinuous); the
+			// cap is a Phase 0.5C scope choice.
+			constexpr double MAX_TURN_TIME = 0.5;
+			if (turn_time > MAX_TURN_TIME) {
+				turn_time = MAX_TURN_TIME;
+			}
 			total_time += turn_time;
+			// Intermediate keyframe at start_time + total_time keeps the unit
+			// at prev (=cur) for the cap duration; removed by future move
+			// commands via set_last's documented erase-future semantics.
 			pos_component->set_position(start_time + total_time, prev_waypoint);
 
 			// update current angle for next waypoint
@@ -182,6 +201,20 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 		total_time += move_time;
 
 		pos_component->set_position(start_time + total_time, cur_waypoint);
+	}
+
+	// Verify the curve now has a future keyframe (Phase 0.5B bug #13 follow-up:
+	// Continuous::set_last erases all elements that follow at a later time, so
+	// each new move_default wipes future keyframes. Log where the dest keyframe
+	// landed and what a mid-point query returns, so a stuck villager is
+	// attributable to either the math here or the curve semantics).
+	log::log(MSG(info) << "Move::move_default: total_time=" << total_time
+	                   << " end keyframe at t+" << total_time << " (=start_time + total_time)");
+	if (total_time > 0) {
+		auto query_t = start_time + time::time_t::from_double(total_time * 0.5);
+		auto mid_pos = positions.get(query_t);
+		log::log(MSG(info) << "Move::move_default: mid-t pos=(" << mid_pos.ne << "," << mid_pos.se
+		                   << ") (expect ~partway between current and dest)");
 	}
 
 	// properties
