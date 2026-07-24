@@ -198,4 +198,6 @@ if __name__ == '__main__':
     # openage is complicated and multithreaded; better not use fork.
     multiprocessing.set_start_method('spawn')
 
-    sys.exit(main())
+    from .exception_guard.main import install_terminate_handler, run_with_exception_guard
+    install_terminate_handler()
+    sys.exit(run_with_exception_guard(main))
