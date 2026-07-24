@@ -414,13 +414,8 @@ class AoCAuxiliarySubprocessor:
         """
         dataset = tech_group.data
         research_location_id = tech_group.get_research_location_id()
-        research_location = dataset.building_lines[research_location_id]
 
-        name_lookup_dict = internal_name_lookups.get_entity_lookups(dataset.game_version)
         tech_lookup_dict = internal_name_lookups.get_tech_lookups(dataset.game_version)
-        civ_lookup_dict = internal_name_lookups.get_civ_lookups(dataset.game_version)
-
-        research_location_name = name_lookup_dict[research_location.get_head_unit_id()][0]
         tech_name = tech_lookup_dict[tech_group.get_id()][0]
 
         obj_ref = f"{tech_name}.ResearchableTech"
@@ -428,19 +423,36 @@ class AoCAuxiliarySubprocessor:
         researchable_raw_api_object = RawAPIObject(obj_ref, obj_name, dataset.nyan_api_objects)
         researchable_raw_api_object.add_raw_parent("engine.util.research.ResearchableTech")
 
-        # Location of the object depends on whether it'a a unique tech or a normal tech
+        # Location of the object depends on whether it's a unique tech,
+        # a normal researchable tech (researched at a building), or a
+        # passive shared tech (no research location, e.g. Arson).
         if tech_group.is_unique():
             # Add object to the Civ object
+            civ_lookup_dict = internal_name_lookups.get_civ_lookups(dataset.game_version)
             civ_id = tech_group.get_civilization()
             civ = dataset.civ_groups[civ_id]
             civ_name = civ_lookup_dict[civ_id][0]
 
             researchable_location = ForwardRef(civ, civ_name)
 
-        else:
+        elif research_location_id > -1:
             # Add object to the research location's Research ability
+            name_lookup_dict = internal_name_lookups.get_entity_lookups(dataset.game_version)
+            research_location = dataset.building_lines[research_location_id]
+            research_location_name = name_lookup_dict[research_location.get_head_unit_id()][0]
+
             researchable_location = ForwardRef(research_location,
                                                f"{research_location_name}.Research")
+
+        else:
+            # Passive shared tech (no research location, e.g. Arson).
+            # Civ bonus patches still target the FQON `XxxResearchable`
+            # via `tech_time_modify_effect` / `tech_cost_modify_effect`,
+            # so the wrapper MUST exist somewhere reachable. Emit it as
+            # a sibling of the Tech itself so `Arson.ResearchableTech`
+            # resolves to the same FQON as `ArsonResearchable` in the
+            # generated nyan.
+            researchable_location = ForwardRef(tech_group, tech_name)
 
         researchable_raw_api_object.set_location(researchable_location)
 

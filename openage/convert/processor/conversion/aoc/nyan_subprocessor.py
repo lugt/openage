@@ -902,7 +902,15 @@ class AoCNyanSubprocessor:
         # =======================================================================
         # Misc (Objects that are not used by the tech group itself, but use its values)
         # =======================================================================
-        if tech_group.is_researchable():
+        # Emit the ResearchableTech wrapper for:
+        #   (a) techs that are researchable in a building (normal case);
+        #   (b) passive shared techs (no research_location, not civ-unique).
+        #   Civ bonus patches may target the FQON `XxxResearchable` via
+        #   `tech_time_modify_effect` / `tech_cost_modify_effect`, so the
+        #   wrapper MUST exist or the load fails with NameError.
+        if (tech_group.is_researchable()
+                or (not tech_group.is_unique()
+                    and tech_group.get_research_location_id() == -1)):
             AoCAuxiliarySubprocessor.get_researchable_tech(tech_group)
 
     @staticmethod
