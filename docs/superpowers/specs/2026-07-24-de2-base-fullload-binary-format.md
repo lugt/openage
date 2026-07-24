@@ -1,16 +1,18 @@
 # de2_base Full-Load — Binary Format Reference
 
-- Date: 2026-07-24 (revision 3)
+- Date: 2026-07-24 (revision 3.1)
 - Parent design: [main design spec](2026-07-24-de2-base-fullload-design.md)
 - Scope: canonical binary contract for `*.nyancache`
 
-This document is the single source of truth for the cache bytes. It intentionally does not repeat goals, implementation stages, or the complete test matrix; see the [Test Matrix](2026-07-24-de2-base-fullload-test-matrix.md).
+This document is the single source of truth for cache bytes. It intentionally does not repeat goals or the complete test matrix; see the [Test Matrix](2026-07-24-de2-base-fullload-test-matrix.md).
 
 ## 1. Identity and file layout
 
-The filename is `engine_de2_base-<closure_id>.nyancache`. `closure_id` is a seven-character base32 digest of canonical closure metadata. The full closure identity is stored in the header and is authoritative over the filename.
+The filename is `engine_de2_base-<closure_id>.nyancache`; `closure_id` is at least 16 Base32 characters derived from the full closure digest. The header stores the complete 32-byte closure digest and is authoritative over the filename.
 
-The file begins with a 4096-byte page-aligned header. All offsets are absolute file offsets. All multi-byte values are little-endian. Readers validate offsets and lengths before dereferencing any mapped address.
+The cache contains every `.nyan` module declared by every manifest in the resolved dependency closure, not only Mission 1 or import-reachable modules. All declared modules and FQONs enter the index; object state remains lazy-materialized.
+
+The file begins with a 4096-byte page-aligned header. All offsets are absolute file offsets and all multi-byte values are little-endian. Readers validate offsets and lengths before dereferencing mapped addresses.
 
 ## 2. Header
 
@@ -21,7 +23,7 @@ The file begins with a 4096-byte page-aligned header. All offsets are absolute f
 | 6 | 2 | endian marker (`0x4243`) |
 | 8 | 4 | hash algorithm id (`1` = vendored wyhash) |
 | 12 | 4 | hash algorithm version (`1`) |
-| 16 | 8 | creation timestamp, informational only |
+| 16 | 8 | reserved zero; build time is external metadata only |
 | 24 | 4 | converter version string offset |
 | 28 | 4 | engine schema version string offset |
 | 32 | 32 | source Merkle root |
@@ -34,18 +36,16 @@ The file begins with a 4096-byte page-aligned header. All offsets are absolute f
 | 104 | 8 | section directory size |
 | 112 | 8 | string table offset |
 | 120 | 8 | string table size |
-| 128 | 256 | closure identity record |
-| 384 | 8 | whole-file digest prefix |
-| 392 | 3700 | reserved, all zero |
+| 128 | 256 | closure identity record, including full 32-byte closure digest |
+| 384 | 32 | whole-file BLAKE3 digest |
+| 416 | 3676 | reserved, all zero |
 | 4092 | 4 | header CRC32C over bytes 0–4091 |
 
-The header has no implicit native struct layout. Writers serialize fields explicitly. Unknown future sections are skipped only when their bounds and checksums remain valid; unknown format versions are rejected.
+Writers serialize fields explicitly, never through native struct layout. Offset 16 is zero for every fixture and formal build. Unknown sections are skippable only after bounds/checksum validation; unknown format versions are rejected.
 
-## 3. Closure identity
+## 3. Closure identity and sections
 
-The fixed closure record contains canonical ordered modpack names, a digest of those names, manifest identity, converter/schema versions, cache format version, and reserved zero bytes. The `closure_id` is computed from canonical metadata with BLAKE3-256 and truncated to seven base32 characters. Header identity is compared to the requested closure during load. A renamed file cannot make a stale cache valid.
-
-## 4. Section directory and sections
+The fixed closure record contains canonical ordered modpack names, manifest identity, converter/schema versions, cache format version, and the full 32-byte closure digest. The filename is only a hint.
 
 The section directory contains fixed-width entries:
 
@@ -57,137 +57,69 @@ crc32c     u32
 flags      u32
 ```
 
-Each section is within the file, does not overlap the header or another section, and begins on a 4-byte boundary. `STRINGS`, `MODULES`, `OBJECTS`, and `MEMBERS` begin on 8-byte boundaries. Section order is canonical and is also the order used for the whole-file digest.
+Each section is within the file, non-overlapping, and aligned to at least 4 bytes; `STRINGS`, `MODULES`, `OBJECTS`, and `MEMBERS` are 8-byte aligned. Canonical directory bytes—including entry order, offsets, sizes, CRCs, and flags—are included in the complete whole-file digest together with every section payload.
 
 | Section | Contents | Canonical order |
 |---|---|---|
-| `STRINGS` | packed UTF-8 strings | first occurrence in canonical record traversal; equal strings deduplicated |
+| `STRINGS` | packed UTF-8 strings | canonical record traversal; equal strings deduplicated |
 | `MODULES` | source module records | canonical module path |
 | `FQON_INDEX` | hash/string/object entries | FQON hash, then full FQON bytes |
 | `FQON_PROBE` | open-addressing table | slot index |
 | `DEPS` | import and overflow-parent edges | importer, importee |
 | `TYPES` | type definitions | canonical type FQON |
 | `OBJECTS` | object records | canonical FQON |
-| `MEMBERS` | object members | object FQON, member name bytes |
-| `VALUES` | tagged values | owning object/member traversal order |
+| `MEMBERS` | object members | object FQON, member bytes |
+| `VALUES` | tagged values | canonical owner/member traversal |
 | `DIAG` | source diagnostics | object, source location |
 
-Every reserved field, alignment gap, and padding byte is written as zero and validated as zero unless a future format flag explicitly assigns it.
+Reserved fields, alignment gaps, and padding bytes are zero and validated as zero.
 
-## 5. Packed records
+## 4. Packed records and values
 
-Records are written field-by-field using explicit `write_u8`, `write_u16`, `write_u32`, `write_u64`, and length-prefixed byte helpers. No record is serialized through `reinterpret_cast` or native ABI layout.
+Records are written field-by-field with explicit `write_u8`, `write_u16`, `write_u32`, `write_u64`, and length-prefixed byte helpers. No `reinterpret_cast` serialization is permitted.
 
 ```text
-ModuleRecord:
-  u32 path_str
-  u32 path_len
-  u64 source_digest_part_0
-  u32 source_digest_part_1
-  u32 source_digest_part_2
-  u32 source_digest_part_3
-  u32 parent_module
-  u32 first_object
-  u32 object_count
-
-FqonEntry:
-  u64 fqon_hash
-  u32 string_offset
-  u32 string_length
-  u32 object_index
-
-ObjectRecord:
-  u32 fqon_string
-  u16 fqon_length
-  u16 parent_count
-  u32 parent_index[8]
-  u32 first_member
-  u16 member_count
-  u16 type_index
-  u32 diagnostic_index
-
-MemberRecord:
-  u32 name_string
-  u16 name_length
-  u16 type_index
-  u32 first_value
-  u32 value_count
-  u8 modifier_mask
-  u8 flags
-  u16 padding_zero
-
-ValueRecord:
-  u8 tag
-  u8 flags
-  u16 padding_zero
-  u32 payload
+ModuleRecord: u32 path_str, u32 path_len, source digest fields,
+              u32 parent_module, u32 first_object, u32 object_count
+FqonEntry:    u64 fqon_hash, u32 string_offset, u32 string_length,
+              u32 object_index
+ObjectRecord: u32 fqon_string, u16 fqon_length, u16 parent_count,
+              u32 parent_index[8], u32 first_member, u16 member_count,
+              u16 type_index, u32 diagnostic_index
+MemberRecord: u32 name_string, u16 name_length, u16 type_index,
+              u32 first_value, u32 value_count, u8 modifier_mask,
+              u8 flags, u16 padding_zero
+ValueRecord:  u8 tag, u8 flags, u16 padding_zero, u32 payload
 ```
 
-Values use tags for Int, Float, Text, Object, Set, OrderedSet, Dict, File, and None. Object references and collection entries refer to object indices that are valid only in the current cache generation. Dict is currently represented as an explicit diagnostic/unhandled value rather than causing a crash.
+Tags cover Int, Float, Text, Object, Set, OrderedSet, Dict, File, and None. Object and collection indices are generation-local. `Dict-as-diagnostic` is permitted only for the Stage 1 fixture; before full `de2_base` publication every encountered type/value variant must have a lossless binary representation, otherwise publication is blocked.
 
-## 6. Hash and lookup policy
+## 5. Hash, offset, alignment, and endianness
 
-The reader and writer vendor one pinned upstream wyhash implementation. The algorithm id/version and pinned source revision are recorded in the tree and header. The seed is frozen as `0xA5A5A5A55A5A5A5AULL`. Input is the exact raw UTF-8 FQON byte sequence; no normalization, case folding, or string transformation is permitted.
+The vendored wyhash uses frozen seed `0xA5A5A5A55A5A5A5AULL`, exact raw UTF-8 FQON bytes, and recorded algorithm id/version. `std::hash` and platform-selected algorithms are forbidden. Lookup always performs full-string equality after hash probing.
 
-The probe table is power-of-two sized with load factor ≤0.6. Lookup hashes first, probes linearly, then compares the candidate's full string bytes and length. Hash equality alone never establishes identity. `std::hash<std::string>` and platform-selected hashes are forbidden. A fake-hash test must prove that two distinct FQONs sharing a hash still resolve correctly.
+Offsets are absolute. Arithmetic for `count * size`, `offset + size`, nested ranges, and all indices is checked before access. Strings remain inside `STRINGS` and are capped at 64 KiB. The capacity census must prove every fixed-width field fits, including u32 indices/offsets and u16/u32 counts.
 
-## 7. Offset, alignment, and endianness rules
+## 6. Checksums, digest, and ABI validation
 
-- All file offsets are absolute and unsigned.
-- Section alignment is at least 4 bytes; the four large record sections are 8-byte aligned.
-- Record padding is explicit and zero-filled.
-- `count * element_size`, `offset + size`, and all nested string/value ranges use checked arithmetic before access.
-- String offsets and lengths must remain inside `STRINGS`; individual strings are capped at 64 KiB.
-- The endian marker and canonical byte encoding are checked at load. The reader does not silently reserialize or rehash a cache for a different host.
+Each section has CRC32C. The header has CRC32C over bytes 0–4091. The whole-file digest is the complete 32-byte BLAKE3 over canonical section-directory bytes followed by every section payload in canonical order, excluding the header. Directory changes are therefore integrity-protected even when payload bytes are unchanged.
 
-## 8. Checksums and digest
+The reader explicitly checks, in order: magic; format version; endian marker; hash id/version; header CRC; section bounds/non-overlap; alignment; zero padding; checked arithmetic; string bounds; count bounds; truncation; per-section CRCs; and complete directory-plus-payload digest. The writer enforces `.tmp` + `fsync` + `rename` + parent-directory `fsync`.
 
-Each section has CRC32C in its directory entry. The header has CRC32C over all header bytes except its CRC field. The whole-file digest is BLAKE3 over the concatenation of sections in canonical directory order, excluding the header; the header stores the specified digest prefix. A mismatch returns a structured error and marks the store unusable.
+Failures return structured `NyanCacheError` variants (`HeaderError`, `BoundsError`, `OverflowError`, `CorruptSectionError`, `WholeFileDigestError`, and related variants). No reader path aborts, terminates, segfaults, or dereferences unchecked data.
 
-## 9. ABI validation contract
+## 7. Deterministic serialization and capacity census
 
-The writer and reader explicitly implement these checks, in order:
+Identical source bytes, manifests, versions, and configuration produce byte-identical caches for every build. Canonical ordering applies to modules, objects, types, members, dependencies, diagnostics, strings, sections, and directory entries. All reserved/padding bytes and the timestamp field are zero. Build time is external log metadata only. Pointer values, process IDs, timestamps, random values, hash-map iteration order, thread scheduling, and filesystem traversal order never enter cache bytes.
 
-1. Magic.
-2. Supported format version.
-3. Endian marker.
-4. Hash algorithm id/version.
-5. Header CRC32C.
-6. Section bounds and non-overlap.
-7. Section alignment.
-8. Record alignment and zero padding.
-9. Checked integer multiplication/addition.
-10. String bounds and maximum lengths.
-11. Object/member count bounds.
-12. Truncation (`offset + size <= file_size`).
-13. Per-section CRC32C.
-14. Whole-file digest.
-15. Atomic publication is enforced by the writer: `.tmp`, `fsync`, `rename`, parent-directory `fsync`.
+Before full publication, the validator records maximum parent count, member count, string length, collection size, module/object/member/value totals, each section size and largest index/offset, and all field-width limits. Any capacity overflow or unsupported full-corpus value is a hard error. Stage 1 may use a small fixture and Dict diagnostics; full `de2_base` may not use that fallback.
 
-Failures return structured variants such as `HeaderError`, `FormatVersionError`, `EndianError`, `HashAlgorithmError`, `ChecksumError`, `BoundsError`, `OverlapError`, `AlignmentError`, `OverflowError`, `StringBoundsError`, `CountError`, `TruncationError`, `CorruptSectionError`, or `WholeFileDigestError`. No reader path aborts, terminates, segfaults, or dereferences an unchecked pointer.
+## 8. mmap lifecycle and generation-safe handles
 
-## 10. Deterministic serialization
+`MmapNyanStore` owns one descriptor and one read-only mapping. Views, `string_view`s, materialized objects, and handles carry the cache generation identity and are valid only while that exact generation remains open.
 
-For identical source bytes, ordered manifests, converter version, engine schema, cache format, and configuration, the complete cache is byte-identical. Determinism is enforced by:
+Live replacement/unmap is forbidden while any such object may remain alive; a new cache loads only on a later process start. Close clears lazy materialization and causes `StoreClosed`; debug builds assert and release builds return structured errors. Stale-generation handles assert in debug builds and return structured errors in release builds before any old index/mapping access. Persistent surfaces use FQON strings, never ObjectId.
 
-- canonical module, object, type, member, dependency, diagnostic, and section ordering;
-- FQON bytes and member names compared by raw UTF-8 bytes;
-- deterministic first-use string table assignment after canonical traversal;
-- fixed-width fields and explicit little-endian serialization;
-- zero creation-time or other nondeterministic metadata in the reproducibility mode used by tests;
-- all reserved and padding bytes written as zero;
-- no pointer values, process IDs, hash-map iteration order, thread scheduling, or filesystem traversal order in output.
+## 9. Reference implementation notes
 
-A deterministic-build test compares two independently built files byte-for-byte and also verifies that changing any declared input identity changes the closure identity.
-
-## 11. mmap lifecycle and handle safety
-
-`MmapNyanStore` owns one file descriptor and one read-only mapping. Mapped views, `string_view`s, and handles carry a generation identity and are valid only while that exact store generation remains open.
-
-The first implementation forbids live reload: it must not close/unmap or replace a cache while any `ObjectView`, `string_view`, `ObjectHandle`, or materialized object can remain alive. New cache loading is a next-process-start operation. Closing a store clears lazy materialization and causes subsequent access to return `StoreClosed`; debug builds assert at every accessor.
-
-ObjectIds are generation-scoped. Persistent surfaces use FQON strings only. Debug builds assert when a handle's generation differs from the store generation. Release builds return a structured stale-handle error before any index or pointer access. Overlay destruction precedes base close, and consumer-owned materialized objects are destroyed only after base-dependent views are gone.
-
-## 12. Reference implementation notes
-
-A Stage 1 fixture should exercise every record and accessor with approximately 30–50 objects. Full `de2_base` size and performance are Stage 2 measurements, not format assumptions. The [Test Matrix](2026-07-24-de2-base-fullload-test-matrix.md) defines the required fixture and corruption coverage.
+A Stage 1 fixture exercises every record/accessor with approximately 30–50 objects. Full `de2_base` size/performance are Stage 2 measurements. The [Test Matrix](2026-07-24-de2-base-fullload-test-matrix.md) defines fixture, capacity, and corruption coverage.

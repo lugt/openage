@@ -1,6 +1,6 @@
 # de2_base Full-Load — Test Matrix
 
-- Date: 2026-07-24 (revision 3)
+- Date: 2026-07-24 (revision 3.1)
 - Parent design: [main design spec](2026-07-24-de2-base-fullload-design.md)
 - Binary contract: [Binary Format Reference](2026-07-24-de2-base-fullload-binary-format.md)
 
@@ -17,7 +17,7 @@ Stage 1 uses an open-source fixture of approximately 30–50 objects. All Stage 
 - does not implement multi-cache composition;
 - does not start background workers or prewarm materialized objects.
 
-The fixture covers multiple modules, imports, cross-module FQON references, single and multilevel inheritance, member overrides, primitive values, object references, Set, OrderedSet, Dict-as-diagnostic, File values, and source diagnostics.
+The fixture covers multiple modules, imports, cross-module FQON references, inheritance, member overrides, primitive values, object references, Set, OrderedSet, Dict-as-diagnostic (fixture-only), File values, and source diagnostics. Full-corpus tests must reject unsupported values rather than using the fixture diagnostic fallback.
 
 ## 2. Fixture and parity
 
@@ -29,7 +29,7 @@ The fixture covers multiple modules, imports, cross-module FQON references, sing
 | `multi_module_resolution` | cross-module import/reference | same target FQON in both stores | 1 |
 | `inheritance_order_parity` | single and multilevel inheritance | member merge and override order matches TextStore | 1 |
 | `collection_parity` | Set and OrderedSet values | membership/order semantics match | 1 |
-| `dict_unhandled_is_safe` | Dict value | structured diagnostic; no crash | 1 |
+| `dict_unhandled_fixture_only` | Dict in Stage 1 fixture | structured diagnostic; no crash; not publishable for full corpus | 1 |
 | `fixture_runtime_seconds` | complete Stage 1 suite | finishes in seconds | 1 |
 
 ## 3. Hash collision and string identity
@@ -63,8 +63,18 @@ Each corruption case starts from a known-valid fixture cache and changes one pro
 | 11 | object/member count exceeds totals | `CountError` |
 | 12 | truncate at every section boundary | `TruncationError` |
 | 13 | corrupt each section independently | `CorruptSectionError` |
-| 14 | valid section CRCs but wrong whole digest | `WholeFileDigestError` |
+| 14 | valid payloads but wrong complete digest | `WholeFileDigestError` |
 | 15 | fail before rename/fsync | prior cache remains byte-identical |
+
+Directory-only corruption cases (payload bytes unchanged):
+
+- modify section directory offset;
+- modify section directory size;
+- modify section directory flags;
+- reorder directory entries;
+- modify directory CRC field;
+- modify the complete closure digest or complete whole-file digest;
+- modify the zero timestamp field to a nonzero value.
 
 Additional cases:
 
@@ -84,6 +94,7 @@ The validator runs against the existing text path and never writes cache output.
 | Test | Corpus defect | Expected result |
 |---|---|---|
 | `validator_clean_passes` | known-good minimal modpack | exit 0 |
+| `validator_manifest_complete_closure` | manifests declaring modules not imported by Mission 1 | all declared modules/FQONs indexed |
 | `validator_missing_name` | absent referenced FQON | `NameError` with location/chain |
 | `validator_missing_member` | absent member | `MemberNotFoundError` |
 | `validator_member_type` | incompatible value/member type | `MemberTypeError` |
@@ -128,19 +139,30 @@ The full `engine + de2_base` corpus must exit 0 before a full cache can be prepa
 | `no_live_reload` | replacement requested with live views/handles/materialized objects | replacement refused; old mapping stays live |
 | `next_process_loads_new_cache` | publish new cache, restart process | new generation loads successfully |
 
-## 8. Determinism
+## 8. Determinism and capacity census
 
 | Test | Procedure | Expected result |
 |---|---|---|
-| `deterministic_byte_identity` | build twice from identical declared inputs | files are byte-identical |
+| `deterministic_byte_identity` | build twice from identical declared inputs | files are byte-identical in every build |
+| `deterministic_timestamp_zero` | inspect header offset 16 across repeated formal/fixture builds | eight bytes are always zero |
 | `filesystem_order_independent` | enumerate source files in different order | identical output |
 | `hash_map_order_independent` | vary insertion order | identical output |
 | `padding_is_zero` | inspect all reserved/alignment bytes | all zero |
 | `canonical_sections` | inspect section directory | canonical fixed ordering |
 | `canonical_records` | inspect module/object/member/string records | canonical ordering and stable offsets |
-| `declared_input_changes_identity` | change one source/manifest/version/config item | closure identity changes |
+| `complete_closure_digest` | recompute full 32-byte closure digest | exact match; truncation is rejected |
+| `complete_whole_file_digest` | recompute directory-plus-payload BLAKE3 | exact 32-byte match |
+| `declared_input_changes_identity` | change one source/manifest/version/config item | full closure digest changes |
+| `capacity_parent_count` | corpus census | maximum fits parent field |
+| `capacity_member_count` | corpus census | maximum fits member/count fields |
+| `capacity_string_length` | corpus census | maximum fits string length/index fields |
+| `capacity_collection_size` | corpus census | maximum fits collection encoding |
+| `capacity_totals` | corpus census | module/object/member/value totals fit fields |
+| `capacity_u32_offsets` | corpus census | `STRINGS` and every section stay within u32 index/offset limits |
+| `capacity_overflow_rejected` | synthetic over-capacity corpus | structured capacity error; no cache publication |
+| `unsupported_full_corpus_value` | synthetic unsupported value outside Stage 1 fallback | validator/prepare fails; no cache publication |
 
-Timestamps or environment-specific metadata must not break the deterministic test mode.
+Build time and timestamps must never enter cache bytes; they may appear only in external logs.
 
 ## 9. mmap, materialization, and overlay lifecycle
 
@@ -158,7 +180,7 @@ Timestamps or environment-specific metadata must not break the deterministic tes
 
 ## 10. Performance gates and observations
 
-Performance tests run only after full `engine + de2_base` validation and cache preparation. In sandboxes without converted data they are skipped, not reported as passed; user-side acceptance must run them.
+Performance tests run only after full `engine + de2_base` validation, manifest-complete collection, capacity census, and cache preparation. In sandboxes without converted data they are skipped, not reported as passed; user-side acceptance must run them.
 
 | Test | Measurement | Gate |
 |---|---|---|
@@ -180,6 +202,9 @@ Performance tests run only after full `engine + de2_base` validation and cache p
 - `full_string_equality_required`: mutation removing equality check makes collision test fail.
 - `persistent_reference_lint`: save/replay/network/scenario persistence cannot serialize generation-local ObjectId.
 - `failed_prepare_preserves_cache`: all validator, serialization, checksum, disk, and rename failures preserve the last valid artifact.
+- `directory_integrity_required`: offset/size/flags/order mutations are rejected without payload changes.
+- `full_value_support_required`: unsupported full-corpus value blocks publication.
+- `capacity_census_required`: all maxima and section/index capacities are measured before full publication.
 
 ## 12. Acceptance mapping
 
@@ -187,7 +212,7 @@ Performance tests run only after full `engine + de2_base` validation and cache p
 |---|---|
 | AC-1 | §6 exception/process safety |
 | AC-2–AC-3 | §5 validator corpus/outputs |
-| AC-4–AC-5 | §7 prepare/atomic publication |
+| AC-4–AC-5 | §7 prepare/atomic publication and §8 census/value gates |
 | AC-6–AC-7 | §10 startup and I/O gates |
 | AC-8 | `parse_once_per_file` |
 | AC-9 | §7 identity invalidation |
@@ -195,6 +220,10 @@ Performance tests run only after full `engine + de2_base` validation and cache p
 | AC-11 | `no_tutorial_assets` |
 | AC-12 | §1–§2 fixture scope and runtime |
 | OBS-1 | `mission1_observations` |
-| Invariant 16 | §8 deterministic build |
-| Invariant 17 | `no_live_reload`, next-process test |
-| Invariant 18 | stale-generation and lifecycle tests |
+| Invariants 16–18 | §8 deterministic/digest tests |
+| Invariants 21–22 | §8 full-value/capacity tests |
+| Manifest-complete closure | `validator_manifest_complete_closure` |
+
+## 13. Revision 3.1 additions
+
+Revision 3.1 adds no architecture. It only makes the following previously implicit binary/test constraints executable: zero timestamp, 16+ character closure filename hint, complete closure and whole-file digests, directory coverage, manifest-complete collection, full-corpus lossless values, and capacity census.

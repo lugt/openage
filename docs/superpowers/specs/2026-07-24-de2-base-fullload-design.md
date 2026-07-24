@@ -1,6 +1,6 @@
 # de2_base Full-Load Correctness and Performance — Design Spec
 
-- Date: 2026-07-24 (revision 3)
+- Date: 2026-07-24 (revision 3.1)
 - Branch: `mvp/tutorial-demo`
 - Owner: openage MVP tutorial
 - Status: Draft for implementation planning
@@ -48,7 +48,7 @@ The preparation flow is:
 
 1. Read manifests from the ordered user modpack list.
 2. Resolve dependencies, reject cycles, and canonicalize the closure.
-3. Collect reachable `.nyan` modules into one global namespace.
+3. Collect **every `.nyan` module declared by every manifest in the resolved closure** into one global namespace. This is manifest-complete collection, not Mission 1 or import-reachable subset collection. All modules and all declared FQONs enter the cache index even when their objects are lazy-materialized later.
 4. Reject duplicate FQON declarations with both source locations.
 5. Run `validate-nyan`; any error prevents cache publication.
 6. Build the packed cache using canonical ordering and the pinned hash policy.
@@ -86,7 +86,7 @@ The mandatory order is:
 6. **NyanStore adapter integration** — connect cache-backed reads at the approved adapter boundary, with lifecycle and handle checks.
 7. **Full `de2_base` cache + performance gates** — prepare and measure the real closure; enforce cold/warm startup budgets.
 
-No cache is considered valid merely because it can be written. Validator exit 0, source/manifest/version identity, binary ABI validation, deterministic serialization, and atomic publication are all required. The detailed error categories and corruption cases are in the [Test Matrix](2026-07-24-de2-base-fullload-test-matrix.md).
+No cache is considered valid merely because it can be written. Validator exit 0, source/manifest/version identity, binary ABI validation, deterministic serialization, complete closure collection, full value-variant support, capacity census, and atomic publication are all required. The detailed error categories and corruption cases are in the [Test Matrix](2026-07-24-de2-base-fullload-test-matrix.md). Unsupported values in a validated full corpus block publication; `Dict-as-diagnostic` is permitted only in the Stage 1 fixture prototype.
 
 ## 6. Acceptance criteria
 
@@ -118,22 +118,26 @@ Any implementation change that violates one of these rules reopens the design.
 
 1. **No tutorial assets**: `assets/converted/tutorial_assets/` and `tutorial_assets.*` FQONs do not exist.
 2. **One closure file**: one dependency closure produces one cache file, not per-modpack files.
-3. **Validator gate**: only validator exit 0 may publish; failure preserves the previous cache.
-4. **Hash correctness**: vendored wyhash, frozen seed/byte-order policy, and mandatory full-string equality; never `std::hash`.
-5. **Binary ABI safety**: all mandatory reader/writer checks return structured errors; no abort, terminate, or unsafe dereference.
-6. **Atomic publication**: temporary file + fsync + rename + parent fsync; never in-place publication.
-7. **Generation-scoped ObjectId**: object IDs are valid only within one open cache generation.
-8. **FQON persistence**: persistent references use FQON strings, never ObjectId.
-9. **No silent rebuild**: game fails fast on missing/invalid cache and gives the prepare command.
-10. **Exception safety**: engine, CLI, and loader convert unexpected input failures to structured exit statuses without core dumps.
-11. **Stage 1 isolation**: fixture prototype does not modify libnyan parser/resolver/transaction/lexer/AST, formal startup, or tutorial runtime.
-12. **Single-threaded Stage 1**: no parallel parsing and no background materialization warming.
-13. **FQON truth**: FQON bytes are preserved exactly; strings are stored once and referenced by offset/length.
-14. **Header authority**: filename is a hint; header identity and integrity fields are authoritative.
-15. **Format scope**: cache serialization uses hand-rolled packed POD, not msgpack/SQLite/capnproto/protobuf.
-16. **Deterministic build**: identical source bytes, manifests, versions, and configuration produce byte-identical caches. Objects, modules, members, strings, sections, and all padding/reserved bytes use canonical ordering and zero values where reserved.
-17. **No live reload**: a cache is never replaced or unmapped while any `ObjectView`, `string_view`, `ObjectHandle`, or materialized object may remain alive. A new cache is loaded only on a later process start.
-18. **Generation-safe handles**: every internal handle carries cache-generation identity. Debug builds assert on stale handles; release builds return structured errors and never access an old mapping.
+3. **Manifest-complete closure**: every `.nyan` module declared by every manifest in the resolved dependency closure, and every declared FQON, is present in the module/FQON index; lazy materialization does not reduce index coverage.
+4. **Validator gate**: only validator exit 0 may publish; failure preserves the previous cache.
+5. **Hash correctness**: vendored wyhash, frozen seed/byte-order policy, and mandatory full-string equality; never `std::hash`.
+6. **Binary ABI safety**: all mandatory reader/writer checks return structured errors; no abort, terminate, or unsafe dereference.
+7. **Atomic publication**: temporary file + fsync + rename + parent fsync; never in-place publication.
+8. **Generation-scoped ObjectId**: object IDs are valid only within one open cache generation.
+9. **FQON persistence**: persistent references use FQON strings, never ObjectId.
+10. **No silent rebuild**: game fails fast on missing/invalid cache and gives the prepare command.
+11. **Exception safety**: engine, CLI, and loader convert unexpected input failures to structured exit statuses without core dumps.
+12. **Stage 1 isolation**: fixture prototype does not modify libnyan parser/resolver/transaction/lexer/AST, formal startup, or tutorial runtime.
+13. **Single-threaded Stage 1**: no parallel parsing and no background materialization warming.
+14. **FQON truth**: FQON bytes are preserved exactly; strings are stored once and referenced by offset/length.
+15. **Header authority**: filename is a hint; header identity and integrity fields are authoritative.
+16. **Format scope**: cache serialization uses hand-rolled packed POD, not msgpack/SQLite/capnproto/protobuf.
+17. **Deterministic build**: identical source bytes, manifests, versions, and configuration produce byte-identical caches for every build, not only test mode. Objects, modules, members, strings, sections, and all padding/reserved bytes use canonical ordering and zero values where reserved; the creation timestamp field is always zero and build time is external metadata only.
+18. **Complete digest coverage**: the full 32-byte closure digest and full 32-byte whole-file BLAKE3 digest are stored and validated. The whole-file digest covers the canonical section directory and every section payload; no truncated digest is authoritative.
+19. **No live reload**: a cache is never replaced or unmapped while any `ObjectView`, `string_view`, `ObjectHandle`, or materialized object may remain alive. A new cache is loaded only on a later process start.
+20. **Generation-safe handles**: every internal handle carries cache-generation identity; debug builds assert on stale handles and release builds return structured errors without accessing an old mapping.
+21. **Full value coverage**: `Dict-as-diagnostic` is a Stage 1 fixture-only limitation. Before full `de2_base` publication, every value/type variant in the validated corpus has a lossless binary representation; unsupported values block publication.
+22. **Capacity census**: the full-corpus gate measures maximum parent/member/string/collection sizes and all module/object/value totals, and rejects any count or offset that exceeds its binary field capacity, including u32 index/offset limits.
 
 ## 9. Revision 3 migration map
 
