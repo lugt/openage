@@ -111,11 +111,11 @@ _Pos14_1(engine.util.terrain.Size):
 # ---------------------------------------------------------------------------
 
 PlayerVillager(engine.util.game_entity.PlacedEntity):
-    PlacedEntity.entity = engine.util.tutorial_data.TutorialVillager
+    PlacedEntity.entity = de2_base.data.game_entity.generic.villager.villager.Villager
     PlacedEntity.position = _Pos8_8
 
 PlayerTownCenter(engine.util.game_entity.PlacedEntity):
-    PlacedEntity.entity = engine.util.tutorial_data.TutorialTownCenter
+    PlacedEntity.entity = de2_base.data.game_entity.generic.town_center.town_center.TownCenter
     PlacedEntity.position = _Pos8_9
 
 
