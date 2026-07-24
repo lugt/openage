@@ -31,17 +31,20 @@ from typing import Iterable
 # grammar; we are looking for the patterns that surface real bugs
 # (missing FQON in type-argument position).
 _IMPORT_RE = re.compile(r"^\s*import\s+([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)+)"
-                        r"(?:\s+as\s+([A-Za-z_][\w]*))?")
+                        r"(?:\s+as\s+([A-Za-z_][\w]*))?", re.M)
 # `<FQON>` type argument. We avoid matching `<<`. The FQON may have
 # any number of segments (>= 1) since real bugs often involve a
 # bare `ArsonResearchable` form just as much as a fully qualified
 # `ArsonResearchable.ArsonCost.GoldAmount`.
 _FQON_RE = re.compile(r"<([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)>")
-# Top-level `X.Y.Z(parent_or_thing):` declaration pattern, restricted
-# to lines that start at column 0 (no leading whitespace) which is
-# how nyan denotes top-level objects. Single-segment names are also
-# accepted (e.g. `Slavs(civ.PlayerSetup):`).
-_TOPLEVEL_DECL_RE = re.compile(r"^([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)\s*\(")
+# Declaration pattern: `Name(...):` anywhere in the file. nyan allows
+# nested objects (indented under another object), so we cannot rely
+# on `^` to mean "top level". Instead, we accept any `Name(` token
+# and trust the nyan parser's later semantic check to filter. This
+# over-collects (set elements like `Foo, Bar` are caught too) but the
+# union of every file is a reasonable upper bound for a corpus-wide
+# catalog of declared FQONs.
+_DECL_RE = re.compile(r"(?<![\w.])([A-Z][\w]*(?:\.[A-Z][\w]*)*)\s*\(")
 
 
 def _scan_file(path: pathlib.Path) -> dict:
@@ -63,10 +66,17 @@ def _scan_file(path: pathlib.Path) -> dict:
                 # alias prefix aliases every member of the target module.
                 imports.add(f"{alias_prefix}.*")
             continue
-        m = _TOPLEVEL_DECL_RE.match(raw)
-        if m:
-            declared.add(m.group(1))
-            continue
+        for m_decl in _DECL_RE.finditer(raw):
+            name = m_decl.group(1)
+            # Skip the obvious false positives:
+            #   - `patch.NyanPatch`, `research.ResearchableTech` etc. are
+            #     type expressions, not declarations. They always begin
+            #     with a lowercase module name. We require the first
+            #     segment to be capitalized.
+            #   - `o{...}` set literals use `Foo, Bar` syntax; we have
+            #     already filtered to `Foo(` form, but the `(` after a
+            #     name in a set is rare. Most set entries are bare.
+            declared.add(name)
         for fqon in _FQON_RE.findall(raw):
             refs.append((lineno, fqon))
     return {"declared": declared, "imports": imports, "refs": refs}
