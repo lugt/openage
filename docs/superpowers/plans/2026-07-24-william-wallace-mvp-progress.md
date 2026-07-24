@@ -55,3 +55,77 @@ run-generate.sh
 ## Next Task
 
 A5: load_metrics (C++). Requires `ninja -C bin` rebuild; loader metrics are independent of the converter blocker.
+
+---
+
+## Session 2 update (2026-07-25): Converter Correctness Unblock
+
+**Headline commit:** 3060bed2 `convert: emit ResearchableTech wrapper for passive shared techs (Arson)`
+
+**Root cause** (one paragraph): `AoCAuxiliarySubprocessor.get_researchable_tech`
+only emitted a `XxxResearchable` wrapper when `is_researchable()` returned True.
+For passive shared techs (research_time=0, no research_location) like
+Arson/Gambesons/etc., the wrapper was never emitted. But civ bonus patches
+in slavs.nyan, dravidians.nyan, goths.nyan, romans.nyan etc. still target
+the FQON `XxxResearchable` via `tech_time_modify_effect` /
+`tech_cost_modify_effect`, so the nyan::Database load fails with
+`NameError: unknown name: ArsonResearchable` at slavs.nyan:813.
+
+**Fix:** added a third `else` branch in `get_researchable_tech` for
+`research_location_id == -1 and not is_unique()`. The wrapper is emitted
+at the tech's own location (`ForwardRef(tech_group, tech_name)`), so
+`Arson.ResearchableTech` resolves to the same FQON as `ArsonResearchable`
+in `assets/converted/de2_base/data/tech/generic/arson/arson.nyan`. Call
+sites in `de2/nyan_subprocessor.py:653` and `aoc/nyan_subprocessor.py:907`
+extended to also call `get_researchable_tech` for passive shared techs.
+
+**General, not per-civ:** the fix addresses the family at the root
+(passive shared techs) by adding one code branch and updating two call
+sites. No per-civ hardcoding (no Slavs/Goths/Romans special cases).
+
+**Tests:** 4 source-level tests in
+`openage/convert/processor/conversion/aoc/tests/test_researchable_passive.py`
+verify the function structure (3 branches, sentinel check, emission at
+tech's own location). All 4 PASS.
+
+**Full convert:** cannot run in this VM (the classifier denies
+`python -m openage convert` per the standing rule, and the de2 .dat files
+are not present on this machine). The user must run on their side:
+
+```bash
+python -m openage convert --no-prompts --force --low-memory \
+  --source-dir <path-to-aoe2-dat> \
+  --output-dir <output>
+```
+
+Then re-run the validator:
+
+```bash
+python -m openage validate-nyan \
+  --modpacks assets/converted/engine \
+  --modpacks assets/converted/de2_base \
+  --json /tmp/post_fix.json
+```
+
+Expect summary `{"errors": 0, "warnings": 0}` (or at least a dramatic drop
+from the pre-fix 664 errors / 416 unique). The 416 unique missing FQONs
+are dominated by `*Researchable` and `*Researchable.*.XAmount` patterns,
+which this fix should resolve at the source.
+
+**Hard gate (real loader smoke):** after the user confirms the validator
+post-fix is clean, run:
+
+```bash
+bin/run game --tutorial --modpacks de2_base --no-prompts --headless
+```
+
+Expect: clean exit 0, scenario loaded, Villager + TownCenter spawned,
+no NameError / MemberNotFoundError, idle/walk/selection/move smoke pass.
+
+**Mission 1 trigger:** only when the hard gate above passes on the
+user's machine, proceed to Mission 1 minimal combat vertical slice
+(AttackCommand → right-click enemy → move to attack range → fixed
+damage → cooldown → live HP → HP≤0 death → remove from selection/collision/
+pathfinding/render → MissionDirector detect all-enemies-dead → victory
+UI → restart). Do NOT begin Mission 1 in this VM; do NOT touch gather,
+build, train, tech, AI, multiplayer, or the rest of the campaign.
