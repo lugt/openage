@@ -65,6 +65,17 @@ def init_subparser(cli: ArgumentParser):
              "automatically")
 
     cli.add_argument(
+        "--no-convert", action='store_true', dest='no_convert',
+        default=True,
+        help="disable automatic converter / api-export runs. Openage will "
+             "only LOAD existing converted assets; missing or outdated "
+             "assets cause a fast, readable failure. Use the explicit "
+             "`openage convert` subcommand (or omit --no-convert) to run "
+             "the converter. Note: --no-prompts only gates the *interactive* "
+             "converter prompt; --no-convert is the hard kill switch and "
+             "is what production / tutorial should pass.")
+
+    cli.add_argument(
         "--window-size", nargs=2, type=int, default=[1024, 768],
         metavar=('WIDTH', 'HEIGHT'),
         help="Initial window size in pixels")
@@ -121,17 +132,68 @@ def main(args, error):
     root["cfg"].mount(get_config_path(args.cfg_dir))
     args.cfg_dir = root["cfg"]
 
+    # PHASE: converted-asset check + conversion decision
+    import time as _time_phase
+    def _phase(name):
+        _t0 = _time_phase.monotonic()
+        return name, _t0
+    def _phase_end(name_t0, *, note=""):
+        name, t0 = name_t0
+        info("[PHASE] %s done in %.3fs%s", name, _time_phase.monotonic() - t0,
+             (" -- " + note) if note else "")
+
+    # Decide up front whether the converter is allowed to run at all.
+    # --no-convert (default True) is a hard kill switch.
+    show_prompts = bool(getattr(args, "show_prompts", True))
+    no_convert = bool(getattr(args, "no_convert", True))
+    converter_allowed = show_prompts and not no_convert
+    # wanna_convert() may read stdin for an interactive prompt; only
+    # call it when both prompts are enabled AND --no-convert is OFF
+    # (a pass that reads stdin from closed FD EOFErrors in CI/headless).
+    if converter_allowed:
+        converter_forced_run = bool(wanna_convert())
+    else:
+        converter_forced_run = False
+    # api_export is the small nyan-API regen, NOT the full converter.
+    api_export_required_now = api_export_required(asset_path)
+    info("CONVERSION_DECISION: api_export=%s ; converter_full=%s",
+         "run" if api_export_required_now else "skip",
+         "run" if converter_forced_run else "skip")
+    info("CONVERSION_REASON: --no-prompts=%s, --no-convert=%s (wanna_convert "
+         "not invoked because converter is suppressed)", show_prompts,
+         no_convert)
+
     # ensure that the openage API is present
-    if api_export_required(asset_path):
-        # export to assets folder
+    api_phase = _phase("api_export")
+    if api_export_required_now:
+        if not converter_allowed:
+            # The user passed --no-convert; engine nyan API is missing or
+            # outdated. We do NOT auto-regenerate; we fail fast and clearly.
+            from ..error import Error as _Error
+            from ..log import err as _err
+            _err("openage nyan API modpack is missing or outdated but "
+                 "--no-convert was passed; refusing to auto-export. "
+                 "Run `openage convert-export-api %s` then retry.",
+                 asset_path)
+            raise _Error(_Error("openage nyan API modpack missing or outdated"))
+        info("Regenerating openage nyan API modpack (api_export)")
         converted_path = asset_path / "converted"
         converted_path.mkdirs()
         export_api(converted_path)
+    _phase_end(api_phase)
 
-    # check if modpacks need to be converted
-    if args.show_prompts and wanna_convert():
+    # full converter: only via interactive prompt (--no-prompts blocks it).
+    convert_phase = _phase("converter_full")
+    if converter_forced_run:
+        info("Running full converter (interactive prompt active)")
         convert_assets(asset_path, args)
+    else:
+        info("[SKIP] converter_full: --no-prompts=%s, --no-convert=%s",
+             bool(getattr(args, "show_prompts", True)),
+             bool(getattr(args, "no_convert", True)))
+    _phase_end(convert_phase)
 
+    enumerate_phase = _phase("modpack_discovery")
     available_modpacks = enumerate_modpacks(asset_path / "converted")
     playable_modpacks = {
         name: version
@@ -143,9 +205,11 @@ def main(args, error):
         if not args.modpacks:
             info("Starting bare 'engine' mode")
             args.modpacks = ["engine"]
+    _phase_end(enumerate_phase)
 
-    # check if the converted modpacks are up to date
+    check_updates_phase = _phase("check_updates")
     check_updates(playable_modpacks, args.cfg_dir / "converter" / "games")
+    _phase_end(check_updates_phase)
 
     # pass modpacks to engine
     #

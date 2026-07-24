@@ -28,6 +28,15 @@ def init_subparser(cli: ArgumentParser) -> None:
         help="run without displaying graphics")
 
     cli.add_argument(
+        "--no-convert", action='store_true', dest='no_convert',
+        default=True,
+        help="Disable automatic converter / api-export runs. openage will "
+             "only LOAD existing converted assets; missing or outdated "
+             "assets cause a fast, readable failure. Production / "
+             "tutorial should pass this. Use the explicit `openage convert` "
+             "subcommand (or omit --no-convert) to run the converter.")
+
+    cli.add_argument(
         "--modpacks", nargs="+", required=True, type=str,
         help="list of modpacks to load")
 
@@ -90,23 +99,56 @@ def main(args, error):
     root["cfg"].mount(get_config_path(args.cfg_dir))
     args.cfg_dir = root["cfg"]
 
-    # ensure that the openage API is present
-    if api_export_required(asset_path):
-        # export to assets folder
+    # PHASE: converted-asset check + conversion decision (game command)
+    import time as _time_phase
+    def _phase_end(name, t0, *, note=""):
+        info("[PHASE] %s done in %.3fs%s", name, _time_phase.monotonic() - t0,
+             (" -- " + note) if note else "")
+
+    # Decision: never run api_export or converter without explicit user opt-in.
+    api_required_now = api_export_required(asset_path)
+    no_convert = bool(getattr(args, "no_convert", True))
+    info("CONVERSION_DECISION: api_export=%s",
+         "run" if api_required_now else "skip")
+    info("CONVERSION_REASON: api_required=%s, --no-convert=%s (game has NO "
+         "full-converter path; only api-export can auto-run for the engine "
+         "modpack and is suppressed when --no-convert)", api_required_now,
+         no_convert)
+
+    api_t0 = _time_phase.monotonic()
+    if api_required_now:
+        if no_convert:
+            from ..error import Error as _Error
+            from ..log import err as _err
+            _err("openage nyan API modpack is missing or outdated but "
+                 "--no-convert was passed; refusing to auto-export. "
+                 "Run `openage convert-export-api %s` then retry.",
+                 asset_path)
+            raise _Error(_Error("openage nyan API modpack missing or "
+                                "outdated"))
+        info("Regenerating openage nyan API modpack (api_export)")
         converted_path = asset_path / "converted"
         converted_path.mkdirs()
         export_api(converted_path)
+    _phase_end("api_export", api_t0)
 
-    # ensure that modpacks are available
+    enum_t0 = _time_phase.monotonic()
     modpack_dir = asset_path / "converted"
     available_modpacks = enumerate_modpacks(modpack_dir, exclude={"engine"})
-    for modpack in args.modpacks:
-        if modpack not in available_modpacks:
-            raise FileNotFoundError(f"Modpack '{modpack}' not found in {modpack_dir}")
+    missing = [m for m in args.modpacks if m not in available_modpacks]
+    if missing:
+        raise FileNotFoundError(
+            f"Modpack(s) {missing} not found in {modpack_dir}. "
+            f"Run `openage convert` first, or omit --no-convert to let "
+            f"the engine nyan API regenerate.")
+    _phase_end("modpack_discovery", enum_t0)
 
-    # check if the converted modpacks are up to date
     if args.check_updates:
+        chk_t0 = _time_phase.monotonic()
         check_updates(available_modpacks, args.cfg_dir / "converter" / "games")
+        _phase_end("check_updates", chk_t0)
+    else:
+        info("[PHASE] check_updates skipped (only runs with --check-updates)")
 
     # encode modpacks as bytes for the C++ interface
     args.modpacks = [modpack.encode('utf-8') for modpack in args.modpacks]
