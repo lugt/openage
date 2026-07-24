@@ -25,6 +25,10 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		simulation_demo_2(path);
 		break;
 
+	case 3:
+		simulation_demo_3(path);
+		break;
+
 	default:
 		log::log(MSG(err) << "Unknown renderer demo requested: " << demo_id << ".");
 		break;

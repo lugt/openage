@@ -42,4 +42,18 @@ void simulation_demo_1(const util::Path &path);
  */
 void simulation_demo_2(const util::Path &path);
 
+/**
+ * Headless real-camera picking test (demo id 3).
+ *
+ * Replaces the identity-camera assumption. Calls screen_to_world_on_terrain
+ * with the tutorial's actual camera parameters (scene_pos, viewport, real_zoom
+ * derived from presenter.cpp look_at_coord(scene3{10,10,0}) + calc_look_at) and
+ * clicks at known screen positions, outputting every intermediate coordinate
+ * (NDC, ray origin, ray/terrain intersection, final scene3). Asserts: screen
+ * center -> camera focus; right -> +se; left -> -se; top -> +ne (no Y flip);
+ * bottom -> -ne; center is viewport/DPR-invariant. If any fails, the first
+ * failing step's logged values pinpoint the picking math error.
+ */
+void simulation_demo_3(const util::Path &path);
+
 } // namespace openage::gamestate::tests

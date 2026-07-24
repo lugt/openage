@@ -5,6 +5,7 @@ add_sources(libopenage
 	coord_test.cpp
 	declarations.cpp
 	phys.cpp
+	picking.cpp
 	pixel.cpp
     scene.cpp
 	term.cpp

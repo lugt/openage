@@ -187,6 +187,37 @@ public:
 	Eigen::Vector3f get_input_pos(const coord::input &coord) const;
 
 	/**
+	 * Get the camera eye position in the 3D scene.
+	 *
+	 * Exposed for screen-to-world picking (pixel.cpp screen_to_world_on_terrain
+	 * needs the eye + camera basis to unproject a mouse position). Kept as a
+	 * getter (rather than making scene_pos public) so the camera can still
+	 * enforce invariants on its own eye position.
+	 *
+	 * @return Current scene (eye) position.
+	 */
+	inline Eigen::Vector3f get_scene_pos() const {
+		return this->scene_pos;
+	}
+
+	/**
+	 * Get the zoom factor applied to the camera projection.
+	 *
+	 * The zoom factor is calculated as
+	 *
+	 *     zoom * zoom_ratio * 0.5f
+	 *
+	 * Note that this zoom factor should NOT be used for sprite scaling, but
+	 * only for 3D projection matrix calculations. For sprite scaling, use
+	 * \p get_zoom() .
+	 *
+	 * @return Zoom factor for projection.
+	 */
+	inline float get_real_zoom_factor() const {
+		return 0.5f * this->default_zoom_ratio * this->zoom;
+	}
+
+	/**
 	 * Get the uniform buffer for this camera.
 	 *
 	 * @return Uniform buffer.
@@ -224,22 +255,9 @@ private:
 	Eigen::Vector3f calc_look_at(Eigen::Vector3f target);
 
 	/**
-	 * Get the zoom factor applied to the camera projection.
-	 *
-	 * The zoom factor is calculated as
-	 *
-	 *     zoom * zoom_ratio * 0.5f
-	 *
-	 * Note that this zoom factor should NOT be used for sprite scaling, but
-	 * only for 3D projection matrix calculations. For sprite scaling, use
-	 * \p get_zoom() .
-	 *
-	 * @return Zoom factor for projection.
-	 */
-	inline float get_real_zoom_factor() const;
-
-	/**
 	 * Position in the 3D scene.
+	 *
+	 * Use get_scene_pos() to read from outside this class.
 	 */
 	Eigen::Vector3f scene_pos;
 

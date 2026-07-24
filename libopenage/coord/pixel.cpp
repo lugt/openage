@@ -3,6 +3,7 @@
 #include "pixel.h"
 
 #include "coord/phys.h"
+#include "coord/picking.h"
 #include "renderer/camera/camera.h"
 #include "renderer/camera/definitions.h"
 
@@ -54,20 +55,14 @@ phys3 input::to_phys3(const std::shared_ptr<renderer::camera::Camera> &camera) c
 
 
 scene3 input::to_scene3(const std::shared_ptr<renderer::camera::Camera> &camera) const {
-	// Use raycasting to find the position
-	// Direction and origin point are fetched from the camera
-	auto cam_dir = renderer::camera::CAM_DIRECTION;
-	auto ray_origin = camera->get_input_pos(*this);
-
-	// xz plane that we want to intersect with
-	// TODO: Account for different terrain heights (move code somewhere else?)
-	auto plane_pos = Eigen::Vector3f(0.0f, 0.0f, 0.0f);
-	auto plane_dir = Eigen::Vector3f(0.0f, 1.0f, 0.0f);
-
-	// calculate intersection point
-	Eigen::Vector3f p_intersect = ray_origin + cam_dir * ((plane_pos - ray_origin).dot(plane_dir) / cam_dir.dot(plane_dir));
-
-	return scene3(-p_intersect.z(), p_intersect.x(), 0.0f);
+	// Single source of truth: see coord/picking.h. Both drag-select and
+	// right-click move go through screen_to_world_on_terrain so they cannot
+	// disagree on NDC, Y-flip, ray/terrain intersection, or world->scene3.
+	return screen_to_world_on_terrain(
+		*this,
+		camera->get_viewport_size(),
+		camera->get_scene_pos(),
+		camera->get_real_zoom_factor());
 }
 
 } // namespace coord

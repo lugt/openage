@@ -297,9 +297,5 @@ Eigen::Vector3f Camera::calc_look_at(Eigen::Vector3f target) {
 		target[2] + side_length);
 }
 
-inline float Camera::get_real_zoom_factor() const {
-	return 0.5f * this->default_zoom_ratio * this->zoom;
-}
-
 
 } // namespace openage::renderer::camera

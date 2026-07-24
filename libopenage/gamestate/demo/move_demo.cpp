@@ -3,12 +3,15 @@
 #include "move_demo.h"
 
 #include <cmath>
+#include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <eigen3/Eigen/Dense>
 
 #include "coord/phys.h"
+#include "coord/picking.h"
 #include "coord/tile.h"
 #include "cvar/cvar.h"
 #include "event/event_loop.h"
@@ -25,10 +28,12 @@
 #include "gamestate/simulation.h"
 #include "gamestate/types.h"
 #include "log/log.h"
+#include "log/level.h"
 #include "log/message.h"
 #include "time/time.h"
 #include "time/time_loop.h"
 #include "util/fixed_point.h"
+#include "util/vector.h"
 
 
 namespace openage::gamestate::tests {
@@ -287,6 +292,91 @@ void simulation_demo_2(const util::Path &path) {
 		log::log(MSG(err) << "FAIL: villager did NOT move via selection chain.");
 	}
 	log::log(MSG(info) << "========== END SELECTION + MOVE TEST ==========");
+}
+
+void simulation_demo_3(const util::Path &/*path*/) {
+	log::log(MSG(info) << "========== REAL-CAMERA PICKING TEST (demo 3) ==========");
+	log::log(MSG(info) << "Tests screen_to_world_on_terrain with the tutorial's ACTUAL "
+	                   << "camera params (no identity camera, no window). Outputs every "
+	                   << "intermediate coordinate so the first picking error is visible.");
+
+	// Tutorial camera, derived from presenter.cpp:121-122:
+	//   Camera(renderer, window->get_size()); look_at_coord(scene3{10,10,0})
+	// look_at_coord -> look_at_scene(world(10,0,-10)) -> calc_look_at:
+	//   y_delta = 10, xz_distance = 10*sqrt(3) = 17.32, side = 17.32/sqrt(2) = 12.25
+	//   new_pos = (10+12.25, 10, -10+12.25) = (22.25, 10, 2.25), within boundaries.
+	Eigen::Vector3f camPos{22.25f, 10.0f, 2.25f};
+	util::Vector2s viewport{1280, 720};
+	float realZoom = 0.5f * (1.0f / 49.0f) * 1.0f;
+	log::log(MSG(info) << "cam_scene_pos=(" << camPos.x() << ","
+	                   << camPos.y() << "," << camPos.z()
+	                   << ") viewport=" << viewport[0] << "x" << viewport[1]
+	                   << " real_zoom=" << realZoom
+	                   << " (=> ortho half-width = " << (640 * realZoom) << " tiles)");
+
+	// Turn on DBG so screen_to_world_on_terrain prints ndc/ray_origin/t/hit per click.
+	log::set_level(log::level::dbg);
+
+	// CamelCase names (not pc/pb/etc) avoid bizarre "non-class type char" errors
+	// triggered by Eigen SIMD packet locals sharing those short names.
+	coord::scene3 resCenter = coord::screen_to_world_on_terrain(coord::input{640, 360},  viewport, camPos, realZoom);
+	coord::scene3 resRight  = coord::screen_to_world_on_terrain(coord::input{1280, 360}, viewport, camPos, realZoom);
+	coord::scene3 resLeft   = coord::screen_to_world_on_terrain(coord::input{0, 360},    viewport, camPos, realZoom);
+	coord::scene3 resTop    = coord::screen_to_world_on_terrain(coord::input{640, 0},    viewport, camPos, realZoom);
+	coord::scene3 resBottom = coord::screen_to_world_on_terrain(coord::input{640, 720},  viewport, camPos, realZoom);
+
+	log::set_level(log::level::info);
+
+	double centerNe = resCenter.ne.to_double();
+	double centerSe = resCenter.se.to_double();
+	double rightNe  = resRight.ne.to_double();
+	double rightSe  = resRight.se.to_double();
+	double leftNe   = resLeft.ne.to_double();
+	double leftSe   = resLeft.se.to_double();
+	double topNe    = resTop.ne.to_double();
+	double bottomNe = resBottom.ne.to_double();
+
+	log::log(MSG(info) << "RESULTS (scene3 == tile, since 1.0 phys3 = 1 tile):");
+	log::log(MSG(info) << "  center -> (" << centerNe << "," << centerSe << ")");
+	log::log(MSG(info) << "  right  -> (" << rightNe  << "," << rightSe  << ")");
+	log::log(MSG(info) << "  left   -> (" << leftNe   << "," << leftSe   << ")");
+	log::log(MSG(info) << "  top    -> (" << topNe    << ")");
+	log::log(MSG(info) << "  bottom -> (" << bottomNe << ")");
+
+	int pass = 0, fail = 0;
+
+	if (std::abs(centerNe - 10.0) < 0.5 && std::abs(centerSe - 10.0) < 0.5) {
+		log::log(MSG(info) << "PASS: center->focus  center=(" << centerNe << "," << centerSe << ") expect ~(10,10)");
+		pass++;
+	} else { log::log(MSG(err) << "FAIL: center->focus  center=(" << centerNe << "," << centerSe << ") expect ~(10,10)"); fail++; }
+
+	if (rightSe > centerSe) { log::log(MSG(info) << "PASS: right->se+  right.se=" << rightSe << " > center.se=" << centerSe); pass++; }
+	else { log::log(MSG(err) << "FAIL: right->se+  right.se=" << rightSe << " <= center.se=" << centerSe); fail++; }
+
+	if (leftSe < centerSe) { log::log(MSG(info) << "PASS: left->se-  left.se=" << leftSe << " < center.se=" << centerSe); pass++; }
+	else { log::log(MSG(err) << "FAIL: left->se-  left.se=" << leftSe << " >= center.se=" << centerSe); fail++; }
+
+	if (topNe > centerNe) { log::log(MSG(info) << "PASS: top->ne+ (no Y flip)  top.ne=" << topNe << " > center.ne=" << centerNe); pass++; }
+	else { log::log(MSG(err) << "FAIL: top->ne+ (no Y flip)  top.ne=" << topNe << " <= center.ne=" << centerNe); fail++; }
+
+	if (bottomNe < centerNe) { log::log(MSG(info) << "PASS: bottom->ne-  bottom.ne=" << bottomNe << " < center.ne=" << centerNe); pass++; }
+	else { log::log(MSG(err) << "FAIL: bottom->ne-  bottom.ne=" << bottomNe << " >= center.ne=" << centerNe); fail++; }
+
+	auto resCenterBig = coord::screen_to_world_on_terrain(coord::input{1280, 720}, util::Vector2s{2560, 1440}, camPos, realZoom);
+	double centerBigNe = resCenterBig.ne.to_double();
+	double centerBigSe = resCenterBig.se.to_double();
+	if (std::abs(centerBigNe - centerNe) < 0.001 && std::abs(centerBigSe - centerSe) < 0.001) {
+		log::log(MSG(info) << "PASS: center viewport-invariant (DPR)  1280x720=(" << centerNe << "," << centerSe << ")  2560x1440=(" << centerBigNe << "," << centerBigSe << ")");
+		pass++;
+	} else { log::log(MSG(err) << "FAIL: center viewport-invariant (DPR)  1280x720=(" << centerNe << "," << centerSe << ")  2560x1440=(" << centerBigNe << "," << centerBigSe << ")"); fail++; }
+
+	auto resRightBig = coord::screen_to_world_on_terrain(coord::input{2560, 720}, util::Vector2s{2560, 1440}, camPos, realZoom);
+	double rightBigSe = resRightBig.se.to_double();
+	if (rightBigSe > centerBigSe) { log::log(MSG(info) << "PASS: right still se+ at bigger viewport  right-of-big.se=" << rightBigSe << " > big-center.se=" << centerBigSe); pass++; }
+	else { log::log(MSG(err) << "FAIL: right still se+ at bigger viewport  right-of-big.se=" << rightBigSe << " <= big-center.se=" << centerBigSe); fail++; }
+
+	log::log(MSG(info) << "==== demo 3 summary: " << pass << " pass, " << fail << " fail ====");
+	log::log(MSG(info) << "========== END REAL-CAMERA PICKING TEST ==========");
 }
 
 } // namespace openage::gamestate::tests
