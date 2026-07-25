@@ -6,6 +6,7 @@
 
 #include "coord/phys.h"
 #include "gamestate/component/internal/command_queue.h"
+#include "gamestate/component/internal/commands/attack.h"
 #include "gamestate/component/internal/commands/idle.h"
 #include "gamestate/component/internal/commands/move.h"
 #include "gamestate/component/types.h"
@@ -79,13 +80,23 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 			break;
 		}
 
-		// TODO(Phase A6/C1-C4): construct the matching command class for each
-		// type. We intentionally log instead of silently dropping so test
+		case component::command::command_t::ATTACK: {
+			auto target_id = params.get("target_id", gamestate::entity_id_t{0});
+			log::log(MSG(info) << "SendCommandHandler: ATTACK for " << ids.size()
+			                   << " entities at t=" << time
+			                   << " target_id=" << target_id);
+			command_queue->add_command(
+				time,
+				std::make_shared<component::command::AttackCommand>(target_id));
+			break;
+		}
+
+		// TODO(Phase A6/C1-C3): construct the matching command class for each
+		// remaining type. We intentionally log instead of silently dropping so test
 		// data wiring problems surface instead of looking like no-op orders.
 		case component::command::command_t::GATHER:
 		case component::command::command_t::BUILD:
 		case component::command::command_t::TRAIN:
-		case component::command::command_t::ATTACK:
 		default:
 			log::log(MSG(warn) << "SendCommandHandler: unhandled command_type "
 			                   << static_cast<int>(command_type)

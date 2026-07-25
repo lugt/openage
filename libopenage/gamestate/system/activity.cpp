@@ -58,7 +58,15 @@ void Activity::advance(const time::time_t &start_time,
 
 	time::time_t event_wait_time = 0;
 	auto stop = false;
+	size_t __dbg_iters = 0;
 	while (not stop) {
+		log::log(DBG << "advance: entity=" << entity->get_id()
+		             << " node=" << current_node->str()
+		             << " type=" << static_cast<int>(current_node->get_type()));
+		if (++__dbg_iters > 64) {
+			throw Error{ERR << "Activity::advance exceeded 64 iterations (cycle?) for entity "
+			                << entity->get_id() << " at node " << current_node->str()};
+		}
 		switch (current_node->get_type()) {
 		case activity::node_t::START: {
 			auto node = std::static_pointer_cast<activity::StartNode>(current_node);
