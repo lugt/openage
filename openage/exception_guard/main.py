@@ -36,9 +36,15 @@ def run_with_exception_guard(entry) -> int:
     Invoke ``entry`` and return its int return value, translating any
     uncaught exception into a structured exit code of 1 with the
     exception name and traceback written to stderr.
+
+    A return value of ``None`` (the implicit result of an entrypoint that
+    falls off the end without an explicit ``return``) is treated as
+    success (0) -- several subcommands (e.g. ``codegen``) complete by
+    writing their outputs as a side effect and return nothing.
     """
     try:
-        return int(entry())
+        result = entry()
+        return int(result) if result is not None else 0
     except KeyboardInterrupt:
         return 130
     except SystemExit as exc:

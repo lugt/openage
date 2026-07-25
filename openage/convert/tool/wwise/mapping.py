@@ -39,7 +39,26 @@ sys.path.insert(0, str(_HERE.parent))
 from openage.convert.tool.wwise.extract import _read_pck_header, _iter_chunks  # noqa: E402
 
 
-DEFAULT_MAP_PATH = Path("/tmp/openage_wwise_mapping.json")
+def _find_project_root() -> "Path":
+    """Walk up from this file to find the openage project root.
+
+    Robust to source vs build tree by searching for the bin/wwise/ marker.
+    """
+    cur = Path(__file__).resolve().parent
+    for _ in range(8):
+        candidate = cur.parent
+        if (candidate / "bin" / "wwise").is_dir():
+            return candidate
+        cur = candidate
+    return Path(__file__).resolve().parents[4]
+
+
+DEFAULT_MAP_PATH = _find_project_root() / "bin" / "wwise" / "openage_wwise_mapping.json"
+"""Default location for the wwise_sound_id -> wem_id JSON cache.
+
+Lives inside the openage project tree (``bin/wwise/``) so it survives reboots
+and is not lost between sessions. Override via OPENAGE_WWISE_MAP_PATH.
+"""
 
 
 # ----------------------------- pck sub-bank extraction ---------------------

@@ -4,6 +4,7 @@ add_py_modules(
 	generate_manifest_hashes.py
 	media_exporter.py
 	modpack_exporter.py
+	output_checks.py
 )
 
 add_cython_modules(

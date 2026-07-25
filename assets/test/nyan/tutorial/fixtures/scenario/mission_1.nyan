@@ -10,6 +10,8 @@
 # =============================================================================
 
 
+import de2_base.data.game_entity.generic.villager.villager as de2_villager
+import de2_base.data.game_entity.generic.town_center.town_center as de2_town_center
 import engine.util.game_entity
 import engine.util.language
 import engine.util.language.translated.type

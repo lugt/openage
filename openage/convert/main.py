@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
+import shutil
+import subprocess
 import typing
 
 from ..log import info, warn
@@ -165,6 +167,143 @@ def convert_assets(
             info("Skipped saving asset location")
 
 
+def _arg_flag(args, name: str) -> bool:
+    """Safe boolean accessor used before args.flag() is installed."""
+    return bool(getattr(args, name, False))
+
+
+def _find_project_root() -> "NativePath":
+    """Find the openage project root regardless of which tree is running.
+
+    Walks up from this file looking for a directory that contains a
+    ``bin/wwise/`` subdirectory (the wwise data marker). Works whether
+    we're loaded from the source tree (``openage/convert/main.py``)
+    or from a build copy (``.bin/g++-.../openage/convert/main.py``),
+    both of which have the same depth below their respective roots.
+    """
+    from pathlib import Path as NativePath
+
+    cur = NativePath(__file__).resolve().parent
+    for _ in range(6):  # bounded; max 6 levels up
+        candidate = cur.parent
+        if (candidate / "bin" / "wwise").is_dir():
+            return candidate
+        cur = candidate
+    # Fallback to parents[2] (works only for the source tree).
+    return NativePath(__file__).resolve().parents[2]
+
+
+def _ffmpeg_has_libopus(ffmpeg_path: str) -> bool:
+    """Check that ffmpeg advertises the libopus encoder."""
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if result.returncode != 0:
+        return False
+    return "libopus" in (result.stdout + result.stderr)
+
+
+def preflight_check(args) -> None:
+    """Validate that the requested conversion can actually start.
+
+    Runs AFTER argparse but BEFORE the .dat scan so users see failures fast.
+    Aggregates all errors and prints them together, then raises
+    SystemExit(1) -- never silently skips a missing prerequisite.
+    """
+    from pathlib import Path as NativePath
+
+    errors: list[str] = []
+    project_root = _find_project_root()
+
+    # --- Wwise prerequisites (DE2 audio path) ---------------------------
+    pck_dir_value = os.environ.get("OPENAGE_WWISE_PCK_DIR", "")
+    if pck_dir_value:
+        pck_dir = NativePath(pck_dir_value).expanduser()
+        if not pck_dir.is_dir():
+            errors.append(
+                f"OPENAGE_WWISE_PCK_DIR is not a directory: {pck_dir}")
+        else:
+            has_pck = any(
+                path.is_file() and path.suffix.lower() == ".pck"
+                for path in pck_dir.iterdir()
+            )
+            if not has_pck:
+                errors.append(
+                    f"OPENAGE_WWISE_PCK_DIR contains no .pck files: {pck_dir}")
+
+        mapping_value = os.environ.get("OPENAGE_WWISE_MAP_PATH", "")
+        mapping_path = (
+            NativePath(mapping_value).expanduser()
+            if mapping_value
+            else project_root / "bin" / "wwise" / "openage_wwise_mapping.json"
+        )
+        if not mapping_path.is_file():
+            errors.append(
+                f"Wwise mapping is missing: {mapping_path}. "
+                "Build it via `python -m openage.convert.tool.wwise.mapping "
+                "--pck-dir <DE2>/wwise --out <mapping.json>`.")
+
+        vgmstream = project_root / "bin" / "wwise" / "vgmstream-cli"
+        if not vgmstream.is_file():
+            errors.append(
+                f"vgmstream-cli is missing: {vgmstream}. "
+                "Download from https://github.com/vgmstream/vgmstream/releases "
+                "and place it there.")
+        elif not os.access(vgmstream, os.X_OK):
+            errors.append(
+                f"vgmstream-cli is not executable: {vgmstream}. "
+                "Run `chmod +x` on it.")
+
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            errors.append(
+                "ffmpeg was not found on PATH. "
+                "Install it (`apt install ffmpeg`); the libopus encoder is required.")
+        elif not _ffmpeg_has_libopus(ffmpeg):
+            errors.append(
+                f"ffmpeg at {ffmpeg} does not advertise the libopus encoder. "
+                "Install an ffmpeg build with libopus support.")
+
+        try:
+            from .tool.wwise.mapping import _get_wwiser_parser
+            _get_wwiser_parser()
+        except (ImportError, RuntimeError) as exc:
+            errors.append(
+                f"wwiser is not importable: {exc}. "
+                "Extract https://github.com/bnnm/wwiser into "
+                "openage/.bin/wwiser/wwiser-master/.")
+
+    # --- "Nothing to do" check ------------------------------------------
+    all_media_disabled = all(
+        _arg_flag(args, name)
+        for name in ("no_media", "no_graphics", "no_sounds", "no_blend",
+                     "no_terrain")
+    )
+    any_if_missing = any(
+        _arg_flag(args, name)
+        for name in ("if_missing_media", "if_missing_nyan",
+                     "if_missing_graphics", "if_missing_sounds",
+                     "if_missing_terrain", "if_missing_blend")
+    )
+    if all_media_disabled and not any_if_missing:
+        errors.append(
+            "Conversion has nothing to do: all media types are disabled "
+            "(--no-media/--no-graphics/--no-sounds/--no-terrain/--no-blend) "
+            "and no --if-missing-* flag is set.")
+
+    if errors:
+        for err in errors:
+            warn("Pre-flight check failed: %s", err)
+        raise SystemExit(1)
+
+
 def get_prev_srcdir_paths(asset_location_path: Path) -> set[str] | None:
     """
     Get previously used source directories from a cache file.
@@ -229,6 +368,38 @@ def init_subparser(cli: ArgumentParser):
     cli.add_argument(
         "--no-scripts", action='store_true',
         help="do not convert scripts (AI and Random Maps)")
+
+    cli.add_argument(
+        "--no-terrain", action='store_true',
+        help="do not convert terrain graphics")
+
+    cli.add_argument(
+        "--no-blend", action='store_true',
+        help="do not convert blending masks")
+
+    cli.add_argument(
+        "--if-missing-media", action='store_true',
+        help="skip whole media export when graphics+sounds+terrain+blend outputs all exist")
+
+    cli.add_argument(
+        "--if-missing-nyan", action='store_true',
+        help="skip nyan export when modpack already contains .nyan files")
+
+    cli.add_argument(
+        "--if-missing-graphics", action='store_true',
+        help="skip graphics conversion when PNG outputs exist")
+
+    cli.add_argument(
+        "--if-missing-sounds", action='store_true',
+        help="skip sound conversion when .opus outputs exist")
+
+    cli.add_argument(
+        "--if-missing-terrain", action='store_true',
+        help="skip terrain conversion when terrain PNG outputs exist")
+
+    cli.add_argument(
+        "--if-missing-blend", action='store_true',
+        help="skip blend conversion when blend outputs exist")
 
     cli.add_argument(
         "--no-pickle-cache", action='store_true',
@@ -310,6 +481,7 @@ def main(args, error):
     outdir = get_asset_path(args.output_dir)
 
     if args.force or (args.show_prompts and wanna_convert()):
+        preflight_check(args)
         convert_assets(outdir, args, srcdir)
 
     if args.check_updates or (args.show_prompts and wanna_check_updates()):

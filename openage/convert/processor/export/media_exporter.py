@@ -12,6 +12,7 @@ import os
 import multiprocessing
 import queue
 import sys
+from pathlib import Path as NativePath
 
 from openage.convert.entity_object.export.texture import Texture
 from openage.convert.service import debug_info
@@ -21,6 +22,7 @@ from openage.convert.value_object.read.media_types import MediaType
 from openage.log import dbg, info, get_loglevel
 from openage.util.strings import format_progress
 from openage.convert.tool.memprobe import snapshot
+from .output_checks import has_outputs
 
 if typing.TYPE_CHECKING:
     from argparse import Namespace
@@ -67,10 +69,63 @@ class MediaExporter:
         snapshot(f"media-export:after-load-media-cache "
                  f"requests={sum(len(v) for v in export_requests.values())}")
 
+        # Per-media-type `--no-X` and `--if-missing-X` dispatch table.
+        # Each entry: (no_flag, if_missing_flag, output_root_relative, suffix).
+        # Wires up the previously-dead --no-graphics / --no-sounds flags
+        # and the new --no-terrain / --no-blend and the six --if-missing-*.
+        media_dispatch = {
+            MediaType.GRAPHICS: (
+                "no_graphics", "if_missing_graphics",
+                "data/game_entity/shared/graphics", ".png",
+            ),
+            MediaType.SOUNDS: (
+                "no_sounds", "if_missing_sounds",
+                "data/game_entity/shared/sounds", ".opus",
+            ),
+            MediaType.TERRAIN: (
+                "no_terrain", "if_missing_terrain",
+                "data/terrain", ".png",
+            ),
+            MediaType.BLEND: (
+                "no_blend", "if_missing_blend",
+                "data/blend", None,
+            ),
+        }
+
         for media_type in export_requests.keys():
             cur_export_requests = export_requests[media_type]
+
+            # Fast smoke-test mode: export only the first file of each media
+            # type to verify the pipeline end-to-end without the full run.
+            # Set OPENAGE_CONVERT_FIRST_ONLY=1 .
+            if os.environ.get("OPENAGE_CONVERT_FIRST_ONLY"):
+                cur_export_requests = cur_export_requests[:1]
+                info("-- SMOKE: OPENAGE_CONVERT_FIRST_ONLY -> "
+                     "first %s request only",
+                     media_type.name.lower())
+
             snapshot(f"media-export:before-type {media_type.name} "
                      f"count={len(cur_export_requests)}")
+
+            # --no-X wins over everything (explicit user opt-out)
+            # --if-missing-X skips a category whose output already exists.
+            # It is an explicit opt-in that takes precedence over --force
+            # (non-interactive startup requires --force, so gating on
+            # `not force` would make the flag dead in the only mode that
+            # runs unattended). --force still overwrites individual files
+            # within categories that ARE being exported.
+            dispatch_opts = media_dispatch.get(media_type)
+            if dispatch_opts is not None:
+                no_flag, missing_flag, output_subpath, suffix = dispatch_opts
+                if args.flag(no_flag):
+                    info("-- Skipping %s export: --%s is set",
+                         media_type.name.lower(), no_flag.replace("_", "-"))
+                    continue
+                if args.flag(missing_flag) and has_outputs(
+                        exportdir / output_subpath, suffix):
+                    info("-- Skipping %s export: output already exists in %s",
+                         media_type.name.lower(), output_subpath)
+                    continue
 
             # Function for reading the source file data
             read_data_func = None
@@ -103,11 +158,13 @@ class MediaExporter:
                 # We dispatch to the Wwise path when that env var is set,
                 # otherwise we fall back to the AoC loose-wav path.
                 if os.environ.get("OPENAGE_WWISE_PCK_DIR"):
-                    read_data_func = MediaExporter._get_wwise_data
+                    read_data_func = _get_wwise_data
                     export_func = _export_wwise_sound
-                    kwargs["pck_dir"] = Path(os.environ["OPENAGE_WWISE_PCK_DIR"])
-                    kwargs["map_path"] = os.environ.get(
-                        "OPENAGE_WWISE_MAP_PATH", "/tmp/openage_wwise_mapping.json")
+                    # find_wem_bytes reads the .pck with stdlib open()/glob(),
+                    # so it needs a real pathlib.Path -- the FS-like Path used
+                    # elsewhere (imported under TYPE_CHECKING below) has no
+                    # .glob and would AttributeError at pck_dir.glob("*.pck").
+                    kwargs["pck_dir"] = NativePath(os.environ["OPENAGE_WWISE_PCK_DIR"])
                     info("-- Exporting Wwise sound files (DE2) "
                          "from %s ...", kwargs["pck_dir"])
                 else:

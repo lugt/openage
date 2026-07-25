@@ -56,10 +56,14 @@ FFMPEG_BIN_NAME = os.environ.get("OPENAGE_FFMPEG_BIN", "ffmpeg")
 
 
 def _vgmstream_path() -> str:
-    """Resolve vgmstream-cli: explicit path from env or $PATH."""
+    """Resolve vgmstream-cli: explicit path from env, project-local bin/wwise/, or $PATH."""
     p = os.environ.get("OPENAGE_VGMSTREAM_BIN_PATH", "")
     if p and os.path.exists(p):
         return p
+    # Project-local: openage/bin/wwise/vgmstream-cli (used during DE2 dev).
+    proj_local = Path(__file__).resolve().parents[4] / "bin" / "wwise" / "vgmstream-cli"
+    if proj_local.is_file():
+        return str(proj_local)
     found = shutil.which(VGMSTREAM_BIN_NAME)
     return found or VGMSTREAM_BIN_NAME
 

@@ -13,6 +13,7 @@ from ...tool.memprobe import snapshot
 from .data_exporter import DataExporter
 from .generate_manifest_hashes import generate_hashes
 from .media_exporter import MediaExporter
+from .output_checks import has_all_media_outputs, has_outputs
 
 if typing.TYPE_CHECKING:
     from argparse import Namespace
@@ -50,19 +51,30 @@ class ModpackExporter:
         info("Dumping data files...")
         snapshot("modpack-export:after-data-files")
 
-        # Data files
-        DataExporter.export(modpack.get_data_files(), modpack_dir)
+        # Data files (nyan)
+        # --if-missing-nyan is an explicit opt-in skip that takes precedence
+        # over --force: --force only enables non-interactive startup and
+        # per-file overwrite within categories that ARE being exported, but an
+        # explicit "skip if already done" must still be honored (otherwise the
+        # flag is dead code in non-interactive mode, which requires --force).
+        if args.flag("if_missing_nyan") and has_outputs(modpack_dir, ".nyan"):
+            info("Skipping nyan export: existing .nyan files in %s", modpack_dir)
+        else:
+            DataExporter.export(modpack.get_data_files(), modpack_dir)
 
         if args.flag("no_media"):
             info("Skipping media file export...")
             return
 
-        info("Exporting media files...")
-        snapshot("modpack-export:before-media")
+        if args.flag("if_missing_media") and has_all_media_outputs(modpack_dir):
+            info("Skipping media export: all media output categories already exist")
+        else:
+            info("Exporting media files...")
+            snapshot("modpack-export:before-media")
 
-        # Media files
-        MediaExporter.export(modpack.get_media_files(), sourcedir, modpack_dir, args)
-        snapshot("modpack-export:after-media")
+            # Media files
+            MediaExporter.export(modpack.get_media_files(), sourcedir, modpack_dir, args)
+            snapshot("modpack-export:after-media")
 
         info("Dumping metadata files...")
 

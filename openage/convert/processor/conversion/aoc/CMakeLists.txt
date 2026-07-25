@@ -15,4 +15,6 @@ add_py_modules(
 	upgrade_attribute_subprocessor.py
 	upgrade_effect_subprocessor.py
 	upgrade_resource_subprocessor.py
+	tests/__init__.py
+	tests/test_auxiliary_behavior.py
 )

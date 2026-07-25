@@ -25,7 +25,27 @@ if typing.TYPE_CHECKING:
 
 # Default location of the Wwise mapping JSON produced by
 # openage/convert/tool/wwise/mapping.py. Override via OPENAGE_WWISE_MAP_PATH.
-DEFAULT_WWISE_MAP_PATH = "/tmp/openage_wwise_mapping.json"
+# Lives inside the project tree (``openage/bin/wwise/``) so it survives
+# reboots and is not lost between sessions.
+def _find_project_root() -> "Path":
+    """Walk up from this file to find the openage project root.
+
+    Robust to running from source tree (openage/...) or any of the
+    build copies (.bin/.../openage/...) by searching for the
+    ``bin/wwise/`` marker rather than counting parent levels.
+    """
+    cur = Path(__file__).resolve().parent
+    for _ in range(8):
+        candidate = cur.parent
+        if (candidate / "bin" / "wwise").is_dir():
+            return candidate
+        cur = candidate
+    return Path(__file__).resolve().parents[5]  # best guess for source tree
+
+
+DEFAULT_WWISE_MAP_PATH = str(
+    _find_project_root() / "bin" / "wwise" / "openage_wwise_mapping.json"
+)
 
 
 def _load_wwise_mapping(path: str | None = None) -> dict[str, list[int]]:
@@ -162,10 +182,26 @@ class DE2MediaSubprocessor:
         Naming: {wwise_sound_id}_{wem_id}.opus to allow multiple wem_ids per
         event (e.g. random/sequence containers).
         """
-        # Load pre-built mapping. If absent, skip (the run-level driver is
-        # expected to call build_mapping before invoking convert()).
+        # Load pre-built mapping. If absent, skip silently only when the
+        # DE2 Wwise path is NOT enabled (AoC use case). When Wwise IS
+        # enabled (OPENAGE_WWISE_PCK_DIR set), failing to load the mapping
+        # is a hard error -- preflight_check() should have caught this,
+        # but we re-check here to close the TOCTOU window (mapping deleted
+        # between pre-flight and this call).
+        wwise_enabled = bool(os.environ.get("OPENAGE_WWISE_PCK_DIR"))
         wwise_map = _load_wwise_mapping()
         if not wwise_map:
+            if wwise_enabled:
+                raise RuntimeError(
+                    "DE2 Wwise sound path is enabled (OPENAGE_WWISE_PCK_DIR set) "
+                    "but the wwise mapping is missing or empty at "
+                    f"{os.environ.get('OPENAGE_WWISE_MAP_PATH', DEFAULT_WWISE_MAP_PATH)}. "
+                    "Pre-flight should have caught this; if you see this "
+                    "error, the mapping was deleted or corrupted after "
+                    "pre-flight. Rebuild via "
+                    "`python -m openage.convert.tool.wwise.mapping "
+                    "--pck-dir <DE2>/wwise --out <mapping.json>`."
+                )
             info("DE2 sound exports: no wwise mapping at %s; "
                  "run openage.convert.tool.wwise.mapping first to enable audio.",
                  os.environ.get("OPENAGE_WWISE_MAP_PATH", DEFAULT_WWISE_MAP_PATH))

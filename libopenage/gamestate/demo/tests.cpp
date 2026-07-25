@@ -5,6 +5,7 @@
 #include "log/log.h"
 #include "log/message.h"
 
+#include "gamestate/demo/attack_demo.h"
 #include "gamestate/demo/demo_0.h"
 #include "gamestate/demo/move_demo.h"
 
@@ -31,6 +32,10 @@ void simulation_demo(int demo_id, const util::Path &path) {
 
 	case 4:
 		simulation_demo_4(path);
+		break;
+
+	case 5:
+		simulation_demo_5(path);
 		break;
 
 	default:
