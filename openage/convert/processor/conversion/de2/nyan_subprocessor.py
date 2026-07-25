@@ -650,14 +650,18 @@ class DE2NyanSubprocessor:
         # =======================================================================
         # Emit the ResearchableTech wrapper for:
         #   (a) techs that are researchable in a building (normal case);
-        #   (b) passive shared techs (no research_location, not civ-unique)
-        #       such as Arson. Civ bonus patches in slavs.nyan, dravidians.nyan,
-        #       goths.nyan, romans.nyan, etc. target the FQON `XxxResearchable`
-        #       via `tech_time_modify_effect` / `tech_cost_modify_effect`, so
-        #       the wrapper MUST exist or the load fails with NameError.
-        if (tech_group.is_researchable()
-                or (not tech_group.is_unique()
-                    and tech_group.get_research_location_id() == -1)):
+        #   (b) passive shared techs (research_time == 0 OR no research_location,
+        #       not civ-unique) such as Arson, Gambesons, etc. Civ bonus patches
+        #       in slavs.nyan, dravidians.nyan, goths.nyan, romans.nyan, etc.
+        #       target the FQON `XxxResearchable` via `tech_time_modify_effect`
+        #       / `tech_cost_modify_effect`, so the wrapper MUST exist or the
+        #       load fails with NameError. The passive branch places the
+        #       Researchable at the tech's own location (Arson.ResearchableTech
+        #       inside Arson), so the existing nested-emission resolution
+        #       ForwardRef(tech_group, "Arson") succeeds.
+        if tech_group.is_researchable() or (
+            not tech_group.is_unique() and not tech_group.is_researchable()
+        ):
             AoCAuxiliarySubprocessor.get_researchable_tech(tech_group)
 
     @staticmethod

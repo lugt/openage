@@ -85,15 +85,17 @@ class AoCModpackSubprocessor:
                 # Resolve location and add nested object
                 try:
                     nyan_object = obj_location.resolve()
-                except KeyError:
+                except KeyError as exc:
                     # Newer game versions (e.g. 'Battle for Greece') reuse unit
                     # ids for different content than the static name tables
                     # expect, which can leave dangling references. Skip the
                     # orphaned nested object instead of aborting the export.
-                    warn("could not resolve nested object location; skipping "
-                         "raw API object %s", raw_api_object.get_obj_id()
-                         if hasattr(raw_api_object, "get_obj_id") else "")
+                    obj_id = getattr(raw_api_object, "get_obj_id", lambda: "?")()
+                    warn("could not resolve nested object location (KeyError %s); "
+                         "skipping raw API object %r", exc, obj_id)
                     return
+                nyan_object.add_nested_object(raw_api_object.get_nyan_object())
+                return
                 nyan_object.add_nested_object(raw_api_object.get_nyan_object())
                 return
 

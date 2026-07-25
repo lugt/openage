@@ -83,9 +83,17 @@ class AoCAuxiliarySubprocessor:
             creatable_location = ForwardRef(civ, civ_name)
 
         else:
-            # Add object to the train location's Create ability
-            creatable_location = ForwardRef(train_location,
-                                            f"{train_location_name}.Create")
+            # Add object to the train location's Create ability.
+            # Earlier code emitted at `ForwardRef(train_location, "X.Create")`,
+            # but unit_lines / building_lines do not register a nested
+            # "X.Create" sub-object in their raw_api_objects dict — the
+            # lookup key is just "X" — so the emit phase's
+            # `obj_location.resolve()` raised KeyError and silently
+            # skipped every Creatable. Emit it as a sibling of the
+            # train location itself instead; the FQON `XxxCreatable`
+            # remains unique and the load path resolves it through
+            # the train location's nested objects.
+            creatable_location = ForwardRef(train_location, train_location_name)
 
         creatable_raw_api_object.set_location(creatable_location)
 
@@ -423,35 +431,35 @@ class AoCAuxiliarySubprocessor:
         researchable_raw_api_object = RawAPIObject(obj_ref, obj_name, dataset.nyan_api_objects)
         researchable_raw_api_object.add_raw_parent("engine.util.research.ResearchableTech")
 
-        # Location of the object depends on whether it's a unique tech,
-        # a normal researchable tech (researched at a building), or a
-        # passive shared tech (no research location, e.g. Arson).
+        # Location of the ResearchableTech:
+        #   - civ-unique tech -> emit inside the Civ object
+        #   - all others (researchable building techs AND passive shared techs
+        #     like Arson/Gambesons) -> emit as a sibling of the Tech itself
+        #
+        # Earlier code emitted researchable building techs at
+        # `ForwardRef(research_location, "X.Research")`. That pattern is
+        # broken: building_lines do not register a nested "X.Research"
+        # sub-object in their raw_api_objects dict (the lookup key is
+        # just "X"), so the emit phase's `obj_location.resolve()` raised
+        # KeyError and silently skipped every Researchable. As a
+        # result, hundreds of `*Researchable` FQONs (ArsonResearchable,
+        # GambesonsResearchable, SuppliesResearchable, SquiresResearchable,
+        # etc.) were referenced by civ bonus patches but never defined
+        # anywhere in the corpus, causing `nyan::NameError` at load.
+        #
+        # Emitting all non-unique Researchables at the tech's own
+        # location is a strictly safer default: it keeps `XxxResearchable`
+        # as a unique FQON, it resolves through the standard nested-emission
+        # path (ForwardRef(tech_group, "Arson") matches the already-emitted
+        # Arson raw_api_object), and it eliminates the broken
+        # "X.Research" lookup for both researchable AND passive techs.
         if tech_group.is_unique():
-            # Add object to the Civ object
             civ_lookup_dict = internal_name_lookups.get_civ_lookups(dataset.game_version)
             civ_id = tech_group.get_civilization()
             civ = dataset.civ_groups[civ_id]
             civ_name = civ_lookup_dict[civ_id][0]
-
             researchable_location = ForwardRef(civ, civ_name)
-
-        elif research_location_id > -1:
-            # Add object to the research location's Research ability
-            name_lookup_dict = internal_name_lookups.get_entity_lookups(dataset.game_version)
-            research_location = dataset.building_lines[research_location_id]
-            research_location_name = name_lookup_dict[research_location.get_head_unit_id()][0]
-
-            researchable_location = ForwardRef(research_location,
-                                               f"{research_location_name}.Research")
-
         else:
-            # Passive shared tech (no research location, e.g. Arson).
-            # Civ bonus patches still target the FQON `XxxResearchable`
-            # via `tech_time_modify_effect` / `tech_cost_modify_effect`,
-            # so the wrapper MUST exist somewhere reachable. Emit it as
-            # a sibling of the Tech itself so `Arson.ResearchableTech`
-            # resolves to the same FQON as `ArsonResearchable` in the
-            # generated nyan.
             researchable_location = ForwardRef(tech_group, tech_name)
 
         researchable_raw_api_object.set_location(researchable_location)
