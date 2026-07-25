@@ -1,4 +1,5 @@
 add_sources(libopenage
+    attack.cpp
     build.cpp
     gather.cpp
     idle.cpp

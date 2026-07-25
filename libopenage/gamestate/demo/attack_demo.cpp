@@ -8,6 +8,7 @@
 #include "cvar/cvar.h"
 #include "event/event_loop.h"
 #include "event/eventhandler.h"
+#include "gamestate/component/api/attack.h"
 #include "gamestate/component/internal/commands/attack.h"
 #include "gamestate/component/internal/commands/types.h"
 #include "gamestate/component/types.h"
@@ -102,9 +103,35 @@ void simulation_demo_5(const util::Path &path) {
 	// command-wait primer exists (mirrors simulation_demo_1).
 	villager->get_manager()->run_activity_system(time::time_t{0});
 
-	// Issue an AttackCommand targeting the villager itself. Self-target is
-	// fine for a dispatch smoke; combat semantics (range/damage/death) land
-	// in later increments.
+	// Confirm the Attack component is mounted (entity_factory wires it from
+	// the villager's ApplyDiscreteEffect ability) and that the ability data
+	// (cooldown / range) is readable. The villager is melee, so range falls
+	// back to the default engagement range.
+	auto attack_comp = std::dynamic_pointer_cast<component::Attack>(
+		villager->has_component(component::component_t::ATTACK)
+			? villager->get_component(component::component_t::ATTACK)
+			: nullptr);
+	if (not attack_comp) {
+		log::log(MSG(err) << "FAIL: villager has no Attack component "
+		                  << "(ApplyDiscreteEffect ability not mounted)");
+		log::log(MSG(info) << "========== END ATTACK TEST (no Attack comp) ==========");
+		return;
+	}
+	double cooldown = attack_comp->get_cooldown();
+	double range = attack_comp->get_attack_range();
+	bool data_ok = (cooldown > 0.0) and (range > 0.0);
+	if (data_ok) {
+		log::log(MSG(info) << "PASS: Attack ability data "
+		                   << "(cooldown=" << cooldown << ", range=" << range << ")");
+	}
+	else {
+		log::log(MSG(err) << "FAIL: Attack ability data unreadable "
+		                  << "(cooldown=" << cooldown << ", range=" << range << ")");
+	}
+
+	// Issue an AttackCommand targeting the villager itself. Self-target
+	// (dist=0) exercises the in-range branch of the range check; the
+	// out-of-range/approach branch lands in increment 3 with a real enemy.
 	openage::event::EventHandler::param_map::map_t params{
 		{"type", component::command::command_t::ATTACK},
 		{"target_id", villager_id},
@@ -120,16 +147,24 @@ void simulation_demo_5(const util::Path &path) {
 	log::log(MSG(info) << "Advancing simulation to t=10s...");
 	event_loop->reach_time(time::time_t::from_int(10), state);
 
-	// Smoke passes if the sim didn't crash (no activity loop) and the villager
-	// is still tracked. The AttackHandler log ("AttackHandler: dispatched
-	// ATTACK") in the output confirms the event-driven path ran.
+	// Verify the persistent attack state was set on the Attack component:
+	// active, target == villager, and not approaching (dist=0 <= range).
+	bool state_ok = attack_comp->is_active()
+	                and attack_comp->get_target_id() == villager_id
+	                and not attack_comp->is_approaching();
+	// Smoke also passes if the sim didn't crash (no activity loop) and the
+	// villager is still tracked.
 	bool alive = state->get_game_entities().count(villager_id) > 0;
-	if (alive) {
-		log::log(MSG(info) << "PASS: ATTACK dispatch smoke "
-		                   << "(sim alive, villager still present, no activity loop)");
+	if (state_ok and alive) {
+		log::log(MSG(info) << "PASS: ATTACK state set "
+		                   << "(active, target=self, not approaching, sim alive)");
 	}
 	else {
-		log::log(MSG(err) << "FAIL: villager vanished after ATTACK dispatch");
+		log::log(MSG(err) << "FAIL: attack state wrong "
+		                  << "(active=" << attack_comp->is_active()
+		                  << " target=" << attack_comp->get_target_id()
+		                  << " approaching=" << attack_comp->is_approaching()
+		                  << " alive=" << alive << ")");
 	}
 
 	log::log(MSG(info) << "========== END ATTACK TEST ==========");

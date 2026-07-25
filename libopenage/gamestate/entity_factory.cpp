@@ -25,6 +25,7 @@
 #include "gamestate/api/activity.h"
 #include "gamestate/api/patch.h"
 #include "gamestate/api/player_setup.h"
+#include "gamestate/component/api/attack.h"
 #include "gamestate/component/api/build.h"
 #include "gamestate/component/api/gather.h"
 #include "gamestate/component/api/idle.h"
@@ -316,12 +317,16 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 			// Branch kept explicit so the ResearchableTech metadata is
 			// at least parsed into the entity rather than dropped.
 		}
-		else if (ability_parent == "engine.ability.type.Attack") {
-			// Phase C4 will hang AttackComponent / system off this. For
-			// now we mount a Production-shaped placeholder so that
-			// production-line units at least have a non-null
-			// component set after creation; a better placeholder would
-			// be an AttackAbility component once Phase C4 designs it.
+		else if (ability_parent == "engine.ability.type.ApplyDiscreteEffect"
+		      || ability_parent == "engine.ability.type.RangedDiscreteEffect") {
+			// Phase 2 event-driven AttackSystem: mount the Attack component
+			// (ability data + runtime attack state). The converter emits
+			// Attack abilities as ApplyDiscreteEffect (melee, e.g. villager)
+			// or RangedDiscreteEffect (ranged, with min/max_range); both are
+			// served by the same component. The old "engine.ability.type.
+			// Attack" branch was dead code -- no ability has that parent.
+			auto attack = std::make_shared<component::Attack>(loop, ability_obj);
+			entity->add_component(attack);
 		}
 		else if (ability_parent == "engine.ability.type.Resistance") {
 			// Resistance is consumed by Phase C4's damage system

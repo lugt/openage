@@ -21,6 +21,7 @@ enum class component_t {
 	MOVE,
 	SELECTABLE,
 	LIVE,
+	ATTACK,
 
 	// Resource / production (tutorial-level)
 	GATHER,
