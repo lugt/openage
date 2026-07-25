@@ -27,32 +27,36 @@
 namespace openage::gamestate::tests {
 
 void simulation_demo_5(const util::Path &path) {
-	log::log(MSG(info) << "========== ATTACK COMMAND TEST (demo 5) ==========");
+	log::log(MSG(info) << "========== ATTACK DISPATCH TEST (demo 5) ==========");
 
 	// ---- Part A: unit-test the AttackCommand class directly. ----
-	// No simulation needed; this is the core Phase 1 deliverable. If the
-	// class wiring (command_t::ATTACK, get_type, get_target) is wrong, the
-	// rest of the combat chain cannot work, so we check it in isolation first.
+	// No simulation needed; this is the core class wiring. If get_type /
+	// get_attacker / get_target are wrong, the rest of the combat chain cannot
+	// work, so we check it in isolation first.
 	{
-		auto cmd = std::make_shared<component::command::AttackCommand>(42);
+		auto cmd = std::make_shared<component::command::AttackCommand>(7, 42);
 		bool type_ok = (cmd->get_type() == component::command::command_t::ATTACK);
+		bool attacker_ok = (cmd->get_attacker() == 7);
 		bool target_ok = (cmd->get_target() == 42);
-		if (type_ok and target_ok) {
+		if (type_ok and attacker_ok and target_ok) {
 			log::log(MSG(info) << "PASS: AttackCommand class "
-			                   << "(get_type()==ATTACK, get_target()==42)");
+			                   << "(get_type()==ATTACK, get_attacker()==7, get_target()==42)");
 		}
 		else {
 			log::log(MSG(err) << "FAIL: AttackCommand class type_ok=" << type_ok
+			                  << " attacker_ok=" << attacker_ok
 			                  << " target_ok=" << target_ok);
 		}
 	}
 
-	// ---- Part B: end-to-end dispatch smoke. ----
-	// Issue an ATTACK command through the real SendCommandHandler and advance
-	// the sim. AttackSystem is not wired into the activity graph yet (that is
-	// Phase 2), so the Move node will pop the AttackCommand and drop it with a
-	// warn log. The smoke passes as long as the SendCommandHandler::ATTACK
-	// branch executes and the sim does not crash.
+	// ---- Part B: end-to-end event-driven dispatch smoke. ----
+	// Issue an ATTACK command through the real SendCommandHandler. The handler
+	// enqueues an AttackCommand and emits a "game.attack" event; AttackHandler
+	// fires (same execute_events pass) and pops the command before the
+	// activity graph's process_command runs -- so no Idle->CheckQueue->Branch
+	// loop. The smoke passes if the AttackHandler log appears, the sim does not
+	// crash, and the villager is still tracked. Combat semantics (range /
+	// damage / death) land in later increments.
 	auto cvar = std::make_shared<cvar::CVarManager>(path);
 	auto time_loop = std::make_shared<time::TimeLoop>();
 	auto simulation = std::make_shared<GameSimulation>(
@@ -100,7 +104,7 @@ void simulation_demo_5(const util::Path &path) {
 
 	// Issue an AttackCommand targeting the villager itself. Self-target is
 	// fine for a dispatch smoke; combat semantics (range/damage/death) land
-	// in later phases.
+	// in later increments.
 	openage::event::EventHandler::param_map::map_t params{
 		{"type", component::command::command_t::ATTACK},
 		{"target_id", villager_id},
@@ -116,11 +120,13 @@ void simulation_demo_5(const util::Path &path) {
 	log::log(MSG(info) << "Advancing simulation to t=10s...");
 	event_loop->reach_time(time::time_t::from_int(10), state);
 
-	// Smoke passes if the sim didn't crash and the villager is still tracked.
+	// Smoke passes if the sim didn't crash (no activity loop) and the villager
+	// is still tracked. The AttackHandler log ("AttackHandler: dispatched
+	// ATTACK") in the output confirms the event-driven path ran.
 	bool alive = state->get_game_entities().count(villager_id) > 0;
 	if (alive) {
 		log::log(MSG(info) << "PASS: ATTACK dispatch smoke "
-		                   << "(sim alive, villager still present)");
+		                   << "(sim alive, villager still present, no activity loop)");
 	}
 	else {
 		log::log(MSG(err) << "FAIL: villager vanished after ATTACK dispatch");

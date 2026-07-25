@@ -5,8 +5,12 @@
 
 namespace openage::gamestate::component::command {
 
-AttackCommand::AttackCommand(entity_id_t target) :
-	target{target} {}
+AttackCommand::AttackCommand(entity_id_t attacker, entity_id_t target) :
+	attacker{attacker}, target{target} {}
+
+entity_id_t AttackCommand::get_attacker() const {
+	return this->attacker;
+}
 
 entity_id_t AttackCommand::get_target() const {
 	return this->target;

@@ -31,19 +31,14 @@ bool next_command_move(const time::time_t &time,
 	}
 
 	auto command = command_queue->get_queue().front(time);
-	// Phase 1 (AttackCommand vertical slice): route both MOVE and ATTACK to the
-	// Move node. MOVE is processed by Move::move_command; ATTACK is popped and
-	// dropped there (the dynamic_pointer_cast<MoveCommand> fails -> warn log ->
-	// return 0). AttackSystem is wired into the activity graph in Phase 2, at
-	// which point ATTACK gets its own branch and this falls back to MOVE-only.
-	//
-	// Without accepting ATTACK here, BranchCommand's default branch (Idle) is
-	// taken, which never pops the command -> the activity loops
-	// Idle -> CheckQueue -> BranchCommand -> Idle forever (caught by the
-	// iteration guard in Activity::advance).
-	auto type = command->get_type();
-	return type == component::command::command_t::MOVE
-	       or type == component::command::command_t::ATTACK;
+	// Phase 2 (event-driven AttackSystem): ATTACK is no longer routed through
+	// the activity graph. SendCommandHandler::ATTACK enqueues the AttackCommand
+	// and emits a "game.attack" event; AttackHandler pops the command before
+	// process_command fires, so the activity never sees an unconsumed ATTACK.
+	// If an ATTACK somehow remains here, BranchCommand's default (Idle) would
+	// loop Idle -> CheckQueue -> BranchCommand forever (caught by the iteration
+	// guard in Activity::advance) -- that is now a bug, not the intended path.
+	return command->get_type() == component::command::command_t::MOVE;
 }
 
 } // namespace openage::gamestate::activity
