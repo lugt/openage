@@ -139,12 +139,9 @@ class DE2Processor:
             # the lazy extractors above, and the per-line DynamicLoaders
             # keep the new line groups themselves lazy.
             AoCProcessor.create_unit_lines(dataset)
-            import sys
-            print(f"DBG after create_unit_lines: unit_lines={len(dataset.unit_lines)} building_lines={len(dataset.building_lines)}", file=sys.stderr, flush=True)
             AoCProcessor.create_extra_unit_lines(dataset)
             AoCProcessor.create_building_lines(dataset)
             AoCProcessor.create_villager_groups(dataset)
-            print(f"DBG after create_building_lines: unit_lines={len(dataset.unit_lines)} building_lines={len(dataset.building_lines)} villager={len(dataset.villager_groups)}", file=sys.stderr, flush=True)
             return dataset
 
         cls.extract_genie_units(gamespec, dataset)
