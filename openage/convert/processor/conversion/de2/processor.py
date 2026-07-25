@@ -127,6 +127,24 @@ class DE2Processor:
             extract_genie_sounds_lazy(gamespec, dataset)
             extract_genie_terrains_lazy(gamespec, dataset)
             extract_genie_restrictions_lazy(gamespec, dataset)
+            # The eager backend calls AoCProcessor.create_unit_lines,
+            # create_extra_unit_lines, and create_building_lines after the
+            # full materialization is done. The lazy backend skipped them,
+            # which left `dataset.unit_lines` and `dataset.building_lines`
+            # empty and made `building_line_to_game_entity` never fire,
+            # leaving every *CreatableGameEntity (ArcheryRangeCreatable,
+            # BarracksCreatable, CastleCreatable, ...) undefined. Reuse the
+            # same static methods: their inputs (unit_connections,
+            # building_connections, genie_units) are already populated by
+            # the lazy extractors above, and the per-line DynamicLoaders
+            # keep the new line groups themselves lazy.
+            AoCProcessor.create_unit_lines(dataset)
+            import sys
+            print(f"DBG after create_unit_lines: unit_lines={len(dataset.unit_lines)} building_lines={len(dataset.building_lines)}", file=sys.stderr, flush=True)
+            AoCProcessor.create_extra_unit_lines(dataset)
+            AoCProcessor.create_building_lines(dataset)
+            AoCProcessor.create_villager_groups(dataset)
+            print(f"DBG after create_building_lines: unit_lines={len(dataset.unit_lines)} building_lines={len(dataset.building_lines)} villager={len(dataset.villager_groups)}", file=sys.stderr, flush=True)
             return dataset
 
         cls.extract_genie_units(gamespec, dataset)

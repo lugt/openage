@@ -378,6 +378,9 @@ class AoCNyanSubprocessor:
         :param building_line: Building line that gets converted to a game entity.
         :type building_line: ..dataformat.converter_object.ConverterObjectGroup
         """
+        import sys
+        head_id = building_line.get_head_unit_id()
+        print(f"DBG building_line_to_game_entity: {type(building_line).__name__} head={head_id} is_creatable={building_line.is_creatable()}", file=sys.stderr, flush=True)
         current_building = building_line.line[0]
         current_building_id = building_line.get_head_unit_id()
         dataset = building_line.data

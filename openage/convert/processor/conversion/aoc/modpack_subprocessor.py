@@ -94,6 +94,12 @@ class AoCModpackSubprocessor:
                     warn("could not resolve nested object location (KeyError %s); "
                          "skipping raw API object %r", exc, obj_id)
                     return
+                # DEBUG
+                import sys
+                obj_id = getattr(raw_api_object, "obj_id", "?")
+                parent_fqon = nyan_object.get_fqon()
+                if obj_id in ("ArcheryRange.CreatableGameEntity", "Barracks.CreatableGameEntity"):
+                    print(f"DBG ADD-NESTED {obj_id} -> parent {parent_fqon}", file=sys.stderr, flush=True)
                 nyan_object.add_nested_object(raw_api_object.get_nyan_object())
                 return
                 nyan_object.add_nested_object(raw_api_object.get_nyan_object())
@@ -138,36 +144,52 @@ class AoCModpackSubprocessor:
         for unit_line in full_data_set.unit_lines.values():
             for raw_api_object in unit_line.get_raw_api_objects().values():
                 emit_one(raw_api_object)
-            release_group(unit_line)
 
         for building_line in full_data_set.building_lines.values():
             for raw_api_object in building_line.get_raw_api_objects().values():
                 emit_one(raw_api_object)
-            release_group(building_line)
 
         for ambient_group in full_data_set.ambient_groups.values():
             for raw_api_object in ambient_group.get_raw_api_objects().values():
                 emit_one(raw_api_object)
-            release_group(ambient_group)
 
         for variant_group in full_data_set.variant_groups.values():
             for raw_api_object in variant_group.get_raw_api_objects().values():
                 emit_one(raw_api_object)
-            release_group(variant_group)
 
         for tech_group in full_data_set.tech_groups.values():
             for raw_api_object in tech_group.get_raw_api_objects().values():
                 emit_one(raw_api_object)
-            release_group(tech_group)
 
         for terrain_group in full_data_set.terrain_groups.values():
             for raw_api_object in terrain_group.get_raw_api_objects().values():
                 emit_one(raw_api_object)
-            release_group(terrain_group)
 
         for civ_group in full_data_set.civ_groups.values():
             for raw_api_object in civ_group.get_raw_api_objects().values():
                 emit_one(raw_api_object)
+
+        # Release all groups after the full emission pass. Per-line
+        # release inside the loops above used to clear a group's
+        # `raw_api_objects` dict while a later category (e.g. buildings
+        # after units) still needed to resolve a `ForwardRef(other_group,
+        # key)` pointing into the cleared dict, raising `KeyError` and
+        # silently dropping the resolved object. Peak memory is held a
+        # bit longer but bounded: emission finishes in O(total_objects)
+        # and the post-loop clears release everything in one pass.
+        for unit_line in full_data_set.unit_lines.values():
+            release_group(unit_line)
+        for building_line in full_data_set.building_lines.values():
+            release_group(building_line)
+        for ambient_group in full_data_set.ambient_groups.values():
+            release_group(ambient_group)
+        for variant_group in full_data_set.variant_groups.values():
+            release_group(variant_group)
+        for tech_group in full_data_set.tech_groups.values():
+            release_group(tech_group)
+        for terrain_group in full_data_set.terrain_groups.values():
+            release_group(terrain_group)
+        for civ_group in full_data_set.civ_groups.values():
             release_group(civ_group)
 
         # Create an import tree from the files. This must run after every

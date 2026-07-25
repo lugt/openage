@@ -36,6 +36,12 @@ class AoCAuxiliarySubprocessor:
         :param line: Unit/Building line.
         :type line: ...dataformat.converter_object.ConverterObjectGroup
         """
+        import sys
+        head_id = line.get_head_unit_id() if hasattr(line, "get_head_unit_id") else -1
+        try:
+            print(f"DBG get_creatable_game_entity: line_type={type(line).__name__} head={head_id}", file=sys.stderr, flush=True)
+        except Exception as exc:
+            print(f"DBG get_creatable EXC: {exc}", file=sys.stderr, flush=True)
         if isinstance(line, GenieVillagerGroup):
             current_unit = line.variants[0].line[0]
 
@@ -93,7 +99,25 @@ class AoCAuxiliarySubprocessor:
             # train location itself instead; the FQON `XxxCreatable`
             # remains unique and the load path resolves it through
             # the train location's nested objects.
-            creatable_location = ForwardRef(train_location, train_location_name)
+            #
+            # The forward-ref target key is whatever the train_location's
+            # raw_api_objects dict uses. The head-unit name (e.g. "Villager"
+            # for the main villager line) is the most common case, but a
+            # BfG villager group's head unit may be a specific male/female
+            # variant ("MaleVillager", "FemaleVillager", ...). We pick any
+            # existing key from the train_location's dict so the resolve
+            # always succeeds.
+            train_keys = list(train_location.get_raw_api_objects().keys())
+            import sys
+            if game_entity_name in ("ArcheryRange", "Barracks"):
+                print(f"DBG creatable for {game_entity_name}: train_keys={train_keys} head={train_location_name}", file=sys.stderr, flush=True)
+            if train_keys:
+                creatable_location = ForwardRef(train_location, train_keys[0])
+            else:
+                # Fallback: use the head_unit name. May still fail if
+                # the train_location never had its raw_api_objects
+                # populated, but that's a deeper structural gap.
+                creatable_location = ForwardRef(train_location, train_location_name)
 
         creatable_raw_api_object.set_location(creatable_location)
 
@@ -591,6 +615,9 @@ class AoCAuxiliarySubprocessor:
 
         tech_group.add_raw_api_object(researchable_raw_api_object)
         tech_group.add_raw_api_object(cost_raw_api_object)
+        if tech_name == "Arson":
+            import sys
+            print(f"DBG end of get_researchable: arson raw_api_objects keys={list(tech_group.raw_api_objects.keys())}", file=sys.stderr, flush=True)
 
     @staticmethod
     def get_condition(

@@ -379,6 +379,9 @@ class DE2NyanSubprocessor:
         :param building_line: Building line that gets converted to a game entity.
         :type building_line: ..dataformat.converter_object.ConverterObjectGroup
         """
+        import sys
+        head_id = building_line.get_head_unit_id()
+        print(f"DBG de2 building_line_to_game_entity: {type(building_line).__name__} head={head_id} is_creatable={building_line.is_creatable()}", file=sys.stderr, flush=True)
         current_building = building_line.line[0]
         current_building_id = building_line.get_head_unit_id()
         dataset = building_line.data
@@ -530,8 +533,14 @@ class DE2NyanSubprocessor:
         # =======================================================================
         # Misc (Objects that are not used by the unit line itself, but use its values)
         # =======================================================================
+        import sys
+        head_id2 = building_line.get_head_unit_id()
+        is_creatable_2 = building_line.is_creatable()
+        print(f"DBG de2 about-to-call: head={head_id2} is_creatable={is_creatable_2} id={id(building_line)}", file=sys.stderr, flush=True)
         if building_line.is_creatable():
+            print(f"DBG de2 calling get_creatable for head={head_id2}", file=sys.stderr, flush=True)
             AoCAuxiliarySubprocessor.get_creatable_game_entity(building_line)
+            print(f"DBG de2 returned from get_creatable for head={head_id2}", file=sys.stderr, flush=True)
 
     @staticmethod
     def tech_group_to_tech(tech_group: GenieTechEffectBundleGroup) -> None:
