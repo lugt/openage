@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "gamestate/types.h"
 #include "time/time.h"
 
 
@@ -200,6 +201,28 @@ private:
 	 */
 	std::string empty_hint;
 };
+
+/**
+ * Build a trigger whose single step completes only when every entity in
+ * \p target_ids has been removed from the state index (i.e. killed).
+ *
+ * This is the enemy-specific victory primitive: the step fires iff the
+ * objective target set is non-empty AND every target is gone. An empty
+ * target set never completes (no false victory when the scenario has no
+ * registered enemy instance). A non-target entity dying (player unit,
+ * bystander) does not affect the predicate because only \p target_ids
+ * are polled.
+ *
+ * Exposed so mission factories can resolve named instances to IDs and
+ * so tests can construct multi-target triggers directly.
+ *
+ * @param state Game state the trigger queries each tick.
+ * @param target_ids Entity IDs that must all be removed for victory.
+ * @return Shared trigger with one "defeat_enemy" step.
+ */
+std::shared_ptr<TutorialTrigger> make_defeat_enemy_trigger(
+	const std::shared_ptr<GameState> &state,
+	const std::vector<entity_id_t> &target_ids);
 
 /**
  * Per-mission tutorial trigger factories.

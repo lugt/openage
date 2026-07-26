@@ -3,6 +3,7 @@
 #include "attack_demo.h"
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "cvar/cvar.h"
@@ -18,6 +19,7 @@
 #include "gamestate/game.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
+#include "gamestate/entity_factory.h"
 #include "gamestate/manager.h"
 #include "gamestate/simulation.h"
 #include "gamestate/types.h"
@@ -79,24 +81,27 @@ void simulation_demo_5(const util::Path &path) {
 	auto event_loop = simulation->get_event_loop();
 	auto commander = simulation->get_commander();
 
-	// Find the player villager (the scenario spawns one with a Move ability).
-	auto &entities = state->get_game_entities();
+	// Find the player villager by its PlacedEntity instance FQON. The
+	// scenario spawns PlayerVillager + EnemyVillager (both movable), so
+	// iterating the entity map and picking "the first movable" is order-
+	// dependent and previously picked the EnemyVillager -- inverting the
+	// attack direction (enemy attacking player). Resolving by instance FQON
+	// makes the attacker unambiguously the player's villager.
 	entity_id_t villager_id = 0;
 	bool found = false;
-	for (auto &[id, entity] : entities) {
-		if (entity->has_component(component::component_t::MOVE)) {
-			villager_id = id;
-			found = true;
-			break;
-		}
+	auto player_id_opt = state->get_entity_id_by_instance(
+		"engine.util.scenario.mission_1.PlayerVillager");
+	if (player_id_opt.has_value()) {
+		villager_id = *player_id_opt;
+		found = state->has_game_entity(villager_id);
 	}
 	if (not found) {
-		log::log(MSG(err) << "FAIL: no movable entity was spawned. "
+		log::log(MSG(err) << "FAIL: PlayerVillager instance not found. "
 		                  << "Cannot test ATTACK dispatch.");
 		log::log(MSG(info) << "========== END ATTACK TEST (no villager) ==========");
 		return;
 	}
-	log::log(MSG(info) << "Found villager id=" << villager_id
+	log::log(MSG(info) << "Found player villager id=" << villager_id
 	                   << " for ATTACK dispatch smoke");
 
 	auto villager = state->get_game_entity(villager_id);
@@ -182,26 +187,29 @@ void simulation_demo_5(const util::Path &path) {
 	attack_comp->stop_attack();
 
 	// Part F prep: build the mission_1 trigger now, while the enemy is
-	// still alive, so its defeat_enemy predicate snapshots the enemy's
-	// id alongside the player villager's. on_update() is polled in Part
-	// F after the enemy has been killed.
+	// still alive. create_mission_1_trigger resolves the EnemyVillager
+	// instance FQON to its entity ID via GameState::get_entity_id_by_instance
+	// and snapshots that target set; on_update() is polled in Part F after
+	// the enemy has been killed. Only the enemy instance is tracked, so the
+	// player villager (the attacker here) dying could not satisfy it.
 	auto mission_trigger = create_mission_1_trigger(state);
 
 	// ---- Part C: approach a distant target (increment 3). ----
 	// The scenario spawns an EnemyVillager at (1,1); the player villager at
 	// (8,8) is ~10 tiles away (range=1), so an ATTACK on it must reuse
 	// Move::move_default to approach. Verify the villager closes distance.
+	// Resolve the enemy by PlacedEntity instance FQON (same reason as Part B:
+	// map iteration order is not a reliable identity).
 	entity_id_t enemy_id = 0;
 	bool found_enemy = false;
-	for (auto &[eid, ent] : entities) {
-		if (eid != villager_id and ent->has_component(component::component_t::MOVE)) {
-			enemy_id = eid;
-			found_enemy = true;
-			break;
-		}
+	auto enemy_id_opt = state->get_entity_id_by_instance(
+		"engine.util.scenario.mission_1.EnemyVillager");
+	if (enemy_id_opt.has_value()) {
+		enemy_id = *enemy_id_opt;
+		found_enemy = state->has_game_entity(enemy_id);
 	}
 	if (not found_enemy) {
-		log::log(MSG(err) << "FAIL (Part C): no second movable entity for approach test");
+		log::log(MSG(err) << "FAIL (Part C): EnemyVillager instance not found for approach test");
 	}
 	else {
 		auto enemy = state->get_game_entity(enemy_id);
@@ -338,6 +346,174 @@ void simulation_demo_5(const util::Path &path) {
 	}
 
 	log::log(MSG(info) << "========== END ATTACK TEST ==========");
+}
+
+
+// ---------------------------------------------------------------------------
+// demo 6 -- victory-semantics integration test.
+//
+// The mission_1 trigger's defeat_enemy step must fire only when the explicit
+// enemy target set is fully eliminated. Each scenario loads a fresh Mission 1
+// (so entity removals don't bleed across cases) and resolves the enemy by
+// PlacedEntity instance FQON via GameState::get_entity_id_by_instance -- no
+// spawn-order / "all movables" heuristics.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// PlacedEntity instance FQONs declared in mission_1.nyan. These are the
+// placed-instance FQONs (their own object names), not the referenced
+// GameEntity FQONs.
+constexpr const char *PLAYER_VILLAGER_FQON =
+	"engine.util.scenario.mission_1.PlayerVillager";
+constexpr const char *ENEMY_VILLAGER_FQON =
+	"engine.util.scenario.mission_1.EnemyVillager";
+constexpr const char *PLAYER_TC_FQON =
+	"engine.util.scenario.mission_1.PlayerTownCenter";
+// A bystander spawned by the test (not in the scenario file) to represent
+// an unrelated movable. Registered under a synthetic instance FQON so it
+// is distinguishable from the objective targets.
+constexpr const char *BYSTANDER_FQON =
+	"engine.util.scenario.mission_1.Bystander";
+// Real GameEntity FQON for spawning a villager (reused from mission_1.nyan).
+constexpr const char *VILLAGER_ENTITY_FQON =
+	"de2_base.data.game_entity.generic.villager.villager.Villager";
+
+// One fresh Mission 1 load. Holds the simulation alive so the state stays
+// valid for the scenario's duration.
+struct Mission1Fixture {
+	std::shared_ptr<GameSimulation> sim;
+	std::shared_ptr<GameState> state;
+	std::shared_ptr<openage::event::EventLoop> event_loop;
+	std::shared_ptr<EntityFactory> factory;
+	// optionals because entity id 0 is a valid id (the first spawned entity
+	// is PlayerVillager with id 0); a truthy id check would misread it as
+	// "not found". has_value() is the real lookup-success signal.
+	std::optional<entity_id_t> enemy_id;
+	std::optional<entity_id_t> player_id;
+	std::optional<entity_id_t> tc_id;
+};
+
+Mission1Fixture load_mission1(const util::Path &path) {
+	Mission1Fixture f;
+	auto cvar = std::make_shared<cvar::CVarManager>(path);
+	auto time_loop = std::make_shared<time::TimeLoop>();
+	f.sim = std::make_shared<GameSimulation>(
+		path,
+		cvar,
+		time_loop,
+		"engine.util.setup.tutorial_setup.TutorialPlayerSetup",
+		"engine.util.scenario.mission_1.Mission1");
+	f.sim->set_modpacks({"engine"});
+	f.sim->start();
+
+	auto game = f.sim->get_game();
+	f.state = game->get_state();
+	f.event_loop = f.sim->get_event_loop();
+	f.factory = f.sim->get_entity_factory();
+	f.enemy_id = f.state->get_entity_id_by_instance(ENEMY_VILLAGER_FQON);
+	f.player_id = f.state->get_entity_id_by_instance(PLAYER_VILLAGER_FQON);
+	f.tc_id = f.state->get_entity_id_by_instance(PLAYER_TC_FQON);
+	return f;
+}
+
+} // namespace
+
+void simulation_demo_6(const util::Path &path) {
+	log::log(MSG(info) << "========== VICTORY SEMANTICS TEST (demo 6) ==========");
+
+	// ---- Part A: removing the EnemyVillager completes the trigger. ----
+	{
+		auto f = load_mission1(path);
+		log::log(MSG(info) << "Part A: enemy=" << f.enemy_id.value_or((entity_id_t)-1)
+		                   << " player=" << f.player_id.value_or((entity_id_t)-1)
+		                   << " tc=" << f.tc_id.value_or((entity_id_t)-1));
+		if (not(f.enemy_id and f.player_id and f.tc_id)) {
+			log::log(MSG(err) << "FAIL (Part A): instance->ID lookup incomplete");
+		}
+		else {
+			auto trigger = create_mission_1_trigger(f.state);
+			f.state->remove_game_entity(*f.enemy_id);
+			trigger->on_update(time::time_t::from_int(1));
+			if (trigger->is_finished()) {
+				log::log(MSG(info) << "PASS (Part A): enemy removed -> victory");
+			}
+			else {
+				log::log(MSG(err) << "FAIL (Part A): enemy removed but trigger "
+				                  << "not finished (finished="
+				                  << trigger->is_finished() << ")");
+			}
+		}
+	}
+
+	// ---- Part B: removing the PlayerVillager does NOT complete it. ----
+	{
+		auto f = load_mission1(path);
+		auto trigger = create_mission_1_trigger(f.state);
+		f.state->remove_game_entity(*f.player_id);
+		trigger->on_update(time::time_t::from_int(1));
+		if (not trigger->is_finished()) {
+			log::log(MSG(info) << "PASS (Part B): player removed -> no victory "
+			                   << "(enemy still alive)");
+		}
+		else {
+			log::log(MSG(err) << "FAIL (Part B): player removed but trigger "
+			                  << "finished (false victory)");
+		}
+	}
+
+	// ---- Part C: removing an unrelated bystander movable does NOT complete. ----
+	{
+		auto f = load_mission1(path);
+		// Spawn a bystander villager (has MOVE) under a synthetic instance
+		// FQON so it is not an objective target.
+		auto bystander = f.factory->add_game_entity(
+			f.event_loop, f.state, 0, VILLAGER_ENTITY_FQON);
+		f.state->add_game_entity(bystander);
+		f.state->register_named_entity(BYSTANDER_FQON, bystander->get_id());
+
+		auto trigger = create_mission_1_trigger(f.state);
+		f.state->remove_game_entity(bystander->get_id());
+		trigger->on_update(time::time_t::from_int(1));
+		if (not trigger->is_finished()) {
+			log::log(MSG(info) << "PASS (Part C): bystander removed -> no victory");
+		}
+		else {
+			log::log(MSG(err) << "FAIL (Part C): bystander removed but trigger "
+			                  << "finished (false victory)");
+		}
+	}
+
+	// ---- Part D: multiple targets -- ALL must be removed to complete. ----
+	{
+		auto f = load_mission1(path);
+		// Use enemy + town center as a two-target objective. remove one at a
+		// time: after the first removal the trigger must NOT fire; only after
+		// both are gone does it complete.
+		auto trigger = make_defeat_enemy_trigger(
+			f.state, std::vector<entity_id_t>{*f.enemy_id, *f.tc_id});
+
+		f.state->remove_game_entity(*f.tc_id);
+		trigger->on_update(time::time_t::from_int(1));
+		bool still_active = not trigger->is_finished();
+
+		f.state->remove_game_entity(*f.enemy_id);
+		trigger->on_update(time::time_t::from_int(2));
+		bool now_done = trigger->is_finished();
+
+		if (still_active and now_done) {
+			log::log(MSG(info) << "PASS (Part D): multi-target needs ALL removed "
+			                   << "(after 1: finished=" << (not still_active)
+			                   << " after 2: finished=" << now_done << ")");
+		}
+		else {
+			log::log(MSG(err) << "FAIL (Part D): multi-target AND semantics wrong "
+			                  << "(after 1: finished=" << (not still_active)
+			                  << " after 2: finished=" << now_done << ")");
+		}
+	}
+
+	log::log(MSG(info) << "========== END VICTORY SEMANTICS TEST ==========");
 }
 
 } // namespace openage::gamestate::tests

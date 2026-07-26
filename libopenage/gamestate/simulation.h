@@ -131,6 +131,15 @@ public:
 	const std::shared_ptr<gamestate::event::Commander> get_commander();
 
 	/**
+	 * Get the entity factory. Exposed so tests can spawn additional
+	 * entities (e.g. a bystander movable for victory-semantics coverage)
+	 * through the same init_components path as the scenario loader.
+	 *
+	 * @return Entity factory.
+	 */
+	const std::shared_ptr<gamestate::EntityFactory> get_entity_factory();
+
+	/**
 	 * Attach a renderer to the simulation.
 	 *
 	 * @param factory Factory for creating render entities.

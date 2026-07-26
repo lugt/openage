@@ -26,4 +26,20 @@ namespace tests {
  */
 void simulation_demo_5(const util::Path &path);
 
+/**
+ * Headless victory-semantics integration test (demo id 6).
+ *
+ * Verifies the mission_1 trigger's defeat_enemy step fires only on the
+ * explicit enemy target set, not on bystander/player deaths:
+ *  - Part A: removing the EnemyVillager instance completes the trigger.
+ *  - Part B: removing the PlayerVillager does NOT complete it.
+ *  - Part C: removing an unrelated bystander movable does NOT complete it.
+ *  - Part D: with multiple targets, ALL must be removed to complete.
+ *
+ * The enemy is resolved by PlacedEntity instance FQON via
+ * GameState::get_entity_id_by_instance -- no spawn-order / "all movables"
+ * assumptions.
+ */
+void simulation_demo_6(const util::Path &path);
+
 }}} // openage::gamestate::tests

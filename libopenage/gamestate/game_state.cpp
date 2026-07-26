@@ -65,6 +65,24 @@ void GameState::remove_game_entity(entity_id_t id) {
 	                   << " remaining)");
 }
 
+void GameState::register_named_entity(const nyan::fqon_t &instance_fqon,
+                                      entity_id_t id) {
+	this->named_entities[instance_fqon] = id;
+}
+
+std::optional<entity_id_t> GameState::get_entity_id_by_instance(
+	const nyan::fqon_t &instance_fqon) const {
+	auto it = this->named_entities.find(instance_fqon);
+	if (it == this->named_entities.end()) {
+		return std::nullopt;
+	}
+	return it->second;
+}
+
+const std::unordered_map<nyan::fqon_t, entity_id_t> &GameState::get_named_entities() const {
+	return this->named_entities;
+}
+
 const std::unordered_map<entity_id_t, std::shared_ptr<GameEntity>> &GameState::get_game_entities() const {
 	return this->game_entities;
 }

@@ -4,11 +4,11 @@
 
 #include <nyan/nyan.h>
 
-#include "gamestate/component/types.h"
-#include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/player.h"
 #include "gamestate/types.h"
+#include "log/log.h"
+#include "log/message.h"
 
 
 namespace openage::gamestate {
@@ -188,45 +188,72 @@ namespace {
 // so the design intent is documented in one place.
 constexpr int64_t MISSION_3_MILITIA_TARGET = 3;
 
+// PlacedEntity instance FQONs that are objective targets in each mission.
+// These are the PlacedEntity nyan instances declared in the scenario file
+// (e.g. assets/.../engine/util/scenario/mission_1.nyan defines
+// `EnemyVillager(engine.util.game_entity.PlacedEntity)`), NOT the
+// referenced GameEntity FQON. The scenario loader registers each placed
+// instance FQON -> spawned entity ID via GameState::register_named_entity,
+// so the trigger resolves the live enemy entity without spawn-order or
+// "all movables" assumptions.
+constexpr const char *MISSION_1_ENEMY_INSTANCE_FQON =
+	"engine.util.scenario.mission_1.EnemyVillager";
+
 } // namespace
+
+std::shared_ptr<TutorialTrigger> make_defeat_enemy_trigger(
+	const std::shared_ptr<GameState> &state,
+	const std::vector<entity_id_t> &target_ids) {
+
+	auto trigger = std::make_shared<TutorialTrigger>(state);
+
+	// Snapshot the target set by value so later mutation of the caller's
+	// vector cannot change the predicate. The step completes iff the set
+	// is non-empty AND every target is gone from the index. Empty set =>
+	// never completes (the scenario registered no enemy instance; failing
+	// closed prevents a false victory). Only target_ids are polled, so a
+	// player unit or bystander dying cannot satisfy the step.
+	auto targets = std::make_shared<std::vector<entity_id_t>>(target_ids);
+	trigger->add_step(
+		1,
+		"defeat_enemy",
+		"Destroy the enemy unit(s). The mission is won when every "
+		"objective target is eliminated.",
+		[targets](const std::shared_ptr<GameState> &s) -> bool {
+			if (targets->empty()) {
+				return false;
+			}
+			for (auto tid : *targets) {
+				if (s->has_game_entity(tid)) {
+					return false;
+				}
+			}
+			return true;
+		});
+
+	return trigger;
+}
 
 std::shared_ptr<TutorialTrigger> create_mission_1_trigger(
 	const std::shared_ptr<GameState> &state) {
 
-	auto trigger = std::make_shared<TutorialTrigger>(state);
-
-	// Combat vertical slice (increment 6): the mission is won when the
-	// scripted enemy villager is destroyed. The tutorial scenario is
-	// single-player with every initial entity owned by player 0 (game.cpp
-	// gives PlacedEntity no owner member), so the enemy cannot be told
-	// apart by ownership. Instead we snapshot the movable entities at
-	// trigger creation -- the scenario spawns exactly two (the player
-	// villager and the enemy villager) -- and the step completes as soon
-	// as one of them is gone from the index. The player villager never
-	// dies in this slice (the enemy does not fight back), so a missing
-	// movable unambiguously means the enemy was killed.
-	std::vector<entity_id_t> movable_ids;
-	for (const auto &[eid, ent] : state->get_game_entities()) {
-		if (ent->has_component(component::component_t::MOVE)) {
-			movable_ids.push_back(eid);
-		}
+	// Resolve the named enemy instance(s) to runtime entity IDs via the
+	// scenario loader's instance->ID map. If the scenario never spawned
+	// the expected instance (authoring drift, wrong scenario loaded), we
+	// hand make_defeat_enemy_trigger an empty target set and it fails
+	// closed -- no false victory -- rather than guessing by spawn order.
+	std::vector<entity_id_t> target_ids;
+	auto enemy_id = state->get_entity_id_by_instance(MISSION_1_ENEMY_INSTANCE_FQON);
+	if (enemy_id.has_value()) {
+		target_ids.push_back(enemy_id.value());
+	}
+	else {
+		log::log(MSG(warn) << "create_mission_1_trigger: no entity registered "
+		                   << "for instance " << MISSION_1_ENEMY_INSTANCE_FQON
+		                   << "; defeat_enemy step will not complete");
 	}
 
-	trigger->add_step(
-		1,
-		"defeat_enemy",
-		"Select your villager, press A and click the enemy villager. "
-		"The mission is won when the enemy is destroyed.",
-		[movable_ids](const std::shared_ptr<GameState> &s) -> bool {
-			for (auto eid : movable_ids) {
-				if (not s->has_game_entity(eid)) {
-					return true;
-				}
-			}
-			return false;
-		});
-
-	return trigger;
+	return make_defeat_enemy_trigger(state, target_ids);
 }
 
 std::shared_ptr<TutorialTrigger> create_mission_2_trigger(

@@ -370,6 +370,14 @@ void Game::load_scenario(const std::shared_ptr<TerrainFactory> &terrain_factory,
 		}
 
 		this->state->add_game_entity(entity);
+
+		// Register the PlacedEntity instance FQON -> runtime entity ID so
+		// objective/trigger systems can resolve a named instance (e.g. the
+		// "EnemyVillager" placed in mission_1) to its entity without spawn-
+		// order assumptions. placed.get_name() is the PlacedEntity's own
+		// FQON (e.g. engine.util.scenario.mission_1.EnemyVillager), not the
+		// referenced GameEntity FQON read above.
+		this->state->register_named_entity(placed.get_name(), entity->get_id());
 	}
 }
 

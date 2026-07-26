@@ -3,6 +3,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <unordered_map>
 
 #include "event/state.h"
@@ -125,6 +126,44 @@ public:
 	void remove_game_entity(entity_id_t id);
 
 	/**
+	 * Register a named scenario instance -> spawned entity ID mapping.
+	 *
+	 * When the scenario loader spawns the initial entities from a Scenario's
+	 * initial_entities set, each PlacedEntity nyan object has its own FQON
+	 * (e.g. "engine.util.scenario.mission_1.EnemyVillager"). The loader
+	 * registers that instance FQON against the runtime entity ID it just
+	 * created, so objective/trigger systems can resolve "the EnemyVillager
+	 * instance" to a concrete entity without relying on spawn order, max
+	 * ID, or "all movables" heuristics. This is the minimal, generic
+	 * instance->ID surface; a full owner/faction system is deliberately
+	 * out of scope.
+	 *
+	 * @param instance_fqon FQON of the PlacedEntity nyan instance.
+	 * @param id Runtime entity ID assigned to the spawned entity.
+	 */
+	void register_named_entity(const nyan::fqon_t &instance_fqon,
+	                           entity_id_t id);
+
+	/**
+	 * Look up the runtime entity ID spawned for a named scenario instance.
+	 *
+	 * @param instance_fqon FQON of the PlacedEntity nyan instance.
+	 *
+	 * @return The entity ID, or std::nullopt if no instance with that FQON
+	 *         was registered (e.g. the scenario never spawned one).
+	 */
+	std::optional<entity_id_t> get_entity_id_by_instance(
+		const nyan::fqon_t &instance_fqon) const;
+
+	/**
+	 * Read-only access to the full instance->ID map. Used by trigger
+	 * factories to snapshot the objective targets at creation time.
+	 *
+	 * @return Map of PlacedEntity instance FQON -> entity ID.
+	 */
+	const std::unordered_map<nyan::fqon_t, entity_id_t> &get_named_entities() const;
+
+	/**
 	 * Get all game entities in the current game.
 	 *
 	 * @return Map of all game entities in the current game by their ID.
@@ -163,6 +202,14 @@ private:
 	 * Map of all game entities in the current game by their ID.
 	 */
 	std::unordered_map<entity_id_t, std::shared_ptr<GameEntity>> game_entities;
+
+	/**
+	 * Map of named scenario instances (PlacedEntity FQON) -> entity ID,
+	 * populated by the scenario loader at spawn time. Lets objective/
+	 * trigger systems resolve a specific placed instance to its runtime
+	 * entity without spawn-order assumptions.
+	 */
+	std::unordered_map<nyan::fqon_t, entity_id_t> named_entities;
 
 	/**
 	 * Map of all players in the current game by their ID.
