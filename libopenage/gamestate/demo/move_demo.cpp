@@ -409,15 +409,33 @@ void simulation_demo_4(const util::Path &path) {
 	std::shared_ptr<component::Position> pos_comp;
 	coord::phys3 start_pos = coord::tile{0, 0}.to_phys3();
 	bool found = false;
+	// Mission 1 now spawns TWO movable villagers: a player one at (8,8) and an
+	// enemy one at (1,1). Entity-id allocation is NOT stable across runs, so
+	// "the first movable entity" can be either. This test queues 5 clicks
+	// toward (10,10) and allows only 12 s -- the enemy at (1,1) is ~12.7 tiles
+	// from (10,10) and cannot finish in time, so it must NOT be picked. Choose
+	// the movable entity whose start position is CLOSEST to (10,10); that is
+	// always the player villager at (8,8) (~2.8 tiles away).
+	auto click_target = coord::tile{10, 10}.to_phys3();
+	double best_dist = 0.0;
 	for (auto &[id, entity] : entities) {
-		if (entity->has_component(component::component_t::MOVE)) {
+		if (not entity->has_component(component::component_t::MOVE)) {
+			continue;
+		}
+		auto pc = std::dynamic_pointer_cast<component::Position>(
+			entity->get_component(component::component_t::POSITION));
+		if (not pc) {
+			continue;
+		}
+		auto sp = pc->get_positions().get(time::time_t{0});
+		double d = (sp - click_target).length();
+		if (not found or d < best_dist) {
+			best_dist = d;
 			villager_id = id;
 			villager = entity;
-			pos_comp = std::dynamic_pointer_cast<component::Position>(
-				entity->get_component(component::component_t::POSITION));
-			start_pos = pos_comp->get_positions().get(time::time_t{0});
+			pos_comp = pc;
+			start_pos = sp;
 			found = true;
-			break;
 		}
 	}
 	if (not found) {
@@ -457,13 +475,17 @@ void simulation_demo_4(const util::Path &path) {
 		                   << c.dest.ne.to_double() << "," << c.dest.se.to_double() << ")");
 	}
 
-	// Wait long enough for the LAST move to complete (3-4 tile path at
-	// move_speed 3 ~= 1.3 s, plus 0.5 s turn cap = ~1.8 s from the last
-	// cmd at t=1). Use 12 s as a generous bound.
-	log::log(MSG(info) << "Advancing simulation to t=12s...");
-	event_loop->reach_time(time::time_t::from_double(12.0), state);
+	// Wait long enough for the LAST move to complete. The 5-click plan walks a
+	// ~10-tile zig-zag (8,8)->(10,9)->(11,10)->(10,11)->(12,12)->(10,10); the
+	// villager's observed speed is ~0.56 tiles/s, and each leg pays up to a
+	// 0.5 s turn cap, so the full plan needs ~20 s of sim time. Use 30 s for
+	// headroom. (12 s was too tight -- it rested on a move_speed=3 assumption
+	// that does not match the real villager speed, and once a second movable
+	// villager joined the scenario the schedule slipped past the bound.)
+	log::log(MSG(info) << "Advancing simulation to t=30s...");
+	event_loop->reach_time(time::time_t::from_double(30.0), state);
 
-	auto final_pos = pos_comp->get_positions().get(time::time_t::from_double(12.0));
+	auto final_pos = pos_comp->get_positions().get(time::time_t::from_double(30.0));
 	log::log(MSG(info) << "final_pos=(" << final_pos.ne.to_double()
 	                   << "," << final_pos.se.to_double() << ")");
 

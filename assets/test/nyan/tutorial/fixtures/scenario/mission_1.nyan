@@ -100,16 +100,15 @@ _Pos14_1(engine.util.terrain.Size):
 
 
 # ---------------------------------------------------------------------------
-# PlacedEntity instances for Mission 1 - just the bare minimum needed to
-# teach the "gather wood" mechanic.
+# PlacedEntity instances for Mission 1.
 #
 #   - 1 player villager at (8, 8)
 #   - 1 player town center at (8, 9)
+#   - 1 enemy villager at (1, 1)   (MVP combat slice: AttackCommand target)
 #
-# No enemies. No other buildings. The player must select the villager,
-# issue a Gather command on a tree, and drop wood off at the TC until
-# they hit the 50-wood target. Combat + barracks + archer range are
-# Missions 3-5; this mission is purely the gather-economy loop.
+# The enemy villager is the AttackCommand target for the combat vertical
+# slice (approach/damage/death/victory). The legacy "gather wood" trigger
+# is repurposed to defeat-enemy in a later increment.
 # ---------------------------------------------------------------------------
 
 PlayerVillager(engine.util.game_entity.PlacedEntity):
@@ -119,6 +118,10 @@ PlayerVillager(engine.util.game_entity.PlacedEntity):
 PlayerTownCenter(engine.util.game_entity.PlacedEntity):
     PlacedEntity.entity = de2_base.data.game_entity.generic.town_center.town_center.TownCenter
     PlacedEntity.position = _Pos8_9
+
+EnemyVillager(engine.util.game_entity.PlacedEntity):
+    PlacedEntity.entity = de2_base.data.game_entity.generic.villager.villager.Villager
+    PlacedEntity.position = _Pos1_1
 
 
 # ---------------------------------------------------------------------------
@@ -436,5 +439,6 @@ Mission1(engine.util.scenario.Scenario):
     }
     Scenario.initial_entities = o{
         PlayerVillager,
-        PlayerTownCenter
+        PlayerTownCenter,
+        EnemyVillager
     }

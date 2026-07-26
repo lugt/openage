@@ -11,6 +11,7 @@
 #include "gamestate/component/api/attack.h"
 #include "gamestate/component/internal/commands/attack.h"
 #include "gamestate/component/internal/commands/types.h"
+#include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
 #include "gamestate/event/send_command.h"
 #include "gamestate/game.h"
@@ -165,6 +166,60 @@ void simulation_demo_5(const util::Path &path) {
 		                  << " target=" << attack_comp->get_target_id()
 		                  << " approaching=" << attack_comp->is_approaching()
 		                  << " alive=" << alive << ")");
+	}
+
+	// ---- Part C: approach a distant target (increment 3). ----
+	// The scenario spawns an EnemyVillager at (1,1); the player villager at
+	// (8,8) is ~10 tiles away (range=1), so an ATTACK on it must reuse
+	// Move::move_default to approach. Verify the villager closes distance.
+	entity_id_t enemy_id = 0;
+	bool found_enemy = false;
+	for (auto &[eid, ent] : entities) {
+		if (eid != villager_id and ent->has_component(component::component_t::MOVE)) {
+			enemy_id = eid;
+			found_enemy = true;
+			break;
+		}
+	}
+	if (not found_enemy) {
+		log::log(MSG(err) << "FAIL (Part C): no second movable entity for approach test");
+	}
+	else {
+		auto enemy = state->get_game_entity(enemy_id);
+		auto villager_pos_comp = std::dynamic_pointer_cast<component::Position>(
+			villager->get_component(component::component_t::POSITION));
+		auto enemy_pos_comp = std::dynamic_pointer_cast<component::Position>(
+			enemy->get_component(component::component_t::POSITION));
+		auto villager_start = villager_pos_comp->get_positions().get(time::time_t::from_int(10));
+		auto enemy_pos = enemy_pos_comp->get_positions().get(time::time_t::from_int(10));
+		double start_dist = (villager_start - enemy_pos).length();
+		log::log(MSG(info) << "Part C: approach villager=" << villager_id
+		                   << " enemy=" << enemy_id
+		                   << " start_dist=" << start_dist);
+
+		openage::event::EventHandler::param_map::map_t params_c{
+			{"type", component::command::command_t::ATTACK},
+			{"target_id", enemy_id},
+			{"entity_ids", std::vector<entity_id_t>{villager_id}},
+		};
+		event_loop->create_event("game.send_command", commander, state,
+		                         time::time_t::from_int(10), params_c);
+
+		log::log(MSG(info) << "Advancing simulation to t=30s for approach...");
+		event_loop->reach_time(time::time_t::from_int(30), state);
+
+		auto villager_end = villager_pos_comp->get_positions().get(time::time_t::from_int(30));
+		double end_dist = (villager_end - enemy_pos).length();
+		if (end_dist < start_dist) {
+			log::log(MSG(info) << "PASS (Part C): approach closed distance to enemy "
+			                   << "(start_dist=" << start_dist
+			                   << " end_dist=" << end_dist << ")");
+		}
+		else {
+			log::log(MSG(err) << "FAIL (Part C): villager did not approach "
+			                  << "(start_dist=" << start_dist
+			                  << " end_dist=" << end_dist << ")");
+		}
 	}
 
 	log::log(MSG(info) << "========== END ATTACK TEST ==========");
