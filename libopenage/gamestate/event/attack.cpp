@@ -49,12 +49,12 @@ void AttackHandler::invoke(openage::event::EventLoop &loop,
 	                   << " target_id=" << target_id);
 
 	for (auto attacker_id : ids) {
-		auto entity = gstate->get_game_entity(attacker_id);
-		if (not entity) {
+		if (not gstate->has_game_entity(attacker_id)) {
 			log::log(MSG(warn) << "AttackHandler: attacker " << attacker_id
 			                   << " not found in state");
 			continue;
 		}
+		auto entity = gstate->get_game_entity(attacker_id);
 
 		std::shared_ptr<component::Attack> attack_comp;
 		if (entity->has_component(component::component_t::ATTACK)) {
@@ -105,8 +105,7 @@ void AttackHandler::invoke(openage::event::EventLoop &loop,
 			resolved_target = attack_comp->get_target_id();
 		}
 
-		auto target_entity = gstate->get_game_entity(resolved_target);
-		if (not target_entity) {
+		if (not gstate->has_game_entity(resolved_target)) {
 			log::log(MSG(warn) << "AttackHandler: target " << resolved_target
 			                   << " not found; "
 			                   << (is_new_attack ? "attack dropped"
@@ -116,6 +115,7 @@ void AttackHandler::invoke(openage::event::EventLoop &loop,
 			}
 			continue;
 		}
+		auto target_entity = gstate->get_game_entity(resolved_target);
 
 		auto attacker_pos_comp = std::dynamic_pointer_cast<component::Position>(
 			entity->get_component(component::component_t::POSITION));
@@ -167,6 +167,25 @@ void AttackHandler::invoke(openage::event::EventLoop &loop,
 						                   << " damage=" << damage
 						                   << " health " << current.value()
 						                   << " -> " << new_value);
+
+						// Increment 5: death + entity removal. When Health
+						// drops to <= 0 the target is destroyed -- remove it
+						// from the state index and stop this attacker's loop.
+						// No follow-up game.attack is scheduled, so the
+						// attack cycle ends here; any *other* attacker still
+						// mid-swing against the same target will, on its next
+						// re-evaluation, find the target gone via
+						// has_game_entity() and stop cleanly instead of
+						// throwing on get_game_entity().
+						if (new_value <= 0) {
+							gstate->remove_game_entity(resolved_target);
+							attack_comp->stop_attack();
+							log::log(MSG(info) << "AttackHandler: target " << resolved_target
+							                   << " killed (HP=" << new_value
+							                   << "); removed from state, attacker "
+							                   << attacker_id << " stops");
+							continue;
+						}
 					}
 					else {
 						log::log(MSG(warn) << "AttackHandler: target " << resolved_target

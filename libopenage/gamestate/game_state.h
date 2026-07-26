@@ -97,6 +97,34 @@ public:
 	const std::shared_ptr<GameEntity> &get_game_entity(entity_id_t id) const;
 
 	/**
+	 * Check whether a game entity with the given ID is still in the index.
+	 *
+	 * Combat systems need a non-throwing lookup: once an entity is killed
+	 * (HP <= 0) it is removed from the index by \p remove_game_entity, and
+	 * any follow-up attack event scheduled against it must detect the gap
+	 * and stop the attacker's loop rather than throwing on \p get_game_entity.
+	 *
+	 * @param id ID of the game entity.
+	 *
+	 * @return true if the entity is present in the index.
+	 */
+	bool has_game_entity(entity_id_t id) const;
+
+	/**
+	 * Remove a game entity from the index.
+	 *
+	 * Called when an entity dies (Health drops to <= 0 in the attack hit
+	 * path). The entity's components may still be alive through outstanding
+	 * shared_ptr references (e.g. an in-flight AttackHandler holding the
+	 * target), but it is no longer discoverable via \p get_game_entity or
+	 * \p get_game_entities, so subsequent attack re-evaluations against it
+	 * stop cleanly. No-op (with a warning) if the ID is not present.
+	 *
+	 * @param id ID of the game entity to remove.
+	 */
+	void remove_game_entity(entity_id_t id);
+
+	/**
 	 * Get all game entities in the current game.
 	 *
 	 * @return Map of all game entities in the current game by their ID.

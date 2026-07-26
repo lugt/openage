@@ -48,6 +48,23 @@ const std::shared_ptr<GameEntity> &GameState::get_game_entity(entity_id_t id) co
 	return this->game_entities.at(id);
 }
 
+bool GameState::has_game_entity(entity_id_t id) const {
+	return this->game_entities.contains(id);
+}
+
+void GameState::remove_game_entity(entity_id_t id) {
+	auto it = this->game_entities.find(id);
+	if (it == this->game_entities.end()) [[unlikely]] {
+		log::log(MSG(warn) << "GameState: remove_game_entity called for ID "
+		                   << id << " which is not in the index (already removed?)");
+		return;
+	}
+	this->game_entities.erase(it);
+	log::log(MSG(info) << "GameState: removed game entity " << id
+	                   << " from index (" << this->game_entities.size()
+	                   << " remaining)");
+}
+
 const std::unordered_map<entity_id_t, std::shared_ptr<GameEntity>> &GameState::get_game_entities() const {
 	return this->game_entities;
 }

@@ -134,6 +134,11 @@ void simulation_demo_5(const util::Path &path) {
 	// Issue an AttackCommand targeting the villager itself. Self-target
 	// (dist=0) exercises the in-range branch of the range check; the
 	// out-of-range/approach branch lands in increment 3 with a real enemy.
+	// Increment 5 note: only advance to t=1 (one hit, HP 13->7) and then
+	// stop_attack() -- the self-attack follow-up chain would otherwise keep
+	// landing hits (t=2,4,...) and, now that HP<=0 removes the entity, kill
+	// the villager mid-test. Stopping here leaves the attacker idle for the
+	// Part C re-target against the real enemy.
 	openage::event::EventHandler::param_map::map_t params{
 		{"type", component::command::command_t::ATTACK},
 		{"target_id", villager_id},
@@ -146,8 +151,8 @@ void simulation_demo_5(const util::Path &path) {
 		time::time_t{0},
 		params);
 
-	log::log(MSG(info) << "Advancing simulation to t=10s...");
-	event_loop->reach_time(time::time_t::from_int(10), state);
+	log::log(MSG(info) << "Advancing simulation to t=1s (one self-hit)...");
+	event_loop->reach_time(time::time_t::from_int(1), state);
 
 	// Verify the persistent attack state was set on the Attack component:
 	// active, target == villager, and not approaching (dist=0 <= range).
@@ -168,6 +173,12 @@ void simulation_demo_5(const util::Path &path) {
 		                  << " approaching=" << attack_comp->is_approaching()
 		                  << " alive=" << alive << ")");
 	}
+
+	// Terminate the self-attack follow-up chain so it cannot kill the
+	// villager across later reach_time() calls (HP<=0 now removes the
+	// entity, per increment 5). The queued game.attack follow-ups still
+	// fire but exit via the AttackHandler "no active attack" guard.
+	attack_comp->stop_attack();
 
 	// ---- Part C: approach a distant target (increment 3). ----
 	// The scenario spawns an EnemyVillager at (1,1); the player villager at
@@ -268,6 +279,34 @@ void simulation_demo_5(const util::Path &path) {
 				                  << " delta=" << delta
 				                  << " per_hit=" << expected_per_hit << ")");
 			}
+		}
+
+		// ---- Part E: death + entity removal (increment 5). ----
+		// Part D drove enemy Health to <= 0 on the first lethal hit (well
+		// before t=45). The attack hit path must (a) remove the dead entity
+		// from the state index and (b) stop the attacker's follow-up loop.
+		// Verify the enemy is gone from the index and the attacker is idle.
+		bool enemy_present = state->has_game_entity(enemy_id);
+		size_t enemy_in_index = 0;
+		for (const auto &[eid, ent] : state->get_game_entities()) {
+			(void)ent;
+			if (eid == enemy_id) {
+				enemy_in_index++;
+			}
+		}
+		bool attacker_idle = not attack_comp->is_active();
+		if (not enemy_present and enemy_in_index == 0 and attacker_idle) {
+			log::log(MSG(info) << "PASS (Part E): enemy " << enemy_id
+			                   << " removed on death; attacker stopped "
+			                   << "(present=" << enemy_present
+			                   << " in_index=" << enemy_in_index
+			                   << " attacker_active=" << (not attacker_idle) << ")");
+		}
+		else {
+			log::log(MSG(err) << "FAIL (Part E): death/removal failed "
+			                  << "(present=" << enemy_present
+			                  << " in_index=" << enemy_in_index
+			                  << " attacker_active=" << (not attacker_idle) << ")");
 		}
 	}
 
