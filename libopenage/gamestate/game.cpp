@@ -378,6 +378,10 @@ void Game::load_scenario(const std::shared_ptr<TerrainFactory> &terrain_factory,
 		// FQON (e.g. engine.util.scenario.mission_1.EnemyVillager), not the
 		// referenced GameEntity FQON read above.
 		this->state->register_named_entity(placed.get_name(), entity->get_id());
+		log::log(MSG(info) << "load_scenario: spawned placed_instance="
+		                   << placed.get_name()
+		                   << " entity_id=" << entity->get_id()
+		                   << " entity_fqon=" << entity_fqon);
 	}
 }
 
