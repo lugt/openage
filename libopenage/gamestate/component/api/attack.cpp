@@ -28,11 +28,94 @@ double Attack::get_attack_range() const {
 	return DEFAULT_MELEE_RANGE;
 }
 
+namespace {
+
+/**
+ * Find the first FlatAttributeChangeDecrease effect in the attacker's
+ * ApplyDiscreteEffect batches and invoke \p visit on it. Returns true
+ * if one was found, false otherwise.
+ *
+ * The villager's Attack ability wires a single UnorderedBatch (Batch)
+ * whose EffectBatch.effects set contains six decrease effects
+ * (BuildingNoPort, Melee, StoneDefense, AnimalPredator, Ram,
+ * SiegeBallista); the first decrease is the right answer for any
+ * attacker type we have in Mission 1, since the MVP scope does not
+ * pick the batch by armour class.
+ *
+ * Iteration uses the same pattern as entity_factory for set-of-object
+ * members: SetValue yields ValueHolder, which we downcast to
+ * ObjectValue and resolve through the same View the ability lives in.
+ */
+template <typename Visitor>
+bool visit_first_decrease_effect(const nyan::Object &ability, Visitor &&visit) {
+	if (not ability.has("ApplyDiscreteEffect.batches")) {
+		return false;
+	}
+	auto view = ability.get_view();
+	auto batches = ability.get_set("ApplyDiscreteEffect.batches");
+	for (auto &batch_holder : batches) {
+		auto batch_val = std::dynamic_pointer_cast<nyan::ObjectValue>(batch_holder.get_ptr());
+		if (not batch_val) {
+			continue;
+		}
+		auto batch = view->get_object(batch_val->get_name());
+		if (not batch.has("EffectBatch.effects")) {
+			continue;
+		}
+		auto effects = batch.get_set("EffectBatch.effects");
+		for (auto &effect_holder : effects) {
+			auto effect_val = std::dynamic_pointer_cast<nyan::ObjectValue>(effect_holder.get_ptr());
+			if (not effect_val) {
+				continue;
+			}
+			auto effect = view->get_object(effect_val->get_name());
+			// The Decrease/Increase subclasses live in
+			// engine.effect.discrete.flat_attribute_change.type (note the
+			// ".type" suffix -- the base FlatAttributeChange class lives
+			// in the parent flat_attribute_change file). The villager's
+			// nyan imports it as 'edisc_flac' and references it via that
+			// alias, so we match the full type.nyan FQON here.
+			if (effect.extends(
+				"engine.effect.discrete.flat_attribute_change.type.FlatAttributeChangeDecrease")) {
+				visit(effect);
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+} // anonymous namespace
+
+
 int64_t Attack::get_damage() const {
-	// Increment 4 reads the flat Health damage from the ability's effect
-	// batch. Returning 0 here is intentional -- increment 2 only tracks
-	// range, and the AttackSystem does not apply damage yet.
-	return 0;
+	int64_t damage = 0;
+	visit_first_decrease_effect(
+		this->get_ability(),
+		[&](const nyan::Object &effect) {
+			if (effect.has("FlatAttributeChange.change_value")) {
+				auto change_value = effect.get_object("FlatAttributeChange.change_value");
+				if (change_value.has("AttributeAmount.amount")) {
+					damage = change_value.get_int("AttributeAmount.amount");
+				}
+			}
+		});
+	return damage;
+}
+
+nyan::fqon_t Attack::get_health_attribute_fqon() const {
+	nyan::fqon_t fqon;
+	visit_first_decrease_effect(
+		this->get_ability(),
+		[&](const nyan::Object &effect) {
+			if (effect.has("FlatAttributeChange.change_value")) {
+				auto change_value = effect.get_object("FlatAttributeChange.change_value");
+				if (change_value.has("AttributeAmount.type")) {
+					fqon = change_value.get_object("AttributeAmount.type").get_name();
+				}
+			}
+		});
+	return fqon;
 }
 
 bool Attack::is_active() const {

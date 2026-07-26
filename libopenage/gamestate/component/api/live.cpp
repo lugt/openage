@@ -51,6 +51,15 @@ void Live::set_attribute(const time::time_t &time,
 	}
 }
 
+std::optional<int64_t> Live::get_attribute_value(const time::time_t &time,
+                                                  const nyan::fqon_t &attribute) const {
+	auto attribute_value = this->attribute_values.at(time, attribute);
+	if (attribute_value) {
+		return (**attribute_value)->get(time);
+	}
+	return std::nullopt;
+}
+
 void Live::remove_attribute(const time::time_t &time,
                             const nyan::fqon_t &attribute) {
 	// UnorderedMap does not currently expose an erase-by-key accessor we

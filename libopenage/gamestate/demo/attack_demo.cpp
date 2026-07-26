@@ -9,6 +9,7 @@
 #include "event/event_loop.h"
 #include "event/eventhandler.h"
 #include "gamestate/component/api/attack.h"
+#include "gamestate/component/api/live.h"
 #include "gamestate/component/internal/commands/attack.h"
 #include "gamestate/component/internal/commands/types.h"
 #include "gamestate/component/internal/position.h"
@@ -219,6 +220,54 @@ void simulation_demo_5(const util::Path &path) {
 			log::log(MSG(err) << "FAIL (Part C): villager did not approach "
 			                  << "(start_dist=" << start_dist
 			                  << " end_dist=" << end_dist << ")");
+		}
+
+		// ---- Part D: cooldown + damage (increment 4). ----
+		// Part C closed distance by t=27.54; the in-range re-eval fires the
+		// first hit immediately (cooldown gate fires because
+		// next_attack_time was initialised to the attack start time), then
+		// each hit schedules the next game.attack at now + cooldown
+		// (reload_time = 2.0 s for villager). Verify the enemy's Health
+		// drops monotonically across multiple hits.
+		auto enemy_live = std::dynamic_pointer_cast<component::Live>(
+			enemy->get_component(component::component_t::LIVE));
+		if (not enemy_live) {
+			log::log(MSG(err) << "FAIL (Part D): enemy " << enemy_id
+			                  << " has no Live component (cannot verify HP)");
+		}
+		else {
+			auto health_fqon = attack_comp->get_health_attribute_fqon();
+			auto start_hp = enemy_live->get_attribute_value(
+				time::time_t::from_int(30), health_fqon);
+			log::log(MSG(info) << "Part D: enemy=" << enemy_id
+			                   << " health_fqon='" << health_fqon << "'"
+			                   << " start_hp=" << start_hp.value_or(-1));
+
+			log::log(MSG(info) << "Advancing simulation to t=45s for hits...");
+			event_loop->reach_time(time::time_t::from_int(45), state);
+
+			auto end_hp = enemy_live->get_attribute_value(
+				time::time_t::from_int(45), health_fqon);
+			int64_t start_v = start_hp.value_or(0);
+			int64_t end_v = end_hp.value_or(start_v);
+			int64_t delta = start_v - end_v;
+			int64_t expected_per_hit = attack_comp->get_damage();
+			int64_t hits = (expected_per_hit > 0) ? (delta / expected_per_hit) : 0;
+			if (delta > 0 and hits >= 1) {
+				log::log(MSG(info) << "PASS (Part D): enemy took damage "
+				                   << "(start_hp=" << start_v
+				                   << " end_hp=" << end_v
+				                   << " delta=" << delta
+				                   << " per_hit=" << expected_per_hit
+				                   << " hits=" << hits << ")");
+			}
+			else {
+				log::log(MSG(err) << "FAIL (Part D): enemy HP did not decrease "
+				                  << "(start_hp=" << start_v
+				                  << " end_hp=" << end_v
+				                  << " delta=" << delta
+				                  << " per_hit=" << expected_per_hit << ")");
+			}
 		}
 	}
 

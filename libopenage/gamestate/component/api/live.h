@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -47,6 +48,22 @@ public:
 	void set_attribute(const time::time_t &time,
 	                   const nyan::fqon_t &attribute,
 	                   int64_t value);
+
+	/**
+	 * Read the current value of an attribute at a given time.
+	 *
+	 * Used by combat systems to subtract damage from Health. The hit path
+	 * reads the current value via this method and writes the post-damage
+	 * value with \p set_attribute, which also fires the change callbacks
+	 * (e.g. the Health<=0 despawn hook registered in Phase C4).
+	 *
+	 * @param time The time at which the attribute is queried.
+	 * @param attribute Attribute identifier (fqon of the nyan object).
+	 * @return The attribute value at \p time, or std::nullopt if the
+	 *         attribute is not registered on this entity.
+	 */
+	std::optional<int64_t> get_attribute_value(const time::time_t &time,
+	                                           const nyan::fqon_t &attribute) const;
 
 	/**
 	 * Remove an attribute from storage.

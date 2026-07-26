@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <nyan/nyan.h>
+
 #include "gamestate/component/api_component.h"
 #include "gamestate/component/types.h"
 #include "gamestate/types.h"
@@ -58,12 +60,34 @@ public:
 	/**
 	 * Damage per hit.
 	 *
-	 * Returns 0 in increment 2; the flat damage amount is read from the
-	 * ability's effect batch in increment 4 (cooldown + ApplyDiscreteEffect),
-	 * where the damage-application path is wired. Armor-aware selection is
-	 * out of scope for Phase 2.
+	 * Reads the first FlatAttributeChangeDecrease effect from the
+	 * ApplyDiscreteEffect batches' EffectBatch.effects lists and returns
+	 * its change_value.amount. The villager's Melee effect carries
+	 * amount=3 for Health, so villager-vs-villager hits deal 3 damage.
+	 *
+	 * Armor-aware batch selection (matching attacker batch to target
+	 * armour class) is out of scope for the MVP; the first decrease is
+	 * the right answer for the villager's melee attack, which is the
+	 * only attacker in Mission 1.
+	 *
+	 * Returns 0 if no FlatAttributeChangeDecrease batch effect is found
+	 * (defensive fallback so a malformed ability cannot crash the loop).
 	 */
 	int64_t get_damage() const;
+
+	/**
+	 * FQON of the attribute damaged by this attack (e.g. the Health
+	 * attribute).
+	 *
+	 * Resolved from the first FlatAttributeChangeDecrease batch effect's
+	 * change_value.type. AttackHandler uses this to write the post-damage
+	 * value via Live::set_attribute on the target.
+	 *
+	 * Returns an empty FQON if no FlatAttributeChangeDecrease batch
+	 * effect is found (defensive fallback; callers should treat empty
+	 * FQON as "do not apply damage").
+	 */
+	nyan::fqon_t get_health_attribute_fqon() const;
 
 	// --- Runtime attack state (set by the AttackSystem) ---
 

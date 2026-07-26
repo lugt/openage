@@ -7,6 +7,7 @@
 #include "coord/phys.h"
 #include "event/event_loop.h"
 #include "gamestate/component/api/attack.h"
+#include "gamestate/component/api/live.h"
 #include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/internal/commands/attack.h"
 #include "gamestate/component/internal/commands/types.h"
@@ -145,7 +146,57 @@ void AttackHandler::invoke(openage::event::EventLoop &loop,
 
 		if (in_range) {
 			attack_comp->set_approaching(false);
-			// In range: ready for cooldown + damage (increment 4).
+
+			// Cooldown gate: only land a hit when the cooldown has
+			// elapsed since the last hit. The first hit is allowed
+			// immediately because start_attack() initialised
+			// next_attack_time to the attack start time.
+			if (time >= attack_comp->get_next_attack_time()) {
+				int64_t damage = attack_comp->get_damage();
+				auto health_fqon = attack_comp->get_health_attribute_fqon();
+				auto target_live = std::dynamic_pointer_cast<component::Live>(
+					target_entity->get_component(component::component_t::LIVE));
+
+				if (damage > 0 and target_live and not health_fqon.empty()) {
+					auto current = target_live->get_attribute_value(time, health_fqon);
+					if (current.has_value()) {
+						int64_t new_value = current.value() - damage;
+						target_live->set_attribute(time, health_fqon, new_value);
+						log::log(MSG(info) << "AttackHandler: hit attacker=" << attacker_id
+						                   << " target=" << resolved_target
+						                   << " damage=" << damage
+						                   << " health " << current.value()
+						                   << " -> " << new_value);
+					}
+					else {
+						log::log(MSG(warn) << "AttackHandler: target " << resolved_target
+						                   << " missing Health attribute '"
+						                   << health_fqon << "'");
+					}
+				}
+				else {
+					log::log(MSG(warn) << "AttackHandler: cannot hit attacker=" << attacker_id
+					                   << " target=" << resolved_target
+					                   << " damage=" << damage
+					                   << " has_live=" << (target_live ? true : false)
+					                   << " health_fqon_set=" << (not health_fqon.empty()));
+				}
+
+				// Schedule the next cooldown tick regardless of whether
+				// a hit landed (a target without Health still gets a
+				// follow-up so the attack loop terminates cleanly if the
+				// target later gains Health). next_attack_time is set on
+				// the Attack component so a concurrent re-entry from the
+				// same event pass does not double-fire.
+				auto next_hit = time + time::time_t::from_double(attack_comp->get_cooldown());
+				attack_comp->set_next_attack_time(next_hit);
+
+				openage::event::EventHandler::param_map::map_t followup_params{
+					{"entity_ids", std::vector<gamestate::entity_id_t>{attacker_id}},
+					{"target_id", resolved_target},
+				};
+				loop.create_event("game.attack", target, state, next_hit, followup_params);
+			}
 		}
 		else {
 			attack_comp->set_approaching(true);
