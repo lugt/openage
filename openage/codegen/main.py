@@ -178,3 +178,5 @@ def main(args, error):
 
             # fail
             sys.exit(1)
+
+    return 0

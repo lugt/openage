@@ -10,6 +10,7 @@ add_py_modules(
 	${CMAKE_CURRENT_BINARY_DIR}/config.py
 	default_dirs.py
 	NOINSTALL devmode.py
+	startup_regression_tests.py
 )
 
 add_cython_modules(
@@ -21,7 +22,9 @@ add_subdirectory(codegen)
 add_subdirectory(convert)
 add_subdirectory(cppinterface)
 add_subdirectory(cvar)
+add_subdirectory(error)
 add_subdirectory(event)
+add_subdirectory(exception_guard)
 add_subdirectory(game)
 add_subdirectory(gamestate)
 add_subdirectory(log)
@@ -31,4 +34,5 @@ add_subdirectory(pathfinding)
 add_subdirectory(renderer)
 add_subdirectory(testing)
 add_subdirectory(util)
+add_subdirectory(validate_nyan)
 add_subdirectory(versions)
