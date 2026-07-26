@@ -21,6 +21,7 @@
 #include "gamestate/manager.h"
 #include "gamestate/simulation.h"
 #include "gamestate/types.h"
+#include "gamestate/tutorial/trigger.h"
 #include "log/log.h"
 #include "log/message.h"
 #include "time/time.h"
@@ -180,6 +181,12 @@ void simulation_demo_5(const util::Path &path) {
 	// fire but exit via the AttackHandler "no active attack" guard.
 	attack_comp->stop_attack();
 
+	// Part F prep: build the mission_1 trigger now, while the enemy is
+	// still alive, so its defeat_enemy predicate snapshots the enemy's
+	// id alongside the player villager's. on_update() is polled in Part
+	// F after the enemy has been killed.
+	auto mission_trigger = create_mission_1_trigger(state);
+
 	// ---- Part C: approach a distant target (increment 3). ----
 	// The scenario spawns an EnemyVillager at (1,1); the player villager at
 	// (8,8) is ~10 tiles away (range=1), so an ATTACK on it must reuse
@@ -307,6 +314,26 @@ void simulation_demo_5(const util::Path &path) {
 			                  << "(present=" << enemy_present
 			                  << " in_index=" << enemy_in_index
 			                  << " attacker_active=" << (not attacker_idle) << ")");
+		}
+
+		// ---- Part F: mission victory (increment 6). ----
+		// The mission_1 trigger's defeat_enemy step was snapshotted in
+		// Part B (enemy still alive). Now that Part E confirmed the
+		// enemy is gone from the index, on_update() must see a missing
+		// movable id, complete the step, and flip is_finished().
+		mission_trigger->on_update(time::time_t::from_int(45));
+		if (mission_trigger->is_finished()) {
+			log::log(MSG(info) << "PASS (Part F): mission_1 trigger "
+			                   << "finished after enemy defeated "
+			                   << "(step=" << mission_trigger->current_step()
+			                   << " steps=" << mission_trigger->step_count() << ")");
+		}
+		else {
+			log::log(MSG(err) << "FAIL (Part F): mission_1 trigger "
+			                  << "not finished (step="
+			                  << mission_trigger->current_step()
+			                  << " finished=" << mission_trigger->is_finished()
+			                  << " steps=" << mission_trigger->step_count() << ")");
 		}
 	}
 

@@ -4,8 +4,11 @@
 
 #include <nyan/nyan.h>
 
+#include "gamestate/component/types.h"
+#include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/player.h"
+#include "gamestate/types.h"
 
 
 namespace openage::gamestate {
@@ -181,16 +184,8 @@ void TutorialTrigger::advance() {
 
 namespace {
 
-// Fully-qualified nyan object names for the tutorial resources.
-// Centralised here so future tests / scenarios can reuse the same
-// constants. When the asset pipeline lands these will move into a
-// shared header.
-constexpr const char *TUTORIAL_WOOD_FQON =
-	"engine.util.setup.tutorial_setup.TutorialWood";
-
 // Balance thresholds per mission. Tweak here rather than inside lambdas
 // so the design intent is documented in one place.
-constexpr int64_t MISSION_1_WOOD_TARGET = 50;
 constexpr int64_t MISSION_3_MILITIA_TARGET = 3;
 
 } // namespace
@@ -200,23 +195,35 @@ std::shared_ptr<TutorialTrigger> create_mission_1_trigger(
 
 	auto trigger = std::make_shared<TutorialTrigger>(state);
 
-	// Step 1 - gather wood. This is the only step whose predicate is
-	// actually wired today because it only needs the Phase A2 Player
-	// resource API. The HUD hint stays visible until the player has
-	// gathered enough wood to win the mission.
+	// Combat vertical slice (increment 6): the mission is won when the
+	// scripted enemy villager is destroyed. The tutorial scenario is
+	// single-player with every initial entity owned by player 0 (game.cpp
+	// gives PlacedEntity no owner member), so the enemy cannot be told
+	// apart by ownership. Instead we snapshot the movable entities at
+	// trigger creation -- the scenario spawns exactly two (the player
+	// villager and the enemy villager) -- and the step completes as soon
+	// as one of them is gone from the index. The player villager never
+	// dies in this slice (the enemy does not fight back), so a missing
+	// movable unambiguously means the enemy was killed.
+	std::vector<entity_id_t> movable_ids;
+	for (const auto &[eid, ent] : state->get_game_entities()) {
+		if (ent->has_component(component::component_t::MOVE)) {
+			movable_ids.push_back(eid);
+		}
+	}
+
 	trigger->add_step(
 		1,
-		"gather_wood",
-		"Press G on the villager, then click a tree. Drop the wood off "
-		"at the town center. Reach " + std::to_string(MISSION_1_WOOD_TARGET) +
-		" wood to win the mission.",
-		[state](const std::shared_ptr<GameState> &s) -> bool {
-			const auto &players = s->get_players();
-			auto it = players.find(0);
-			if (it == players.end()) {
-				return false;
+		"defeat_enemy",
+		"Select your villager, press A and click the enemy villager. "
+		"The mission is won when the enemy is destroyed.",
+		[movable_ids](const std::shared_ptr<GameState> &s) -> bool {
+			for (auto eid : movable_ids) {
+				if (not s->has_game_entity(eid)) {
+					return true;
+				}
 			}
-			return it->second->get_resource(TUTORIAL_WOOD_FQON) >= MISSION_1_WOOD_TARGET;
+			return false;
 		});
 
 	return trigger;
