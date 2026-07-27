@@ -7,3 +7,4 @@ add_py_modules(
 )
 
 add_subdirectory(formats)
+add_subdirectory(tests)

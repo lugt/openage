@@ -138,10 +138,19 @@ class DE2MediaSubprocessor:
                 # Notify metadata export about SMX metadata when the file is exported
                 export_request.add_observer(texture_meta_export)
                 export_request.add_observer(sprite_meta_export)
+                # Mirror forward observer wiring with reverse-reference on the
+                # metadata side so the ModpackExporter filter step can drop
+                # ONLY orphan metadata (no surviving request still references
+                # it). Shared metadata files referenced by more than one
+                # request stay alive as long as any of those requests
+                # remains.
+                texture_meta_export.add_request_ref(id(export_request))
+                sprite_meta_export.add_request_ref(id(export_request))
 
                 handled_graphic_ids.add(graphic_id)
 
-        # TODO: Terrain exports (DDS files)
+        # TODO: Terrain exports (DDS files) - implemented for SLP via
+        # create_terrain_requests() below; DDS path is the documented TODO.
 
     @staticmethod
     def create_sound_requests(full_data_set: GenieObjectContainer) -> None:

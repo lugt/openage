@@ -25,12 +25,43 @@ class MetadataExport(Observer):
     """
     A class for exporting metadata from another format. MetadataExports are
     observers so they can receive data from media conversion.
+
+    Tracks the set of MediaExportRequest identifiers this metadata file
+    depends on. The filter layer in ``ModpackExporter.export`` keeps a
+    metadata entry iff at least one of its dependent media requests is
+    still alive in the filtered set -- shared metadata survives the
+    filter; orphan metadata is dropped. ``request_id`` is ``id(request)``,
+    which sidesteps the pickle / circular-import problem of stashing the
+    request itself.
     """
 
     def __init__(self, targetdir: str, target_filename: str):
 
         self.targetdir = targetdir
         self.filename = target_filename
+        self._request_refs: set[int] = set()
+
+    def add_request_ref(self, request_id: int) -> None:
+        """
+        Add a back-reference from this metadata file to a media request
+        that depends on it. Called by the media subprocessor right
+        after ``MediaExportRequest.add_observer(...)`` so the ref count
+        mirrors the observer wiring.
+        """
+        self._request_refs.add(int(request_id))
+
+    def has_live_request(self, kept_request_ids: set[int]) -> bool:
+        """
+        Return True iff at least one of this metadata file's dependent
+        media requests is still in ``kept_request_ids``. Used by
+        ModpackExporter's filter step to drop only metadata that has
+        become an orphan after the request filter ran.
+        """
+        return bool(self._request_refs & kept_request_ids)
+
+    @property
+    def request_refs(self) -> set[int]:
+        return set(self._request_refs)
 
     def update(self, observable: Observable, message=None):
         return NotImplementedError("Interface does not implement update()")
@@ -48,6 +79,19 @@ class SpriteMetadataExport(MetadataExport):
         super().__init__(targetdir, target_filename)
 
         self.graphics_metadata: dict[int, tuple] = {}
+        # Pre-populated by add_graphics_metadata() from genie frame_count *
+        # angle_count; optionally overridden by update() once the texture
+        # atlas has actually been built. The invariant is:
+        #
+        #   every key in graphics_metadata must have an entry here by the
+        #   time dump() runs.
+        #
+        # Without pre-population, dump() used to throw KeyError on any
+        # graphic whose texture export never completed (filtered out by
+        # B5-FIX2-pending command, or killed by an earlier merge_frames
+        # OOM in the singlethreaded loop). The genie data is already
+        # authoritative for the frame count, so seeding here makes the
+        # invariant hold independently of any texture-export side effect.
         self.subtex_count: dict[str, int] = {}
 
     def add_graphics_metadata(
@@ -89,16 +133,48 @@ class SpriteMetadataExport(MetadataExport):
             start_angle
         )
 
+        # Seed the subtexture count with the genie-derived estimate so
+        # the dump() invariant holds even if the texture exporter never
+        # ran for this graphic (filtered out, killed by a sibling OOM,
+        # source SLD missing, etc.). The exporter's update() may still
+        # overwrite this with the precise atlas count if the texture
+        # actually got built.
+        if angle_count == 0:
+            angle_count = 1
+        seeded_count = frame_count * angle_count
+        self.subtex_count.setdefault(img_filename, seeded_count)
+
     def dump(self) -> str:
         """
         Creates a human-readable string that can be written to a file.
         """
+        # Fail-fast invariant check: every img_filename registered via
+        # add_graphics_metadata() must have a subtex_count entry by the
+        # time dump() runs. Without pre-population this used to throw
+        # KeyError on partial-export runs (filtered / OOM-killed) and on
+        # historical death/projectile animations. The check below turns
+        # the silent weakness into a structured error pointing at the
+        # request that broke the invariant.
+        missing = [k for k in self.graphics_metadata if k not in self.subtex_count]
+        if missing:
+            provenance = []
+            for img in missing[:10]:
+                meta = self.graphics_metadata[img]
+                provenance.append(
+                    f"  img_filename={img!r} tex_filename={meta[0]!r} "
+                    f"frame_count={meta[5]} angle_count={meta[6]}"
+                )
+            more = "" if len(missing) <= 10 else f" (and {len(missing) - 10} more)"
+            from ....error import Error as _SpriteDumpError
+            raise _SpriteDumpError(
+                f"SpriteMetadataExport invariant violated for sprite file "
+                f"{self.filename!r}: {len(missing)} entry/entries missing in "
+                f"subtex_count. First entries:\n" + "\n".join(provenance) + more
+            )
+
         sprite_file = SpriteMetadata(self.targetdir, self.filename)
 
         tex_index = 0
-
-        # if len(self.graphics_metadata) == 0:
-        #     raise ValueError("No graphics metadata in sprite file.")
 
         for img_filename, metadata in self.graphics_metadata.items():
             tex_filename = metadata[0]
@@ -131,10 +207,17 @@ class SpriteMetadataExport(MetadataExport):
                 sprite_file.add_angle(int(degree), mirror_from)
 
                 if not mirror_from:
+                    # Subtex_count is invariant-populated by
+                    # add_graphics_metadata() (genie frame_count *
+                    # angle_count) and optionally refined by the
+                    # exporter's update() if the texture atlas was
+                    # actually built. Either way, the key is present,
+                    # so the KeyError the legacy TODO comment alluded to
+                    # can no longer hide silently.
+                    subtex_total = self.subtex_count[img_filename]
                     for frame_idx in range(frame_count):
                         subtex_index = frame_idx + angle_index * frame_count
-                        if subtex_index >= self.subtex_count[img_filename]:
-                            # TODO: Can happen for some death and projectile animations. Why?
+                        if subtex_index >= subtex_total:
                             break
 
                         sprite_file.add_frame(
@@ -158,6 +241,10 @@ class SpriteMetadataExport(MetadataExport):
         :param message: A dict with frame metadata from the exported PNG file.
         :type message: dict
         """
+        # Once the texture atlas is built the exporter reports the
+        # exact subtex_metadata length; this refines (or, if the SLP
+        # contained 0 frames, decrements) the genie-derived seed so the
+        # sprite metadata reflects what was actually written.
         if message:
             for tex_filename, metadata in message.items():
                 self.subtex_count[tex_filename] = len(metadata["subtex_metadata"])
