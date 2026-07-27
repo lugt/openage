@@ -2,7 +2,7 @@
 # =============================================================================
 # William Wallace Mission 1 -- real game-window startup script.
 #
-# This is the SINGLE source of truth for launching the tutorial. Both the
+# This is the SINGLE source of truth for launching the scenario. Both the
 # agent's smoke checks and the user's manual launch MUST call this script;
 # do not invent alternative commands that test a weaker entry point.
 #
@@ -14,7 +14,7 @@
 #   - Forbids auto-conversion (--no-convert). It runs against whatever is
 #     currently in assets/converted and prints those mtimes so staleness is
 #     visible, never silently regenerating or swapping in test fixtures.
-#   - Calls the REAL game-window entry: `bin/run --tutorial --no-convert
+#   - Calls the REAL game-window entry: `bin/run --scenario --no-convert
 #     --no-prompts` (FULL mode: creates the Qt window + renderer + presenter).
 #     It does NOT use --headless or QT_QPA_PLATFORM=offscreen, because those
 #     bypass the window/renderer path that is the whole point of the launch.
@@ -36,8 +36,8 @@ LOGDIR="$REPO/logs"
 mkdir -p "$LOGDIR"
 LOG="$LOGDIR/ww_mission1_${TS}.log"
 
-SCENARIO_FQON="engine.util.scenario.mission_1.Mission1"
-PLAYER_SETUP_FQON="engine.util.setup.tutorial_setup.TutorialPlayerSetup"
+SCENARIO_FQON="ww_mvp.campaign.william_wallace.mission_01.Mission"
+PLAYER_SETUP_FQON="ww_mvp.campaign.william_wallace.mission_01.PlayerSetup"
 
 print_line() { printf '=%.0s' {1..78}; printf '\n'; }
 
@@ -51,8 +51,8 @@ echo "executable       : $REPO/bin/run"
 echo "asset dir        : $REPO/assets/converted"
 echo "scenario FQON    : $SCENARIO_FQON"
 echo "player setup FQON: $PLAYER_SETUP_FQON"
-echo "modpacks (tutorial activates 'engine'; de2_base present for nyan import resolution):"
-for m in engine de2_base; do
+echo "modpacks (scenario activates 'ww_mvp'; engine auto-added by C++, de2_base present for nyan import resolution):"
+for m in ww_mvp engine de2_base; do
 	f="$REPO/assets/converted/$m/modpack.toml"
 	if [ -f "$f" ]; then
 		ver="$(grep -E '^version' "$f" | head -1 | sed 's/.*= *"\(.*\)".*/\1/')"
@@ -77,7 +77,7 @@ check "$REPO/bin/run"                 "executable"
 check "$REPO/.venv/bin/python3"       "venv python"
 check "$REPO/assets/converted/engine/modpack.toml"   "engine modpack def"
 check "$REPO/assets/converted/de2_base/modpack.toml" "de2_base modpack def"
-check "$REPO/assets/converted/engine/util/scenario/mission_1.nyan" "mission_1 scenario nyan"
+check "$REPO/assets/converted/ww_mvp/campaign/william_wallace/mission_01.nyan" "mission_01 scenario nyan"
 # Built library (libopenage.so) -- the build dir layout is fixed by the project.
 so="$(find "$REPO/.bin" -name 'libopenage.so*' 2>/dev/null | head -1)"
 if [ -z "$so" ]; then
@@ -95,12 +95,12 @@ print_line
 # ---- Real game-window launch. No --headless, no offscreen override.
 # --no-convert is the hard kill switch (default is already no-convert; this
 # makes it explicit so the launch never silently regenerates assets).
-echo "Launching: bin/run --tutorial --no-convert --no-prompts"
+echo "Launching: bin/run --scenario --no-convert --no-prompts"
 echo "(FULL mode: Qt window + renderer + presenter. stdout/stderr -> $LOG)"
 print_line
 
 # NOTE: we do NOT set -e here; we want the engine's real exit code.
-"$REPO/bin/run" --tutorial --no-convert --no-prompts 2>&1 | tee "$LOG"
+"$REPO/bin/run" --scenario --no-convert --no-prompts 2>&1 | tee "$LOG"
 rc=${PIPESTATUS[0]}
 
 print_line
