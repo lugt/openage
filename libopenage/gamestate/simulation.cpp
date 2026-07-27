@@ -18,15 +18,15 @@
 // TODO
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
-#include "gamestate/tutorial/trigger.h"
+#include "gamestate/objective/objective_controller.h"
 
 namespace openage::gamestate {
 
 GameSimulation::GameSimulation(const util::Path &root_dir,
                                const std::shared_ptr<cvar::CVarManager> &cvar_manager,
                                const std::shared_ptr<openage::time::TimeLoop> time_loop,
-                               const std::string &tutorial_player_setup_fqon,
-                               const std::string &tutorial_scenario_fqon) :
+                               const std::string &scenario_player_setup_fqon,
+                               const std::string &scenario_fqon) :
 	running{false},
 	root_dir{root_dir},
 	cvar_manager{cvar_manager},
@@ -37,8 +37,8 @@ GameSimulation::GameSimulation(const util::Path &root_dir,
 	mod_manager{std::make_shared<assets::ModManager>(this->root_dir / "assets" / "converted")},
 	spawner{std::make_shared<gamestate::event::Spawner>(this->event_loop)},
 	commander{std::make_shared<gamestate::event::Commander>(this->event_loop)},
-	tutorial_player_setup_fqon{tutorial_player_setup_fqon},
-	tutorial_scenario_fqon{tutorial_scenario_fqon} {
+	scenario_player_setup_fqon{scenario_player_setup_fqon},
+	scenario_fqon{scenario_fqon} {
 	auto mods = mod_manager->enumerate_modpacks(root_dir / "assets" / "converted");
 	for (const auto &mod : mods) {
 		this->mod_manager->register_modpack(mod);
@@ -48,100 +48,186 @@ GameSimulation::GameSimulation(const util::Path &root_dir,
 }
 
 
-void GameSimulation::run() {
-	this->start();
-	while (this->running) {
-		time::time_t current_time = this->time_loop->get_clock()->get_time();
-		this->event_loop->reach_time(current_time, this->game->get_state());
+// GameSimulation::run() is defined later in this file (Phase G1: the
+// loop driver sits below the deprecated start()/stop() pair so the
+// initialization lifecycle is visible at a glance from the top of the
+// file).
 
-		// Tick the tutorial trigger once per simulation step. The
-		// trigger polls its current step's predicate and advances when
-		// the player has completed it. Phase D will hook into
-		// TutorialTrigger::is_finished() to surface the victory banner.
-		if (this->tutorial_trigger) {
-			this->tutorial_trigger->on_update(current_time);
-		}
-	}
-	log::log(MSG(info) << "Game simulation loop exited");
-}
-
-std::shared_ptr<TutorialTrigger> GameSimulation::create_tutorial_trigger() {
+std::shared_ptr<WilliamWallaceMission01ObjectiveController> GameSimulation::create_objective_controller() {
 	const auto &state = this->game->get_state();
 
 	// Suffix-match the scenario FQON against the 5 known mission names.
 	// This way the simulation doesn't need a separate "mission id" CLI
 	// flag - the scenario's name encodes the mission.
-	auto pick = [&](const std::string &suffix, auto factory) -> std::shared_ptr<TutorialTrigger> {
-		if (this->tutorial_scenario_fqon.find(suffix) != std::string::npos) {
+	auto pick = [&](const std::string &suffix, auto factory) -> std::shared_ptr<WilliamWallaceMission01ObjectiveController> {
+		if (this->scenario_fqon.find(suffix) != std::string::npos) {
 			return factory(state);
 		}
 		return nullptr;
 	};
 
-	if (auto t = pick(".mission_1.Mission1", &create_mission_1_trigger)) {
+	if (auto t = pick(".mission_01.Mission", &create_mission_1_trigger)) {
 		return t;
 	}
-	if (auto t = pick(".mission_2.Mission2", &create_mission_2_trigger)) {
+	if (auto t = pick(".mission_02.Mission", &create_mission_2_trigger)) {
 		return t;
 	}
-	if (auto t = pick(".mission_3.Mission3", &create_mission_3_trigger)) {
+	if (auto t = pick(".mission_03.Mission", &create_mission_3_trigger)) {
 		return t;
 	}
-	if (auto t = pick(".mission_4.Mission4", &create_mission_4_trigger)) {
+	if (auto t = pick(".mission_04.Mission", &create_mission_4_trigger)) {
 		return t;
 	}
-	if (auto t = pick(".mission_5.Mission5", &create_mission_5_trigger)) {
+	if (auto t = pick(".mission_05.Mission", &create_mission_5_trigger)) {
 		return t;
 	}
 
-	// Default: Mission 1. Lets the user run `--tutorial` with whatever
+	// Default: William Wallace Mission 1 MVP. Lets the user run `--scenario` with whatever
 	// scenario FQON they have and still get a working (if simplistic)
 	// trigger, instead of a silent no-op.
-	log::log(MSG(info) << "create_tutorial_trigger: no mission suffix matched; "
+	log::log(MSG(info) << "create_objective_controller: no mission suffix matched; "
 	                   << "falling back to Mission 1");
 	return create_mission_1_trigger(state);
 }
 
 
+const char *to_string(SimulationLifecycle s) {
+	switch (s) {
+	case SimulationLifecycle::Uninitialized: return "Uninitialized";
+	case SimulationLifecycle::Initialized:   return "Initialized";
+	case SimulationLifecycle::Running:      return "Running";
+	case SimulationLifecycle::Stopped:      return "Stopped";
+	case SimulationLifecycle::Failed:       return "Failed";
+	}
+	return "<unknown SimulationLifecycle>";
+}
+
+bool GameSimulation::initialize() {
+	std::unique_lock lock{this->mutex};
+
+	if (this->lifecycle != SimulationLifecycle::Uninitialized) {
+		auto label = to_string(this->lifecycle);
+		log::log(MSG(err) << "GameSimulation::initialize refused: lifecycle="
+		                  << label << " (expected Uninitialized)");
+		throw Error{ERR
+		           << "GameSimulation::initialize called twice (current='"
+		           << label
+		           << "'). Phase G1 forbids silent re-entry: a successful "
+		           << "initialize sets the runtime to Initialized; any further "
+		           << "initialize call is a hard lifecycle error."};
+	}
+
+	log::log(MSG(info) << "GameSimulation::initialize: phase begin "
+	                       "(modpacks activated, runtime frozen before any "
+	                       "worker is spawned)");
+
+	this->lifecycle = SimulationLifecycle::Initialized; // optimistic
+	try {
+		this->init_event_handlers();
+
+		// Build the initial player list. When scenario mode provides a
+		// PlayerSetup FQON, use it as the slot's civ; otherwise fall back
+		// to the debug/observer slot (empty FQON -> no civ patches, no
+		// starting resources).
+		nyan::fqon_t player_setup_fqon = this->scenario_player_setup_fqon.empty()
+			? nyan::fqon_t{""}
+			: nyan::fqon_t{this->scenario_player_setup_fqon};
+		std::vector<gamestate::PlayerDescriptor> players{
+			gamestate::PlayerDescriptor{player_setup_fqon},
+		};
+
+		nyan::fqon_t scenario_fqon = this->scenario_fqon.empty()
+			? nyan::fqon_t{""}
+			: nyan::fqon_t{this->scenario_fqon};
+
+		this->game = std::make_shared<gamestate::Game>(
+			event_loop,
+			this->mod_manager,
+			this->entity_factory,
+			this->terrain_factory,
+			players,
+			scenario_fqon);
+
+		if (not this->scenario_player_setup_fqon.empty() or
+		    not this->scenario_fqon.empty()) {
+			this->objective_controller = this->create_objective_controller();
+		}
+	}
+	catch (...) {
+		this->lifecycle = SimulationLifecycle::Failed;
+		log::log(MSG(err) << "GameSimulation::initialize: phase threw; "
+		                  << "lifecycle=Failed; runtime must NOT be used");
+		throw;
+	}
+
+	log::log(MSG(info) << "GameSimulation::initialize: phase complete "
+	                       "(game + objective ready; lifecycle=Initialized)");
+	return true;
+}
+
 void GameSimulation::start() {
 	std::unique_lock lock{this->mutex};
 
-	this->init_event_handlers();
-
-	// Build the initial player list. When tutorial mode provides a
-	// PlayerSetup FQON, use it as the slot's civ; otherwise fall back to
-	// the debug/observer slot (empty FQON → no civ patches, no starting
-	// resources).
-	nyan::fqon_t player_setup_fqon = this->tutorial_player_setup_fqon.empty()
-		? nyan::fqon_t{""}
-		: nyan::fqon_t{this->tutorial_player_setup_fqon};
-	std::vector<gamestate::PlayerDescriptor> players{
-		gamestate::PlayerDescriptor{player_setup_fqon},
-	};
-
-	// Scenario FQON: empty falls back to the default procedural terrain.
-	// B3 will thread this into the actual Game::load_scenario() call.
-	nyan::fqon_t scenario_fqon = this->tutorial_scenario_fqon.empty()
-		? nyan::fqon_t{""}
-		: nyan::fqon_t{this->tutorial_scenario_fqon};
-
-	this->game = std::make_shared<gamestate::Game>(event_loop,
-	                                               this->mod_manager,
-	                                               this->entity_factory,
-	                                               this->terrain_factory,
-	                                               players,
-	                                               scenario_fqon);
-
-	// Build the tutorial trigger once the Game (and therefore GameState)
-	// exists. The trigger stays null in non-tutorial runs.
-	if (not this->tutorial_player_setup_fqon.empty() or
-	    not this->tutorial_scenario_fqon.empty()) {
-		this->tutorial_trigger = this->create_tutorial_trigger();
+	// Phase G1: `start()` no longer performs initialization. Its single
+	// responsibility is to transition Initialized -> Running. Callers
+	// that previously relied on `start()` to do work must call
+	// `initialize()` first (typically the Engine owns the order).
+	if (this->lifecycle != SimulationLifecycle::Initialized) {
+		auto label = to_string(this->lifecycle);
+		log::log(MSG(err) << "GameSimulation::start refused: lifecycle="
+		                  << label << " (expected Initialized)");
+		throw Error{ERR
+		           << "GameSimulation::start requires lifecycle='Initialized'; "
+		           << "current='"
+		           << label
+		           << "'. Call initialize() first. Phase G1 explicitly "
+		           << "disallows the old initialize-in-start() semantics so a "
+		           << "double-start or a start-before-initialize regression "
+		           << "surfaces as a hard error rather than a silent no-op."};
 	}
 
+	this->lifecycle = SimulationLifecycle::Running;
 	this->running = true;
+}
 
-	log::log(MSG(info) << "Game simulation started");
+void GameSimulation::run() {
+	if (this->lifecycle != SimulationLifecycle::Initialized) {
+		auto label = to_string(this->lifecycle);
+		log::log(MSG(err) << "GameSimulation::run refused: lifecycle="
+		                  << label << " (expected Initialized before first "
+		                  << "run, then a one-shot Running transition)");
+		throw Error{ERR
+		           << "GameSimulation::run requires lifecycle='Initialized'; "
+		           << "current='"
+		           << label
+		           << "'. Phase G1 split initialize() and run() so a run() "
+		           << "issued before initialize() surfaces as a hard error "
+		           << "instead of trying to bootstrap internally."};
+	}
+
+	// One-shot Running transition. This is where the loop driver lives.
+	this->start();
+
+	time::time_t last_logged_at = time::time_t{0};
+	while (this->lifecycle == SimulationLifecycle::Running and this->running) {
+		time::time_t current_time = this->time_loop->get_clock()->get_time();
+		this->event_loop->reach_time(current_time, this->game->get_state());
+
+		if (this->objective_controller) {
+			this->objective_controller->on_update(current_time);
+		}
+
+		if (current_time - last_logged_at >= time::time_t{5000}) {
+			log::log(DBG << "GameSimulation::run: simulation time advanced to "
+			              << current_time
+			              << " (lifecycle=Running)");
+			last_logged_at = current_time;
+		}
+	}
+
+	this->lifecycle = SimulationLifecycle::Stopped;
+	log::log(MSG(info) << "GameSimulation::run: loop exited "
+	                       "(lifecycle=Stopped)");
 }
 
 
@@ -150,7 +236,16 @@ void GameSimulation::stop() {
 
 	this->running = false;
 
-	log::log(MSG(info) << "Game simulation stopped");
+	// Best-effort lifecycle transition. The loop predicate is `running`,
+	// so we set it false to break the loop; if the loop is no longer in
+	// Running (e.g. we already finished or never initialized) we stay in
+	// whatever state we were in rather than falsely stamping Stopped.
+	if (this->lifecycle == SimulationLifecycle::Running) {
+		this->lifecycle = SimulationLifecycle::Stopped;
+	}
+
+	log::log(MSG(info) << "GameSimulation::stop: running=false "
+	                       "(lifecycle=" << to_string(this->lifecycle) << ")");
 }
 
 

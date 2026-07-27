@@ -87,6 +87,12 @@ Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 	db{nyan::Database::create()},
 	state{std::make_shared<GameState>(this->db, event_loop)},
 	universe{std::make_shared<Universe>(state)} {
+	// Phase G1: the only modpack dump is the single audit line emitted
+	// by Engine::initialize_runtime() after activate_modpacks. The
+	// constructor body itself does NOT touch the manager; load_data()
+	// below only reads get_load_order() / get_modpack(), and any
+	// accounting of those reads goes through the invariant checked
+	// inside activate_modpacks(), not through per-call dumps here.
 	this->load_data(mod_manager);
 
 	// Add one Player per PlayerDescriptor. Empty FQON yields a player
@@ -126,6 +132,12 @@ void Game::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &rende
 
 void Game::load_data(const std::shared_ptr<assets::ModManager> &mod_manager) {
 	auto t0_load_data = perf_t0();
+	// Phase G1: load_data intentionally does not call dump_state.
+	// The audit line is the single dump_state() at the end of
+	// Engine::initialize_runtime(). This file (game.cpp) is on the
+	// "read-only consumer" side of the manager; the manager's
+	// write side (activate_modpacks + invariant) is the only place
+	// that mutates state, and it does the dumps itself.
 	auto load_order = mod_manager->get_load_order();
 	log::log(MSG(info) << "[PERF] load_data modpacks=" << load_order.size());
 
@@ -375,7 +387,7 @@ void Game::load_scenario(const std::shared_ptr<TerrainFactory> &terrain_factory,
 		// objective/trigger systems can resolve a named instance (e.g. the
 		// "EnemyVillager" placed in mission_1) to its entity without spawn-
 		// order assumptions. placed.get_name() is the PlacedEntity's own
-		// FQON (e.g. engine.util.scenario.mission_1.EnemyVillager), not the
+		// FQON (e.g. ww_mvp.campaign.william_wallace.mission_01.EnemyVillager), not the
 		// referenced GameEntity FQON read above.
 		this->state->register_named_entity(placed.get_name(), entity->get_id());
 		log::log(MSG(info) << "load_scenario: spawned placed_instance="

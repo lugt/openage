@@ -75,6 +75,21 @@ public:
 	const std::vector<std::string> &get_load_order() const;
 
 	/**
+	 * Diagnostic dump of the manager's authoritative state.
+	 *
+	 * Used by Phase C5 to track when, between observation points, the
+	 * active set stops matching the load order. The output includes the
+	 * object pointer (instance identity), the available keys, the active
+	 * keys, the load order, and a per-id "active? requested?" matrix.
+	 *
+	 * Must be safe to call from any thread; the underlying containers
+	 * are not mutated here.
+	 *
+	 * @param label Short tag identifying the call site for cross-grep.
+	 */
+	void dump_state(const std::string &label) const;
+
+	/**
 	 * Enumerates all modpack ids in a given directory.
 	 *
 	 * This also loads available modpack definition files.

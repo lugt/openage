@@ -33,12 +33,34 @@ class EntityFactory;
 class Game;
 class TerrainFactory;
 
-class TutorialTrigger;
+class WilliamWallaceMission01ObjectiveController;
 
 namespace event {
 class Commander;
 class Spawner;
 } // namespace event
+
+/**
+ * Explicit lifecycle states for GameSimulation.
+ *
+ * Phase G1 split `start()` out into `initialize()` and `run()` so that
+ * the "runtime is ready" boundary can be reached exactly once, on the
+ * caller's thread, and explicitly fail-fast on any re-entry or
+ * out-of-order calls. The state machine only progresses forward; a
+ * duplicate `initialize()` or a `run()` issued before `initialize()` has
+ * completed is reported as a hard error so the noise that the old
+ * `if (game) return` guard silently swallowed can no longer hide a
+ * lifecycle regression.
+ */
+enum class SimulationLifecycle {
+	Uninitialized,   //!< Just constructed; nothing has been registered.
+	Initialized,      //!< initialize() has finished; runtime is ready to step.
+	Running,         //!< run() is the active loop driver.
+	Stopped,         //!< stop() has been observed; the loop will exit on the next check.
+	Failed,          //!< initialize() failed; no further calls allowed.
+};
+
+const char *to_string(SimulationLifecycle s);
 
 /**
  * Gameplay subsystem of the engine.
@@ -53,16 +75,16 @@ public:
 	 * @param root_dir openage root directory.
 	 * @param cvar_manager Environment variable manager.
 	 * @param time_loop Time management loop.
-	 * @param tutorial_player_setup_fqon PlayerSetup FQON the tutorial slot
+	 * @param scenario_player_setup_fqon PlayerSetup FQON the tutorial slot
 	 *                                   should use (empty = observer/debug).
-	 * @param tutorial_scenario_fqon Scenario FQON to load at start (empty
+	 * @param scenario_fqon Scenario FQON to load at start (empty
 	 *                               = default procedural terrain).
 	 */
 	GameSimulation(const util::Path &root_dir,
 	               const std::shared_ptr<cvar::CVarManager> &cvar_manager,
 	               const std::shared_ptr<openage::time::TimeLoop> time_loop,
-	               const std::string &tutorial_player_setup_fqon = "",
-	               const std::string &tutorial_scenario_fqon = "");
+	               const std::string &scenario_player_setup_fqon = "",
+	               const std::string &scenario_fqon = "");
 
 	// game simulation should not be copied or moved
 	GameSimulation(const GameSimulation &copy) = delete;
@@ -72,12 +94,56 @@ public:
 	~GameSimulation() = default;
 
 	/**
-	 * Run the simulation loop.
+	 * Initialize the simulation runtime synchronously on the caller's
+	 * thread. Performs, in order:
+	 *   - `init_event_handlers`
+	 *   - `Game` / `GameState` construction
+	 *   - `Game::load_data` (nyan / engine schema / scenario data load)
+	 *   - `Game::add_player` for the configured PlayerSetup
+	 *   - `Game::load_scenario` (terrain + initial PlacedEntity spawns)
+	 *   - objective controller construction (Mission 1 MVP)
+	 *
+	 * Idempotent? **No** — calling `initialize()` after a successful
+	 * `initialize()` is a hard error. Re-entry attempts return false via
+	 * the return value (for tests) AND log + throw, so neither path
+	 * silently absorbs a state-machine regression.
+	 *
+	 * Threading: must be called on the thread that will own the runtime
+	 * -- in openage, the main thread. Doing it on a worker after the
+	 * GameSimulation::run() worker has spawned is precisely the
+	 * anti-pattern this split was added to forbid.
+	 *
+	 * @return true on success.
+	 * @throws Error if the runtime is not in Uninitialized state, or if
+	 *         any phase fails (state moves to Failed and the simulation
+	 *         must be discarded rather than used).
+	 */
+	bool initialize();
+
+	/**
+	 * Run the simulation loop. **Does not initialize** the runtime; a
+	 * successful `initialize()` is a precondition. The loop iterates
+	 * while `lifecycle == Running`; the loop exits cleanly when
+	 * `stop()` is called.
+	 *
+	 * Threading: typically called from a worker thread spawned by
+	 * `engine::Engine::loop()` after `initialize()` has fully returned.
 	 */
 	void run();
 
 	/**
-	 * Start the simulation loop.
+	 * Start the simulation loop. **Deprecated** as a public verb -- the
+	 * lifecycle intent is now `initialize()` + `run()` so the call site
+	 * that owns initialization is unmistakable in code review.
+	 *
+	 * Kept as a thin wrapper to avoid breaking existing call sites
+	 * (demos, interactive debugger, libopenage unit tests). On call it
+	 * asserts that the simulation is Initialized, then transitions to
+	 * Running. Calling `start()` before `initialize()` is a hard error.
+	 *
+	 * Removing this alias is recorded as a technical-debt item -- the
+	 * demos, headless smoke driver, and WW Mission 1 regression depend
+	 * on having a single unambiguous verb to schedule the loop.
 	 */
 	void start();
 
@@ -85,6 +151,13 @@ public:
 	 * Stop of the simulation loop.
 	 */
 	void stop();
+
+	/**
+	 * Current lifecycle state. Primarily for diagnostic / testing.
+	 */
+	SimulationLifecycle get_lifecycle() const {
+		return this->lifecycle;
+	}
 
 	/**
 	 * Get the root directory of the simulation executable.
@@ -156,6 +229,10 @@ public:
 	/**
 	 * current simulation state variable.
 	 * to be set to false to stop the simulation loop.
+	 *
+	 * @deprecated Replaced by the `lifecycle` enum above. Kept as a
+	 * plain bool for the `while(this->running)` loop predicate; flips
+	 * to false once `stop()` is observed.
 	 */
 	bool running;
 
@@ -164,6 +241,12 @@ private:
 	 * Initialize event handlers.
 	 */
 	void init_event_handlers();
+
+	/**
+	 * Lifecycle state machine. Only modified under `this->mutex`; read
+	 * from the controller / diagnostic code paths.
+	 */
+	SimulationLifecycle lifecycle = SimulationLifecycle::Uninitialized;
 
 	/**
 	 * The simulation root directory.
@@ -206,6 +289,19 @@ private:
 	 */
 	std::shared_ptr<assets::ModManager> mod_manager;
 
+public:
+	/**
+	 * Returns the mod manager. Used by Phase C5 diagnostic call sites
+	 * (engine ctor / loop / start entry) to snapshot the manager's
+	 * authoritative state without copying it. The accessor is intentional
+	 * to avoid changing the manager's ownership story during diagnosis.
+	 */
+	const std::shared_ptr<assets::ModManager> &get_mod_manager() const {
+		return this->mod_manager;
+	}
+
+private:
+
 	// TODO: move somewhere sensible or remove
 	std::shared_ptr<gamestate::event::Spawner> spawner;
 	std::shared_ptr<gamestate::event::Commander> commander;
@@ -214,34 +310,34 @@ private:
 	std::shared_ptr<gamestate::Game> game;
 
 	/**
-	 * PlayerSetup FQON for the tutorial slot. Empty means the simulation
+	 * PlayerSetup FQON for the scenario slot. Empty means the simulation
 	 * starts without any civ patches / starting resources (debug slot).
 	 *
 	 * Populated from the CLI / Engine; consumed by start() when
 	 * constructing the initial PlayerDescriptor.
 	 */
-	std::string tutorial_player_setup_fqon;
+	std::string scenario_player_setup_fqon;
 
 	/**
-	 * Scenario FQON for the tutorial. Empty means the simulation falls back
+	 * Scenario FQON for the active scenario. Empty means the simulation falls back
 	 * to the default procedural terrain (B3 will plumb this into Game).
 	 */
-	std::string tutorial_scenario_fqon;
+	std::string scenario_fqon;
 
 	/**
-	 * TutorialTrigger for the active tutorial mission. Constructed in
-	 * start() by matching tutorial_scenario_fqon against the known
+	 * Active objective controller (William Wallace Mission 1 MVP). Constructed in
+	 * start() by matching scenario_fqon against the known
 	 * mission FQONs (Mission1..Mission5). Ticked from run() once per
 	 * simulation step.
 	 */
-	std::shared_ptr<TutorialTrigger> tutorial_trigger;
+	std::shared_ptr<WilliamWallaceMission01ObjectiveController> objective_controller;
 
 	/**
 	 * Pick the right mission trigger factory by suffix-matching the
 	 * scenario FQON against the 5 known mission names. Falls back to
 	 * Mission 1 if no match is found.
 	 */
-	std::shared_ptr<TutorialTrigger> create_tutorial_trigger();
+	std::shared_ptr<WilliamWallaceMission01ObjectiveController> create_objective_controller();
 
 	/**
 	 * Mutex for thread-safe access to the simulation.

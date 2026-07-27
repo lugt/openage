@@ -94,6 +94,24 @@ public:
 	void run();
 
 	/**
+	 * Initialize graphics + GUI + input subsystems up-front.
+	 *
+	 * Phase C5 split this off from `run()` so the Engine can drive the
+	 * full init phase on the main thread (no presenter renderer init
+	 * racing with the simulation's first tick). Idempotent: subsequent
+	 * calls are no-ops; `run()` detects `is_initialized()` and skips
+	 * re-init, proceeding straight to the render loop.
+	 */
+	void init_all();
+
+	/**
+	 * Whether `init_all()` has already completed.
+	 */
+	bool is_initialized() const {
+		return this->initialized;
+	}
+
+	/**
 	 * Set the game simulation controlled by this presenter.
 	 *
 	 * @param simulation Game simulation.
@@ -236,6 +254,14 @@ protected:
 	 * Input manager.
 	 */
 	std::shared_ptr<input::InputManager> input_manager;
+
+	/**
+	 * Whether `init_all()` (graphics + GUI + input) has been driven.
+	 * Phase C5: the Engine constructor may pre-flight this on the main
+	 * thread so that `run()` is allowed to start its render loop
+	 * concurrently with the simulation worker threads.
+	 */
+	bool initialized = false;
 };
 
 } // namespace presenter

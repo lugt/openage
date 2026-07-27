@@ -74,16 +74,16 @@ public:
 	 * @param root_dir openage root directory.
 	 * @param mods The mods to load.
 	 * @param window_settings The settings to customize the display window (e.g. size, display mode, vsync).
-	 * @param tutorial When true, the engine launches in tutorial mode: a
-	 *                 tutorial PlayerSetup FQON is forwarded to the
-	 *                 simulation so a single tutorial slot is created.
-	 *                 Empty FQON strings disable the tutorial overlay even
+	 * @param scenario_mode When true, the engine launches in scenario mode: a
+	 *                 scenario PlayerSetup FQON is forwarded to the
+	 *                 simulation so a single scenario slot is created.
+	 *                 Empty FQON strings disable the scenario overlay even
 	 *                 when this is true (allows forcing a debug/observer
 	 *                 slot via CLI).
-	 * @param tutorial_player_setup_fqon PlayerSetup FQON the tutorial
+	 * @param scenario_player_setup_fqon PlayerSetup FQON the scenario
 	 *                                    player slot should use. Empty
 	 *                                    means observer/debug slot.
-	 * @param tutorial_scenario_fqon Scenario FQON to load when the
+	 * @param scenario_fqon Scenario FQON to load when the
 	 *                               simulation starts. Empty falls back to
 	 *                               the simulation's default procedural
 	 *                               terrain.
@@ -92,9 +92,9 @@ public:
 	       const util::Path &root_dir,
 	       const std::vector<std::string> &mods,
 	       const renderer::window_settings &window_settings = {},
-	       bool tutorial = false,
-	       const std::string &tutorial_player_setup_fqon = "",
-	       const std::string &tutorial_scenario_fqon = "");
+	       bool scenario_mode = false,
+	       const std::string &scenario_player_setup_fqon = "",
+	       const std::string &scenario_fqon = "");
 
 	// engine should not be copied or moved
 	Engine(const Engine &) = delete;
@@ -108,6 +108,29 @@ public:
 	 * Run the main loop.
 	 */
 	void loop();
+
+	/**
+	 * Phase G1 explicit-runtime entry: synchronously prepare the runtime
+	 * (modpacks, Game, scenario, objective controller, FULL-mode
+	 * Presenter/Renderer) on the caller's thread **before** any worker
+	 * thread is spawned. Idempotent? No -- calling it twice is a hard
+	 * lifecycle error so the noise that the old "Engine constructor
+	 * does it all and run() does not re-do it" pattern silently swallowed
+	 * can no longer hide a regression.
+	 *
+	 * Threading: must be called on the same thread that will later call
+	 * `loop()`. In openage, that is the main thread (so the FULL-mode
+	 * Presenter/Renderer thread-affinity for Qt is satisfied).
+	 */
+	void initialize_runtime();
+
+	/**
+	 * True iff `initialize_runtime()` has run to completion and the
+	 * runtime is fully prepared for `loop()`. `loop()` asserts this.
+	 */
+	bool is_runtime_initialized() const {
+		return this->runtime_initialized;
+	}
 
 	/**
 	 * current simulation state variable.
@@ -139,23 +162,23 @@ private:
 	util::Path root_dir;
 
 	/**
-	 * Whether the engine was started in tutorial mode.
+	 * Whether the engine was started in scenario mode.
 	 *
 	 * Propagated to the GameSimulation at construction so the simulation
-	 * can choose the tutorial PlayerSetup / scenario instead of the
+	 * can choose the scenario PlayerSetup and the scenario FQON instead of the
 	 * hardcoded empty / debug defaults.
 	 */
-	bool tutorial;
+	bool scenario_mode;
 
 	/**
-	 * PlayerSetup FQON for the tutorial player slot. Empty = observer/debug.
+	 * PlayerSetup FQON for the scenario slot. Empty = observer/debug.
 	 */
-	std::string tutorial_player_setup_fqon;
+	std::string scenario_player_setup_fqon;
 
 	/**
-	 * Scenario FQON to load for the tutorial. Empty = default procedural terrain.
+	 * Scenario FQON to load. Empty = default procedural terrain.
 	 */
-	std::string tutorial_scenario_fqon;
+	std::string scenario_fqon;
 
 	/**
 	 * The threads used by the engine.
@@ -181,6 +204,13 @@ private:
 	 * Video/audio/input management. Can be nullptr in headless mode.
 	 */
 	std::shared_ptr<presenter::Presenter> presenter;
+
+	/**
+	 * True iff `initialize_runtime()` has run to completion. Set true at
+	 * the end of a successful initialize_runtime() call, never reset.
+	 * Doubled initialize_runtime() calls fail-fast on this flag.
+	 */
+	bool runtime_initialized = false;
 };
 
 } // namespace engine
