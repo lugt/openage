@@ -4,9 +4,11 @@
 Main engine entry point for openage.
 """
 from __future__ import annotations
+import argparse
+import sys
 import typing
 
-from ..log import info
+from ..log import info, warn
 
 if typing.TYPE_CHECKING:
     from argparse import ArgumentParser
@@ -24,34 +26,63 @@ def init_subparser(cli: ArgumentParser):
         "--headless", action='store_true',
         help="run without displaying graphics")
 
+    # ==========================================================================
+    # Generic scenario launch (canonical names).
+    #
+    # --scenario is the boolean that opts in to loading a Scenario+PlayerSetup
+    # at simulation startup instead of the bare-engine / debug defaults.
+    # --scenario-fqon identifies the nyan Scenario to load.
+    # --player-setup-fqon identifies the nyan PlayerSetup used for the slot.
+    #
+    # The defaults point at the William Wallace Mission 1 MVP reconstruction
+    # (see assets/nyan/ww_mvp/campaign/william_wallace/mission_01/).
+    # ==========================================================================
     cli.add_argument(
-        "--tutorial", action='store_true', dest='tutorial',
-        help="launch in tutorial mode: a tutorial PlayerSetup FQON and "
+        "--scenario", action='store_true', dest='scenario',
+        help="launch with a single scenario slot: a PlayerSetup FQON and "
              "scenario FQON are forwarded to the engine so the C++ "
-             "simulation can wire up the tutorial slot instead of the "
-             "hardcoded empty / debug defaults.")
+             "simulation can wire up the slot instead of the hardcoded "
+             "empty / debug defaults.")
 
+    cli.add_argument(
+        "--scenario-fqon", type=str,
+        default="ww_mvp.campaign.william_wallace.mission_01.Mission",
+        dest='scenario_fqon',
+        help="FQON of the nyan Scenario loaded by the simulation on "
+             "start. Defaults to the William Wallace Mission 1 MVP "
+             "Scenario. Pass an empty string to keep the simulation's "
+             "hardcoded procedural terrain. Combined with --scenario; "
+             "ignored otherwise.")
+
+    cli.add_argument(
+        "--player-setup-fqon", type=str,
+        default=("ww_mvp.campaign.william_wallace.mission_01."
+                 "PlayerSetup"),
+        dest='player_setup_fqon',
+        help="FQON of the nyan PlayerSetup used for the scenario slot. "
+             "Defaults to the William Wallace Mission 1 MVP PlayerSetup "
+             "so `--scenario` alone is enough to run the campaign "
+             "tutorial. Pass an empty string to keep the slot as a "
+             "debug/observer with no civ patches or starting resources. "
+             "Combined with --scenario; ignored otherwise.")
+
+    # ==========================================================================
+    # Deprecated aliases. Remapped to the canonical flag with a stderr
+    # warning at parse time. Will be removed in a future release.
+    # New code MUST use --scenario / --scenario-fqon / --player-setup-fqon.
+    # ==========================================================================
+    cli.add_argument(
+        "--tutorial", action='store_const', const=True, dest='_legacy_tutorial',
+        default=None,
+        help=argparse.SUPPRESS)
     cli.add_argument(
         "--tutorial-player-setup-fqon", type=str,
-        default="engine.util.setup.tutorial_setup.TutorialPlayerSetup",
-        dest='tutorial_player_setup_fqon',
-        help="FQON of the nyan PlayerSetup used for the tutorial slot. "
-             "Defaults to the engine modpack's TutorialPlayerSetup so "
-             "`--tutorial` alone is enough to run the campaign tutorial. "
-             "Pass an empty string to keep the slot as a debug/observer "
-             "with no civ patches or starting resources. Combined with "
-             "--tutorial; ignored otherwise.")
-
+        default=None, dest='_legacy_tutorial_player_setup_fqon',
+        help=argparse.SUPPRESS)
     cli.add_argument(
         "--tutorial-scenario-fqon", type=str,
-        default="engine.util.scenario.mission_1.Mission1",
-        dest='tutorial_scenario_fqon',
-        help="FQON of the nyan Scenario loaded by the simulation on "
-             "start. Defaults to the engine modpack's Mission1 (16x16 "
-             "grass map, 1 villager + 1 town center; teaches gather wood). "
-             "Pass an empty string to keep the simulation's hardcoded "
-             "procedural terrain. Combined with --tutorial; ignored "
-             "otherwise.")
+        default=None, dest='_legacy_tutorial_scenario_fqon',
+        help=argparse.SUPPRESS)
 
     cli.add_argument(
         "--modpacks", nargs="+", type=str,
@@ -213,16 +244,22 @@ def main(args, error):
 
     # pass modpacks to engine
     #
-    # Tutorial mode uses the self-contained 'engine' modpack unless the user
-    # explicitly requested other modpacks. Tutorial data lives entirely under
-    # engine.util.tutorial_data / engine.util.scenario.mission_1 and does not
-    # depend on de2_base. Loading de2_base here would instead abort startup:
-    # its converter-generated civ data (e.g. burgundians.nyan:597 references
-    # the unresolved name 'HusbandryResearchable.HusbandryCost.FoodAmount')
-    # contains nyan name-resolution errors that pre-date this tutorial work.
-    if getattr(args, "tutorial", False) and not args.modpacks:
-        info("Tutorial mode: using 'engine' modpack (self-contained tutorial data)")
-        args.modpacks = ["engine"]
+    # Scenario mode loads the 'ww_mvp' modpack (William Wallace Mission 1
+    # MVP: scenario + player setup under ww_mvp.campaign.william_wallace.
+    # mission_01) unless the user explicitly requested other modpacks.
+    # The C++ side (GameSimulation::set_modpacks) always prepends 'engine',
+    # so ww_mvp's declared dependency on engine is satisfied and its Mission 1
+    # scenario can import engine.util.tutorial_data.TutorialGrass. de2_base is
+    # intentionally NOT activated in scenario mode: its converter-generated civ
+    # data (e.g. burgundians.nyan:597 references the unresolved name
+    # 'HusbandryResearchable.HusbandryCost.FoodAmount') contains nyan
+    # name-resolution errors that pre-date this work; it is still registered,
+    # so the Mission 1 PlacedEntity FQONs that point at de2_base game entities
+    # resolve without activation.
+    if getattr(args, "scenario", False) and not args.modpacks:
+        info("Scenario mode: using 'ww_mvp' modpack "
+             "(William Wallace Mission 1 MVP)")
+        args.modpacks = ["ww_mvp"]
 
     if args.modpacks:
         # ensure that specified modpacks are available
@@ -255,17 +292,88 @@ def main(args, error):
         "window_mode": args.window_mode,
     }
 
-    # Normalise tutorial CLI args. ``args.tutorial`` is the bool flag;
-    # the two FQON strings are always present (defaulted to the engine
-    # modpack's TutorialPlayerSetup / Tutorial1 above) and the C++ side
-    # decides whether to use them based on the bool. Pass --tutorial
-    # alone to use the bundled tutorial, or override the FQONs to swap
-    # to a different scenario.
-    args.tutorial = bool(getattr(args, "tutorial", False))
-    args.tutorial_player_setup_fqon = str(
-        getattr(args, "tutorial_player_setup_fqon", "") or "")
-    args.tutorial_scenario_fqon = str(
-        getattr(args, "tutorial_scenario_fqon", "") or "")
+    # ==========================================================================
+    # Resolve deprecated CLI aliases into canonical scenario args.
+    #
+    # The old `--tutorial` flags continue to work during the migration window,
+    # but emit a stderr deprecation warning and are mapped to the canonical
+    # flag values. Passing both old and new simultaneously is a hard error.
+    # ==========================================================================
+    legacy_tut = getattr(args, "_legacy_tutorial", None)
+    cur_scenario = bool(getattr(args, "scenario", False))
+    if legacy_tut is not None and cur_scenario is True:
+        raise SystemExit(
+            "error: --tutorial is deprecated; use --scenario instead. "
+            "Passing both is ambiguous and is treated as a hard error. "
+            "Re-run with only the new flag.")
+    legacy_tutorial_psu = getattr(args, "_legacy_tutorial_player_setup_fqon", None)
+    if legacy_tutorial_psu is not None:
+        cur_psu = getattr(args, "player_setup_fqon", "") or ""
+        default_psu = ("ww_mvp.campaign.william_wallace.mission_01."
+                      "PlayerSetup")
+        if cur_psu != default_psu:
+            raise SystemExit(
+                "error: --tutorial-player-setup-fqon conflicts with "
+                "--player-setup-fqon. Migrate your launcher script to the "
+                "canonical flag and run with that only.")
+        warn(
+            "--tutorial-player-setup-fqon is deprecated; mapped to "
+            "--player-setup-fqon=%s",
+            default_psu)
+    legacy_tutorial_scn = getattr(args, "_legacy_tutorial_scenario_fqon", None)
+    if legacy_tutorial_scn is not None:
+        cur_scn = getattr(args, "scenario_fqon", "") or ""
+        default_scn = "ww_mvp.campaign.william_wallace.mission_01.Mission"
+        if cur_scn != default_scn:
+            raise SystemExit(
+                "error: --tutorial-scenario-fqon conflicts with "
+                "--scenario-fqon. Migrate your launcher script to the "
+                "canonical flag and run with that only.")
+        warn(
+            "--tutorial-scenario-fqon is deprecated; mapped to "
+            "--scenario-fqon=%s",
+            default_scn)
+    if legacy_tut is not None:
+        sys.stderr.write(
+            "DEPRECATION: --tutorial is deprecated; use --scenario.\n")
+        args.scenario = True
+    if legacy_tutorial_psu is not None:
+        args.player_setup_fqon = (
+            "ww_mvp.campaign.william_wallace.mission_01.PlayerSetup")
+    if legacy_tutorial_scn is not None:
+        args.scenario_fqon = (
+            "ww_mvp.campaign.william_wallace.mission_01.Mission")
+
+    # Canonical scenario args. The C++ side decides whether to use them
+    # based on the boolean. Pass --scenario alone for the bundled WW
+    # Mission 1 MVP, or override the FQONs to swap to a different scenario.
+    args.scenario = bool(getattr(args, "scenario", False))
+    # main_cpp.pyx reads `args.scenario_mode` (matching the C++ args struct
+    # field in main.h); mirror the canonical `scenario` boolean under that
+    # name so the bridge forwards it correctly. When scenario_mode is False
+    # the engine clears scenario_fqon (engine.cpp) and falls back to the
+    # procedural terrain instead of calling Game::load_scenario.
+    args.scenario_mode = args.scenario
+    args.scenario_fqon = str(
+        getattr(args, "scenario_fqon", "") or "")
+    args.player_setup_fqon = str(
+        getattr(args, "player_setup_fqon", "") or "")
+    # main_cpp.pyx reads `args.scenario_player_setup_fqon` (matching the
+    # C++ args struct field); mirror the canonical `player_setup_fqon`
+    # under that name. When empty, EntityFactory::add_player calls
+    # get_object("") which hangs in nyan lookup, so the bridge MUST
+    # forward the real FQON in scenario mode.
+    args.scenario_player_setup_fqon = args.player_setup_fqon
+
+    # ====================================================================
+    # For the William Wallace Mission 1 MVP launch, log the explicit
+    # scenario identity. Other scenarios (or no --scenario) skip this.
+    # ====================================================================
+    if getattr(args, "scenario", False):
+        info("Scenario kind: William Wallace Mission 1 MVP reconstruction")
+        info("Scenario FQON: %s", args.scenario_fqon)
+        info("Player setup FQON: %s", args.player_setup_fqon)
+        info("Initial entities: 3 (PlayerVillager, PlayerTownCenter, EnemyVillager)")
 
     # start the game, continue in main_cpp.pyx!
     return run_game(args, root)

@@ -130,7 +130,7 @@ public:
 	 *
 	 * When the scenario loader spawns the initial entities from a Scenario's
 	 * initial_entities set, each PlacedEntity nyan object has its own FQON
-	 * (e.g. "engine.util.scenario.mission_1.EnemyVillager"). The loader
+	 * (e.g. "ww_mvp.campaign.william_wallace.mission_01.EnemyVillager"). The loader
 	 * registers that instance FQON against the runtime entity ID it just
 	 * created, so objective/trigger systems can resolve "the EnemyVillager
 	 * instance" to a concrete entity without relying on spawn order, max

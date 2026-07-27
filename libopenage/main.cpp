@@ -57,9 +57,18 @@ int run_game(const main_arguments &args) {
 	                               args.root_path,
 	                               args.mods,
 	                               win_settings,
-	                               args.tutorial,
-	                               args.tutorial_player_setup_fqon,
-	                               args.tutorial_scenario_fqon};
+	                               args.scenario_mode,
+	                               args.scenario_player_setup_fqon,
+	                               args.scenario_fqon};
+
+	// Phase G1: explicit boundary between Engine construction and
+	// loop(). After this returns, every worker-safe object (game,
+	// scenario, objective controller, FULL presenter/renderer) has been
+	// set up on the main thread. loop() may now spawn T1/T2 and (FULL)
+	// run the presenter on the main thread without any "is_initialized"
+	// guard, because initialize_runtime() has either succeeded (and
+	// runtime_initialized=true) or thrown (no partial state to drive).
+	engine.initialize_runtime();
 
 	engine.loop();
 

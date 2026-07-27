@@ -31,14 +31,14 @@ def run_game(args, root_path):
         # headless mode
         args_cpp.headless = args.headless
 
-        # tutorial mode + FQON strings. ``args.tutorial`` is the bool flag;
-        # the FQONs default to empty strings if not set on the Python side.
+        # scenario mode + FQON strings. ``args.tutorial`` is the bool flag (was --tutorial pre-migration);
+        # the FQONs default to empty strings if not set on the Python side (was tutorial_player_setup_fqon pre-migration).
         # Encoding as utf-8 because ``main_arguments`` carries std::string.
-        args_cpp.tutorial = bool(getattr(args, "tutorial", False))
-        args_cpp.tutorial_player_setup_fqon = \
-            getattr(args, "tutorial_player_setup_fqon", "").encode('utf-8')
-        args_cpp.tutorial_scenario_fqon = \
-            getattr(args, "tutorial_scenario_fqon", "").encode('utf-8')
+        args_cpp.scenario_mode = bool(getattr(args, "scenario_mode", False))
+        args_cpp.scenario_player_setup_fqon = \
+            getattr(args, "scenario_player_setup_fqon", "").encode('utf-8')
+        args_cpp.scenario_fqon = \
+            getattr(args, "scenario_fqon", "").encode('utf-8')
 
         # mods
         if args.modpacks is not None:
