@@ -127,7 +127,7 @@
 | **保留(冻结参考)** | `docs/superpowers/specs/2026-07-22-rts-gameplay-foundation-design.md`、`docs/superpowers/plans/2026-07-22-m0-determinism-harness.md`、`docs/superpowers/plans/2026-07-21-lazy-convert.md` 等 | 不删,不改,不作为执行依据 |
 | **冻结(不 wire)** | `system_id_t` 的 GATHER/BUILD/TRAIN/RESEARCH 等条目、`ACTIVITY_TASK_SYSTEM_DEFS` 对应映射、`handle_subsystem` 不加 case | 保留枚举避免 churn,但走 tick 路径而非 activity 路径 |
 | **冻结(不碰)** | converter 全部(`openage/convert/**`)、streaming/BfG/Wwise 主干及未提交改动 | 不阻塞 tutorial,不扩展 |
-| **删除/清理** | `simulation.cpp:66-70` 的 `static bool logged_completion` hack(迁入 MissionDirector);未跟踪 `plan-tutorial-lvl.md`(旧 transcript,可删) | 迁移后移除 hack |
+| **删除/清理** | `simulation.cpp:66-70` 的 `static bool logged_completion` hack(迁入 MissionDirector);未跟踪 `plan-tutorial-lvl.md`(历史 transcript,S5 已删,见 PhaseS0 迁移表) | 迁移后移除 hack |
 
 ---
 

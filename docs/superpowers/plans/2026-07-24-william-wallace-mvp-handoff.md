@@ -123,7 +123,7 @@ M  openage/convert/processor/export/modpack_exporter.py          (prior session)
 M  openage/convert/tool/wwise/extract.py                         (prior session)
 M  openage/convert/tool/wwise/mapping.py                         (prior session)
 ?? openage/convert/processor/export/output_checks.py             (prior session)
-?? plan-tutorial-lvl.md                                          (prior session)
+?? plan-tutorial-lvl.md  [deleted, see PhaseS0 migration table]  (prior session)
 ?? run-generate.sh                                               (prior session)
 ```
 

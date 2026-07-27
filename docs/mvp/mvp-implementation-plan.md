@@ -21,7 +21,7 @@
 
 ### T0.1 清理工作区,建 MVP 分支
 - **修改文件**:无代码改动。
-- **实现内容**:`git checkout -b mvp/tutorial-demo` (基于当前 HEAD)。保留未提交 converter 改动不动(不属本 MVP,但也不删)。删除未跟踪 `plan-tutorial-lvl.md`(旧 transcript)。
+- **实现内容**:`git checkout -b mvp/tutorial-demo` (基于当前 HEAD)。保留未提交 converter 改动不动(不属本 MVP,但也不删)。删除未跟踪 `plan-tutorial-lvl.md`(历史 transcript,S5 已执行,见 PhaseS0 迁移表)。
 - **测试方式**:`git status` 确认干净(除已知 converter 未提交组)。
 - **人工验收**:`git log --oneline -1` 显示在 `62051247` 之上。
 - **DoD**:分支创建,工作区可识别。
@@ -330,7 +330,7 @@
 
 | # | 任务 | 关键命令/文件 | 完成判据 |
 |---|---|---|---|
-| 0.1 | 建 `mvp/tutorial-demo` 分支,删 `plan-tutorial-lvl.md` transcript | `git checkout -b mvp/tutorial-demo`;`rm plan-tutorial-lvl.md` | 分支在 62051247 之上,工作区可识别 |
+| 0.1 | 建 `mvp/tutorial-demo` 分支,删 `plan-tutorial-lvl.md` transcript (历史 transcript,S5 已删) | `git checkout -b mvp/tutorial-demo`;`rm plan-tutorial-lvl.md` | 分支在 62051247 之上,工作区可识别 |
 | 0.2 | `ninja -C bin -j$(nproc)` 编译,修所有错误(以实际输出为准) | 预计涉 `game.cpp` load_scenario 的 nyan 类型访问、`simulation.cpp`/`trigger.cpp` | ninja 退出 0,`bin/run` 生成 |
 | 0.3 | `bin/run --tutorial --no-prompts` 启动验证 | 观察日志 `load_scenario size=16x16`/`initial_entities=2`/`Game simulation started` | 画面显示 16×16 草地 + 1 村民 + 1 TC |
 | 0.4 | 验证现有 MOVE:右键村民能移动;Ctrl+LMB 能生成 test 实体 | 鼠标操作 | 移动可用,无崩溃 |

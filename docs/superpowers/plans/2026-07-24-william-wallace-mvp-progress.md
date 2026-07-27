@@ -43,7 +43,7 @@ openage/convert/processor/export/modpack_exporter.py
 openage/convert/processor/export/output_checks.py
 openage/convert/tool/wwise/extract.py
 openage/convert/tool/wwise/mapping.py
-plan-tutorial-lvl.md
+plan-tutorial-lvl.md  [deleted, see PhaseS0 migration table] (prior session)
 run-generate.sh
 ```
 
