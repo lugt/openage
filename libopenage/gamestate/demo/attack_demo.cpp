@@ -23,7 +23,7 @@
 #include "gamestate/manager.h"
 #include "gamestate/simulation.h"
 #include "gamestate/types.h"
-#include "gamestate/tutorial/trigger.h"
+#include "gamestate/objective/objective_controller.h"
 #include "log/log.h"
 #include "log/message.h"
 #include "time/time.h"
@@ -69,11 +69,12 @@ void simulation_demo_5(const util::Path &path) {
 		path,
 		cvar,
 		time_loop,
-		"engine.util.setup.tutorial_setup.TutorialPlayerSetup",
-		"engine.util.scenario.mission_1.Mission1");
-	simulation->set_modpacks({"engine"});
+		"ww_mvp.campaign.william_wallace.mission_01.PlayerSetup",
+		"ww_mvp.campaign.william_wallace.mission_01.Mission");
+	simulation->set_modpacks({"de2_base", "ww_mvp"});
 
-	log::log(MSG(info) << "Starting simulation (loads Mission 1 scenario)...");
+	log::log(MSG(info) << "Initializing simulation (loads Mission 1 scenario)...");
+	simulation->initialize();
 	simulation->start();
 
 	auto game = simulation->get_game();
@@ -90,7 +91,7 @@ void simulation_demo_5(const util::Path &path) {
 	entity_id_t villager_id = 0;
 	bool found = false;
 	auto player_id_opt = state->get_entity_id_by_instance(
-		"engine.util.scenario.mission_1.PlayerVillager");
+		"ww_mvp.campaign.william_wallace.mission_01.PlayerVillager");
 	if (player_id_opt.has_value()) {
 		villager_id = *player_id_opt;
 		found = state->has_game_entity(villager_id);
@@ -203,7 +204,7 @@ void simulation_demo_5(const util::Path &path) {
 	entity_id_t enemy_id = 0;
 	bool found_enemy = false;
 	auto enemy_id_opt = state->get_entity_id_by_instance(
-		"engine.util.scenario.mission_1.EnemyVillager");
+		"ww_mvp.campaign.william_wallace.mission_01.EnemyVillager");
 	if (enemy_id_opt.has_value()) {
 		enemy_id = *enemy_id_opt;
 		found_enemy = state->has_game_entity(enemy_id);
@@ -365,16 +366,16 @@ namespace {
 // placed-instance FQONs (their own object names), not the referenced
 // GameEntity FQONs.
 constexpr const char *PLAYER_VILLAGER_FQON =
-	"engine.util.scenario.mission_1.PlayerVillager";
+	"ww_mvp.campaign.william_wallace.mission_01.PlayerVillager";
 constexpr const char *ENEMY_VILLAGER_FQON =
-	"engine.util.scenario.mission_1.EnemyVillager";
+	"ww_mvp.campaign.william_wallace.mission_01.EnemyVillager";
 constexpr const char *PLAYER_TC_FQON =
-	"engine.util.scenario.mission_1.PlayerTownCenter";
+	"ww_mvp.campaign.william_wallace.mission_01.PlayerTownCenter";
 // A bystander spawned by the test (not in the scenario file) to represent
 // an unrelated movable. Registered under a synthetic instance FQON so it
 // is distinguishable from the objective targets.
 constexpr const char *BYSTANDER_FQON =
-	"engine.util.scenario.mission_1.Bystander";
+	"ww_mvp.campaign.william_wallace.mission_01.Bystander";
 // Real GameEntity FQON for spawning a villager (reused from mission_1.nyan).
 constexpr const char *VILLAGER_ENTITY_FQON =
 	"de2_base.data.game_entity.generic.villager.villager.Villager";
@@ -402,9 +403,10 @@ Mission1Fixture load_mission1(const util::Path &path) {
 		path,
 		cvar,
 		time_loop,
-		"engine.util.setup.tutorial_setup.TutorialPlayerSetup",
-		"engine.util.scenario.mission_1.Mission1");
-	f.sim->set_modpacks({"engine"});
+		"ww_mvp.campaign.william_wallace.mission_01.PlayerSetup",
+		"ww_mvp.campaign.william_wallace.mission_01.Mission");
+	f.sim->set_modpacks({"de2_base", "ww_mvp"});
+	f.sim->initialize();
 	f.sim->start();
 
 	auto game = f.sim->get_game();
@@ -490,7 +492,7 @@ void simulation_demo_6(const util::Path &path) {
 		// Use enemy + town center as a two-target objective. remove one at a
 		// time: after the first removal the trigger must NOT fire; only after
 		// both are gone does it complete.
-		auto trigger = make_defeat_enemy_trigger(
+		auto trigger = make_defeat_enemy_objective(
 			f.state, std::vector<entity_id_t>{*f.enemy_id, *f.tc_id});
 
 		f.state->remove_game_entity(*f.tc_id);

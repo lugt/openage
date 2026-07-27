@@ -16,6 +16,11 @@ void simulation_demo_0(const util::Path &path) {
 
 	simulation->set_modpacks({"engine"});
 
+	// Phase G1: explicit initialize()/start() split. demos used to
+	// rely on start() doing the heavy init too; under the new lifecycle
+	// start() only transitions Initialized -> Running, so we must call
+	// initialize() to load nyan / build Game on the calling thread.
+	simulation->initialize();
 	simulation->start();
 }
 

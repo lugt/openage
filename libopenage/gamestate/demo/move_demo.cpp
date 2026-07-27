@@ -47,11 +47,16 @@ void simulation_demo_1(const util::Path &path) {
 		path,
 		cvar,
 		time_loop,
-		"engine.util.setup.tutorial_setup.TutorialPlayerSetup",
-		"engine.util.scenario.mission_1.Mission1");
-	simulation->set_modpacks({"engine"});
+		"ww_mvp.campaign.william_wallace.mission_01.PlayerSetup",
+		"ww_mvp.campaign.william_wallace.mission_01.Mission");
+	simulation->set_modpacks({"de2_base", "ww_mvp"});
 
-	log::log(MSG(info) << "Starting simulation (loads Mission 1 scenario, spawns villagers)...");
+	log::log(MSG(info) << "Initializing simulation (loads Mission 1 scenario, spawns villagers)...");
+	// Phase G1: explicit initialize()/start() split. set_modpacks()
+	// has already activated the modpacks; initialize() now loads
+	// nyan / builds Game / spawns the three initial entities; start()
+	// transitions Initialized -> Running.
+	simulation->initialize();
 	simulation->start();
 	log::log(MSG(info) << "Simulation started. Entities in state: "
 	                   << simulation->get_game()->get_state()->get_game_entities().size());
@@ -167,9 +172,10 @@ void simulation_demo_2(const util::Path &path) {
 		path,
 		cvar,
 		time_loop,
-		"engine.util.setup.tutorial_setup.TutorialPlayerSetup",
-		"engine.util.scenario.mission_1.Mission1");
-	simulation->set_modpacks({"engine"});
+		"ww_mvp.campaign.william_wallace.mission_01.PlayerSetup",
+		"ww_mvp.campaign.william_wallace.mission_01.Mission");
+	simulation->set_modpacks({"de2_base", "ww_mvp"});
+	simulation->initialize();
 	simulation->start();
 
 	auto game = simulation->get_game();
@@ -393,9 +399,10 @@ void simulation_demo_4(const util::Path &path) {
 	auto time_loop = std::make_shared<time::TimeLoop>();
 	auto simulation = std::make_shared<GameSimulation>(
 		path, cvar, time_loop,
-		"engine.util.setup.tutorial_setup.TutorialPlayerSetup",
-		"engine.util.scenario.mission_1.Mission1");
-	simulation->set_modpacks({"engine"});
+		"ww_mvp.campaign.william_wallace.mission_01.PlayerSetup",
+		"ww_mvp.campaign.william_wallace.mission_01.Mission");
+	simulation->set_modpacks({"de2_base", "ww_mvp"});
+	simulation->initialize();
 	simulation->start();
 
 	auto game = simulation->get_game();
