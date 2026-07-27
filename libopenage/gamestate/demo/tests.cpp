@@ -47,6 +47,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		simulation_demo_7(path);
 		break;
 
+	case 8:
+		// Phase H0.5: EventLoop fractional-time characterisation.
+		simulation_demo_8(path);
+		break;
+
 	default:
 		log::log(MSG(err) << "Unknown renderer demo requested: " << demo_id << ".");
 		break;
