@@ -181,6 +181,25 @@ void EventLoop::create_change(const std::shared_ptr<Event> evnt,
 	this->queue.add_change(evnt, changes_at);
 }
 
+std::optional<time::time_t> EventLoop::peek_next_event_time() const {
+	// Phase H0.5: test-driver helper. Holds the recursive_mutex so we
+	// do not race with an in-flight reach_time() call. The lock here
+	// is the same one reach_time() acquires via `execute_events()`
+	// transitively, so the read is serialised against in-flight event
+	// dispatch without deadlocking (recursive_mutex supports that).
+	// peek is declared const at the API surface; cast away const for
+	// the lock so we do not mutate logical state (the lock guard
+	// mutates only the mutex's transient state, not the queue).
+	std::lock_guard<std::recursive_mutex> lock{
+		const_cast<std::recursive_mutex &>(this->mutex)};
+
+	const auto &sorted = this->queue.get_event_queue().get_sorted_events();
+	if (sorted.empty()) {
+		return std::nullopt;
+	}
+	return sorted.front()->get_time();
+}
+
 
 void EventLoop::update_changes(const std::shared_ptr<State> &state) {
 	log::log(SPAM << "Loop: " << this->queue.get_changes().size()

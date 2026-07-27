@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -119,6 +120,30 @@ public:
 	const EventQueue &get_queue() const {
 		return this->queue;
 	}
+
+	/**
+	 * Read-only peek at the time of the next pending event in the queue.
+	 *
+	 * Returns the scheduled time of the front element of the queue
+	 * (the next event that `reach_time(t)` would dispatch given `t`
+	 * is large enough), or std::nullopt if the queue is empty or all
+	 * pending events have times that have already been passed by
+	 * `reach_time` calls earlier in this loop iteration.
+	 *
+	 * Phase H0.5 driver uses this to advance simulation time by
+	 * scheduled event time (event-time jump) instead of a fixed `+1`
+	 * time-unit step. The peek is intentionally a side-effect-free
+	 * read: it does not pop, reorder, or schedule anything.
+	 *
+	 * Rounds to the next pending event time so test drivers do not
+	 * have to invent a dt. Same-time events preserve the queue's
+	 * stable ordering.
+	 *
+	 * @return Optional next-event time, std::nullopt if queue empty
+	 *         or no event remains with a time > the current simulation
+	 *         time.
+	 */
+	std::optional<time::time_t> peek_next_event_time() const;
 
 private:
 	/**

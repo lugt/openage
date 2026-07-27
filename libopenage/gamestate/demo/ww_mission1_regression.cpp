@@ -68,11 +68,13 @@ constexpr const char *ENEMYVILLAGER_FQON =
 // Phase H0 deadline: if Mission 1 cannot be won within 5 simulated
 // minutes we have a regression against the legacy attack pipeline.
 constexpr time::time_t WW_MISSION1_DEADLINE = time::time_t::from_int(300);
-// Phase H0 max-event budget: 4096 events catches anything that
-// would otherwise busy-loop in the kernel (e.g. when the legacy
-// AttackHandler re-schedules itself faster than the resolution of
-// the simulation time unit).
-constexpr size_t WW_MISSION1_EVENT_BUDGET = 4096;
+// Phase H0.5 event-batch budget. We track EVENT BATCHES, not actual
+// dispatched events (the EventLoop reach_time() return value is
+// currently void; the implemented dispatcher returns a count but it
+// is private to the loop). Phases H1/H2+ are planned to expose a
+// real executed_event counter; until then we use event_batches as
+// the explicit counter and let a spike in batches fail the test.
+constexpr size_t WW_MISSION1_MAX_EVENT_BATCHES = 4096;
 
 bool assertion_failed = false;
 std::ostringstream failure_log;
@@ -178,39 +180,82 @@ void simulation_demo_7(const util::Path &path) {
 	event_loop->create_event("game.send_command", commander, state,
 	                         time::time_t::from_int(0), attack_params);
 
-	// Phase H0 manual-time loop. We step `current` one time-unit at a
-	// time and call reach_time() each step. The Clock does not need a
-	// public set_time -- EventLoop::reach_time itself drives event
-	// dispatch relative to its schedule.
-	time::time_t current = time::time_t::from_int(0);
-	size_t events_used = 0;
-	time::time_t stop_at = WW_MISSION1_DEADLINE;
+	// Phase H0.5 manual-time loop. We advance by scheduled event time,
+	// not by a fixed `+1`. Each loop iteration:
+	//   1. Peek next pending event time (no pop, no reorder).
+	//   2. If no event is pending or its time exceeds the deadline, exit.
+	//   3. reach_time(next_event_time) so the kernel can dispatch the
+	//      batch of events scheduled at that exact time.
+	//   4. Poll the objective controller exactly once per event batch
+	//      (Phase D temporary compatibility hook; will be removed when
+	//      the controller consumes a dedicated event).
+	//   5. Check the stop conditions (enemy removed, objective finished).
+	//
+	// Counters tracked explicitly so a future regression that spikes
+	// e.g. on event-batches visibly fails. We name them precisely:
+	//   time_advances        -- number of peek_next_event_time() queries
+	//   event_batches        -- number of reach_time() calls
+	//   objective_poll_count -- number of tick_objective_controller() calls
+	size_t time_advances = 0;
+	size_t event_batches = 0;
+	size_t objective_poll_count = 0;
+	time::time_t final_dispatched_time = time::time_t::from_int(0);
 
 	bool enemy_removed = false;
 	bool objective_finished = false;
-	while (events_used < WW_MISSION1_EVENT_BUDGET and current <= stop_at) {
-		event_loop->reach_time(current, state);
-		events_used += 1;
+	while (event_batches < WW_MISSION1_MAX_EVENT_BATCHES) {
+		// Step 1: peek next event time without consuming it.
+		auto next_opt = event_loop->peek_next_event_time();
+		++time_advances;
+		if (not next_opt.has_value()) {
+			// Queue exhausted -- no more events to dispatch.
+			break;
+		}
+		time::time_t next = *next_opt;
+
+		// Step 2: stop if the next event time would exceed the deadline.
+		if (next > WW_MISSION1_DEADLINE) {
+			break;
+		}
+
+		// Step 3: dispatch the event(s) scheduled at `next`.
+		event_loop->reach_time(next, state);
+		++event_batches;
+		final_dispatched_time = next;
+
+		// Step 4: Phase D TEMPORARY DEBT. The objective controller
+		// currently polls the game state once per simulation step
+		// rather than consuming an explicit MissionCompletedEvent.
+		// Until Phase D rewires this, we replicate run()'s per-step
+		// on_update here so headless tests can observe Victory. Phase D
+		// event-driven objective controller will allow deletion of
+		// tick_objective_controller / objective_poll_count.
+		simulation->tick_objective_controller(next);
+		++objective_poll_count;
 
 		enemy_removed = not state->has_game_entity(enemy_id);
-		simulation->tick_objective_controller(current);
 		objective_finished = simulation->is_objective_finished();
 		if (enemy_removed or objective_finished) {
 			break;
 		}
-		current = current + time::time_t::from_int(1);
 	}
 
 	// ---- Phase 4: stop-condition diagnostics + assertions.
 	WW1_ASSERT(enemy_removed,
-	          "EnemyVillager not removed before deadline (events_used="
-	              << events_used << " t=" << current << ")");
+	          "EnemyVillager not removed before deadline "
+	              "(time_advances=" << time_advances
+	              << " event_batches=" << event_batches
+	              << " objective_poll_count=" << objective_poll_count
+	              << " last_dispatched_t=" << final_dispatched_time << ")");
 	WW1_ASSERT(objective_finished,
-	          "Mission 1 objective not finished (Victory not reached; events_used="
-	              << events_used << " t=" << current << ")");
+	          "Mission 1 objective not finished (Victory not reached; "
+	              "time_advances=" << time_advances
+	              << " event_batches=" << event_batches
+	              << " objective_poll_count=" << objective_poll_count
+	              << " last_dispatched_t=" << final_dispatched_time << ")");
 
 	if (assertion_failed) {
-		log::log(MSG(err) << snapshot_failure_state(state, simulation, current));
+		log::log(MSG(err) << snapshot_failure_state(state, simulation, final_dispatched_time));
 		log::log(MSG(err) << "WW MISSION 1 HEADLESS REGRESSION: FAIL");
 		return;
 	}
@@ -218,8 +263,10 @@ void simulation_demo_7(const util::Path &path) {
 	log::log(MSG(info) << "WW MISSION 1 HEADLESS REGRESSION: PASS"
 	                       " (enemy_removed=" << enemy_removed
 	                       << " objective_finished=" << objective_finished
-	                       << " events_used=" << events_used
-	                       << " t=" << current << ")");
+	                       << " time_advances=" << time_advances
+	                       << " event_batches=" << event_batches
+	                       << " objective_poll_count=" << objective_poll_count
+	                       << " last_dispatched_t=" << final_dispatched_time << ")");
 }
 
 } // namespace openage::gamestate::tests
