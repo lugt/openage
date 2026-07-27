@@ -1,5 +1,6 @@
 add_py_modules(
 	__init__.py
+	media_export_filter.py
     api_export.py
 	budget_gate.py
 	driver.py

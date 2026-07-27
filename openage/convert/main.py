@@ -266,6 +266,16 @@ def init_subparser(cli: ArgumentParser):
               "OPENAGE_CONVERTER_BACKEND=lazy."))
 
     cli.add_argument(
+        "--media-export-filter", default=None,
+        help=("Path to a media export filter file. Restricts the media "
+              "exporter's request set by modpack, media_type, targetdir "
+              "glob, and target filename glob. Lines starting with '#' "
+              "are comments; one rule per line as 'modpack:media_type:"
+              "targetdir_glob:target_filename_glob'; '*' or empty matches "
+              "any. Empty / missing file means no filtering. Failure to "
+              "parse fails fast. Default: no filter (export everything)."))
+
+    cli.add_argument(
         "--export-api", action='store_true',
         help="Export the openage nyan API definition as a modpack")
 
