@@ -42,6 +42,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		simulation_demo_6(path);
 		break;
 
+	case 7:
+		// Phase H0: WW Mission 1 headless regression (manual time).
+		simulation_demo_7(path);
+		break;
+
 	default:
 		log::log(MSG(err) << "Unknown renderer demo requested: " << demo_id << ".");
 		break;

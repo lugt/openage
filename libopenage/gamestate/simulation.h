@@ -6,6 +6,8 @@
 
 #include "util/path.h"
 
+#include "gamestate/objective/objective_controller.h"
+
 namespace openage {
 
 namespace assets {
@@ -157,6 +159,32 @@ public:
 	 */
 	SimulationLifecycle get_lifecycle() const {
 		return this->lifecycle;
+	}
+
+	/**
+	 * True iff the active Mission 1 MVP objective controller has marked
+	 * the scenario completed. Phase H0 uses this from tests/demos to
+	 * poll for Victory without exposing the private objective_controller
+	 * pointer. Returns false when no objective controller is currently
+	 * registered (non-scenario runs).
+	 */
+	bool is_objective_finished() const {
+		return this->objective_controller
+		       and this->objective_controller->is_finished();
+	}
+
+	/**
+	 * Tick the registered objective controller at `now`, mirroring the
+	 * call that `run()` makes between `EventLoop::reach_time` iterations.
+	 * Phase H0 tests / demos use this so the headless regression can
+	 * advance the controller off-thread (it normally advances inside
+	 * `run()`'s while-loop predicate, which the manual-time driver
+	 * never enters).
+	 */
+	void tick_objective_controller(time::time_t now) {
+		if (this->objective_controller) {
+			this->objective_controller->on_update(now);
+		}
 	}
 
 	/**

@@ -3,6 +3,7 @@ add_sources(libopenage
     demo_0.cpp
 	move_demo.cpp
 	tests.cpp
+	ww_mission1_regression.cpp
 )
 
 pxdgen(
