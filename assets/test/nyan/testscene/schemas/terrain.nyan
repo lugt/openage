@@ -2,13 +2,13 @@
 !version 0.2.0
 # =============================================================================
 # HAND-WRITTEN MVP STOPGAP SCHEMA - NOT A CONVERTER PRODUCT.
-# Source of truth: assets/test/nyan/tutorial/schemas/terrain.nyan
+# Source of truth: assets/test/nyan/testscene/schemas/terrain.nyan
 # Installed to:      assets/converted/engine/util/terrain.nyan   (by install.sh, OVERLAYS
 #                   the api_export-generated base schema where applicable).
 # This file contains hand-authored schema additions (PlacedEntity / Scenario /
 # TerrainChunkLayout / Size) that api_export does NOT emit. It is a stopgap for
-# the Phase 0 tutorial scenario, NOT a converter product. See
-# assets/test/nyan/tutorial/README.md for the install/reproducibility flow.
+# the Phase 0 testscene scenario, NOT a converter product. See
+# assets/test/nyan/testscene/README.md for the install/reproducibility flow.
 # =============================================================================
 
 
