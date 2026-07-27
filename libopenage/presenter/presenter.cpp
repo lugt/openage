@@ -56,11 +56,15 @@ Presenter::Presenter(const util::Path &root_dir,
 
 
 void Presenter::run() {
-	log::log(INFO << "Presenter: Launching subsystems...");
-
-	this->init_graphics();
-
-	this->init_input();
+	// Phase C5: if init_all() was already driven by Engine::Engine
+	// during its pre-flight (before Engine::loop() spawned T1/T2), skip
+	// the init phase here and proceed straight to the render loop. This
+	// keeps init_graphics/init_input, which touch
+	// simulation->attach_renderer(), off the racing path with the
+	// simulation thread.
+	if (not this->initialized) {
+		this->init_all();
+	}
 
 	while (not this->window->should_close()) {
 		this->gui_app->process_events();
@@ -84,6 +88,19 @@ void Presenter::run() {
 	}
 
 	this->window->close();
+}
+
+void Presenter::init_all() {
+	if (this->initialized) {
+		return;
+	}
+	log::log(MSG(info) << "Presenter: pre-flight init_all() (on main thread, "
+	                       "before Engine::loop spawns workers)");
+	this->init_graphics();
+	this->init_input();
+	this->initialized = true;
+	log::log(MSG(info) << "Presenter: pre-flight complete; render loop is safe "
+	                       "to start concurrently with simulation tick");
 }
 
 void Presenter::set_simulation(const std::shared_ptr<gamestate::GameSimulation> &simulation) {
