@@ -1,44 +1,27 @@
 {
-  "scenario_kind": "William Wallace Mission 1 MVP reconstruction",
-  "scenario_fqon": "ww_mvp.campaign.william_wallace.mission_01.Mission",
-  "player_setup_fqon": "ww_mvp.campaign.william_wallace.mission_01.PlayerSetup",
-  "source_status": "BLOCKED",
-  "source_blocker": "Path D - no DE2 install on host; no SCX/SCN/campaign parser in repo (see docs/mvp/reports/mission1-scenario-feasibility.md)",
-  "is_imported_original": false,
-  "produced_at_commit": "fbb23fcfb6bb05a5ba0dccb8c860573e1e11b72e",
-  "schema_version": "p1-reconstruction-dump-v1",
-  "hand_authored_fields": [
-    "MapDefinition.size (16x16)",
-    "MapDefinition.terrain_ids (256 grass tiles, all TestsceneGrass)",
-    "MapDefinition.elevation (all 0)",
-    "EntityPlacement[PlayerVillager @ (8,8) -> de2_base.data.game_entity.generic.villager.villager.Villager]",
-    "EntityPlacement[PlayerTownCenter @ (8,9) -> de2_base.data.game_entity.generic.town_center.town_center.TownCenter]",
-    "EntityPlacement[EnemyVillager @ (1,1) -> de2_base.data.game_entity.generic.villager.villager.Villager]",
-    "PlayerSetup (MissionWood = 0)",
-    "VictoryDefinition (event-driven via ObjectiveController, NOT a trigger)"
-  ],
-  "trigger_types_present": [],
-  "trigger_types_candidate_from_spec": [
-    "TimerElapsed",
-    "EntityInArea",
-    "EntityDestroyed",
-    "EntityAlive",
-    "EntityOwnedBy",
-    "PlayerOwnsCount",
-    "AttributeCompare",
-    "TriggerFired"
-  ],
   "condition_types_present": [],
   "effect_types_present": [],
-  "unsupported_or_missing": [
-    "Original AoE2 DE William Wallace Mission 1 scenario data",
-    "campaigns_x_x.dat parser (does not exist in repo)",
-    "Per-mission scenario file parser (does not exist in repo)",
-    "TriggerDefinition instances (no trigger language in nyan)",
-    "ConditionDefinition / EffectDefinition variants (no runtime)",
-    "DiplomacyDefinition matrix (hand-reconstruction has no enemy players)",
-    "MapDefinition.terrain_ids variety (all tiles identical)",
-    "Elevation (all 0; source likely non-trivial)",
-    "AreasDefinition (none defined)"
-  ]
+  "is_imported_original": false,
+  "player_setup_fqon": "ww_mvp.campaign.william_wallace.mission_01.PlayerSetup",
+  "produced_at_commit": "fbb23fcfb6bb05a5ba0dccb8c860573e1e11b72e",
+  "scenario_fqon": "ww_mvp.campaign.william_wallace.mission_01.Mission",
+  "scenario_kind": "William Wallace Mission 1 MVP reconstruction",
+  "schema_version": "p2-ir-v1",
+  "source_blocker": "see docs/mvp/reports/mission1-scenario-feasibility.md",
+  "source_status": "BLOCKED",
+  "trigger_count": 0,
+  "trigger_types_candidate_from_spec": [
+    "AttributeCompare",
+    "EntityAlive",
+    "EntityDestroyed",
+    "EntityInArea",
+    "EntityOwnedBy",
+    "PlayerOwnsCount",
+    "TimerElapsed",
+    "TriggerFired"
+  ],
+  "trigger_types_present": [],
+  "unsupported_condition_kinds": [],
+  "unsupported_effect_kinds": [],
+  "unsupported_or_missing": []
 }

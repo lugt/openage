@@ -1,9 +1,10 @@
 """
-Mission-pack writer (P2.3).
+Mission-pack writer (P2.3 + P2.7).
 
 Serializes a :class:`ScenarioDefinition` into the four-file dump
 format consumed by :func:`openage.scenario.dumps.load_scenario_dump`
-and by the P2.4 / P4 workstream.
+and by the P2.4 / P4 workstream, plus a binary-friendly
+``scenario.json`` that the C++ production loader (P2.7) reads.
 
 Files written:
 
@@ -11,7 +12,11 @@ Files written:
                               with the dense terrain / elevation
                               arrays stored compactly (count + the
                               unique-value list, since all 256 tiles
-                              are identical in the reconstruction).
+                              are identical in the reconstruction),
+                              PLUS the per-chunk tile FQON list
+                              (P2.7: native loader needs chunk
+                              boundaries that the dense array does
+                              not encode).
   - ``object_table.csv``    - one row per EntityPlacement with
                               stable column order.
   - ``trigger_graph.json``  - trigger / condition / effect
@@ -26,6 +31,9 @@ The writer is byte-deterministic for a fixed input: no timestamps,
 no random IDs, no OS-dependent ordering. The
 ``produced_at_commit`` field is copied verbatim from the input
 ScenarioDefinition (it is metadata the writer does not invent).
+The chunk layout uses a fixed 8x8 chunk grid (matches Mission 1
+and the libopenage terrain_chunk API); edge chunks at the right /
+bottom borders are NOT padded.
 
 Validation gate
 ---------------
@@ -39,6 +47,7 @@ from __future__ import annotations
 import collections
 import csv
 import json
+import math
 import pathlib
 import typing as T
 
@@ -111,6 +120,35 @@ def _trigger_histograms(
 
 
 def _scenario_dict(scenario: ScenarioDefinition) -> dict[str, T.Any]:
+    # Expand the dense terrain / elevation arrays into the per-chunk
+    # tile FQON lists. Chunks are 8x8 by default (matches Mission 1
+    # and the libopenage terrain_chunk API). Edge chunks at the right /
+    # bottom edges may be smaller than the configured chunk size; they
+    # are NOT padded with bogus FQONs.
+    chunk_size = 8
+    chunks_x = math.ceil(scenario.map.width / chunk_size)
+    chunks_y = math.ceil(scenario.map.height / chunk_size)
+    chunk_records: list[dict[str, T.Any]] = []
+    for cy in range(chunks_y):
+        for cx in range(chunks_x):
+            ox = cx * chunk_size
+            oy = cy * chunk_size
+            max_x = min(ox + chunk_size, scenario.map.width)
+            max_y = min(oy + chunk_size, scenario.map.height)
+            tile_fqons: list[str] = []
+            for y in range(oy, max_y):
+                for x in range(ox, max_x):
+                    tile_fqons.append(
+                        scenario.map.terrain_ids[
+                            y * scenario.map.width + x
+                        ]
+                    )
+            chunk_records.append({
+                "offset": {"x": ox, "y": oy},
+                "size": {"x": max_x - ox, "y": max_y - oy},
+                "tile_fqons": tile_fqons,
+            })
+
     return {
         "schema_version": scenario.schema_version,
         "produced_at_commit": scenario.produced_at_commit,
@@ -126,6 +164,7 @@ def _scenario_dict(scenario: ScenarioDefinition) -> dict[str, T.Any]:
             "see docs/mvp/reports/mission1-scenario-feasibility.md"
         ),
         "is_imported_original": False,
+        "chunk_size": chunk_size,
         "ScenarioDefinition": {
             "id": scenario.id,
             "source": scenario.source,
@@ -141,6 +180,7 @@ def _scenario_dict(scenario: ScenarioDefinition) -> dict[str, T.Any]:
                 "elevation_unique": _compact_dense(
                     list(scenario.map.elevation)
                 )["unique"],
+                "chunks": chunk_records,
             },
             "players": [
                 {

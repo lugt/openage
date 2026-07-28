@@ -1,76 +1,389 @@
 {
-  "schema_version": "p1-reconstruction-dump-v1",
-  "produced_at_commit": "fbb23fcfb6bb05a5ba0dccb8c860573e1e11b72e",
-  "scenario_kind": "William Wallace Mission 1 MVP reconstruction",
-  "scenario_fqon": "ww_mvp.campaign.william_wallace.mission_01.Mission",
-  "player_setup_fqon": "ww_mvp.campaign.william_wallace.mission_01.PlayerSetup",
   "ScenarioDefinition": {
-    "id": "ww_mission1_reconstruction",
-    "source": "hand-authored",
-    "source_file": "assets/converted/ww_mvp/campaign/william_wallace/mission_01.nyan",
-    "MapDefinition": {
-      "width": 16,
-      "height": 16,
-      "terrain_ids_count": 256,
-      "terrain_ids_unique": ["engine.test.testscene_data.TestsceneGrass"],
-      "elevation_count": 256,
-      "elevation_unique": [0]
-    },
-    "players": [
-      {
-        "PlayerDefinition.player_id": 0,
-        "PlayerDefinition.name": "Tutorial Player",
-        "PlayerDefinition.starting_resources": [
-          {"type": "MissionWood", "amount": 0}
-        ]
-      },
-      {
-        "PlayerDefinition.player_id": 1,
-        "PlayerDefinition.name": "Enemy",
-        "PlayerDefinition.starting_resources": []
-      }
-    ],
+    "AreaDefinition": [],
     "EntityPlacement": [
       {
+        "AttributeOverrides": {},
+        "PlayerId": 0,
         "ScenarioObjectId": "PlayerVillager",
         "entity_definition_fqon": "de2_base.data.game_entity.generic.villager.villager.Villager",
-        "PlayerId": 0,
-        "position": {"x": 8, "y": 8},
-        "rotation": 0.0,
-        "AttributeOverrides": {}
+        "position": {
+          "x": 8,
+          "y": 8
+        },
+        "rotation": 0.0
       },
       {
+        "AttributeOverrides": {},
+        "PlayerId": 0,
         "ScenarioObjectId": "PlayerTownCenter",
         "entity_definition_fqon": "de2_base.data.game_entity.generic.town_center.town_center.TownCenter",
-        "PlayerId": 0,
-        "position": {"x": 8, "y": 9},
-        "rotation": 0.0,
-        "AttributeOverrides": {}
+        "position": {
+          "x": 8,
+          "y": 9
+        },
+        "rotation": 0.0
       },
       {
+        "AttributeOverrides": {},
+        "PlayerId": 1,
         "ScenarioObjectId": "EnemyVillager",
         "entity_definition_fqon": "de2_base.data.game_entity.generic.villager.villager.Villager",
-        "PlayerId": 1,
-        "position": {"x": 1, "y": 1},
-        "rotation": 0.0,
-        "AttributeOverrides": {}
+        "position": {
+          "x": 1,
+          "y": 1
+        },
+        "rotation": 0.0
       }
     ],
-    "AreaDefinition": [],
+    "MapDefinition": {
+      "chunks": [
+        {
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "size": {
+            "x": 8,
+            "y": 8
+          },
+          "tile_fqons": [
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass"
+          ]
+        },
+        {
+          "offset": {
+            "x": 8,
+            "y": 0
+          },
+          "size": {
+            "x": 8,
+            "y": 8
+          },
+          "tile_fqons": [
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass"
+          ]
+        },
+        {
+          "offset": {
+            "x": 0,
+            "y": 8
+          },
+          "size": {
+            "x": 8,
+            "y": 8
+          },
+          "tile_fqons": [
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass"
+          ]
+        },
+        {
+          "offset": {
+            "x": 8,
+            "y": 8
+          },
+          "size": {
+            "x": 8,
+            "y": 8
+          },
+          "tile_fqons": [
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass",
+            "engine.test.testscene_data.TestsceneGrass"
+          ]
+        }
+      ],
+      "elevation_count": 256,
+      "elevation_unique": [
+        0
+      ],
+      "height": 16,
+      "terrain_ids_count": 256,
+      "terrain_ids_unique": [
+        "engine.test.testscene_data.TestsceneGrass"
+      ],
+      "width": 16
+    },
     "TriggerDefinition": [],
     "VictoryDefinition": {
       "kind": "objective-driven",
-      "objective_controller_path": "libopenage/gamestate/objective/objective_controller.cpp",
-      "objective_polling": "TEMPORARY DEBT (P4 will replace with MissionCompletedEvent)",
-      "required_removals": ["EnemyVillager"]
-    }
+      "required_removals": [
+        "EnemyVillager"
+      ]
+    },
+    "id": "ww_mission1_reconstruction",
+    "players": [
+      {
+        "PlayerDefinition.name": "Tutorial Player",
+        "PlayerDefinition.player_id": 0,
+        "PlayerDefinition.starting_resources": []
+      },
+      {
+        "PlayerDefinition.name": "Enemy",
+        "PlayerDefinition.player_id": 1,
+        "PlayerDefinition.starting_resources": []
+      }
+    ],
+    "source": "hand-authored",
+    "source_file": "assets/converted/ww_mvp/campaign/william_wallace/mission_01.nyan"
   },
-  "trigger_graph": {
-    "trigger_count": 0,
-    "node_count": 0,
-    "edge_count": 0
-  },
-  "unsupported_or_skipped": [
-    "Original AoE2 DE Mission 1 (Path D BLOCKED; see mission1-scenario-feasibility.md)"
-  ]
+  "chunk_size": 8,
+  "is_imported_original": false,
+  "player_setup_fqon": "ww_mvp.campaign.william_wallace.mission_01.PlayerSetup",
+  "produced_at_commit": "fbb23fcfb6bb05a5ba0dccb8c860573e1e11b72e",
+  "scenario_fqon": "ww_mvp.campaign.william_wallace.mission_01.Mission",
+  "scenario_kind": "William Wallace Mission 1 MVP reconstruction",
+  "schema_version": "p2-ir-v1",
+  "source_blocker": "see docs/mvp/reports/mission1-scenario-feasibility.md",
+  "source_status": "BLOCKED"
 }
