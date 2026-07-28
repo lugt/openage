@@ -1,0 +1,4 @@
+scenario_object_id,scenario_fqon,player_id,entity_fqon,pos_x,pos_y,rotation,source
+PlayerVillager,ww_mvp.campaign.william_wallace.mission_01.PlayerVillager,0,de2_base.data.game_entity.generic.villager.villager.Villager,8,8,0.0,hand-authored
+PlayerTownCenter,ww_mvp.campaign.william_wallace.mission_01.PlayerTownCenter,0,de2_base.data.game_entity.generic.town_center.town_center.TownCenter,8,9,0.0,hand-authored
+EnemyVillager,ww_mvp.campaign.william_wallace.mission_01.EnemyVillager,1,de2_base.data.game_entity.generic.villager.villager.Villager,1,1,0.0,hand-authored

@@ -1,0 +1,71 @@
+{
+  "schema_version": "p1-reconstruction-dump-v1",
+  "produced_at_commit": "fbb23fcfb6bb05a5ba0dccb8c860573e1e11b72e",
+  "scenario_kind": "William Wallace Mission 1 MVP reconstruction",
+  "scenario_fqon": "ww_mvp.campaign.william_wallace.mission_01.Mission",
+  "player_setup_fqon": "ww_mvp.campaign.william_wallace.mission_01.PlayerSetup",
+  "ScenarioDefinition": {
+    "id": "ww_mission1_reconstruction",
+    "source": "hand-authored",
+    "source_file": "assets/converted/ww_mvp/campaign/william_wallace/mission_01.nyan",
+    "MapDefinition": {
+      "width": 16,
+      "height": 16,
+      "terrain_ids_count": 256,
+      "terrain_ids_unique": ["engine.test.testscene_data.TestsceneGrass"],
+      "elevation_count": 256,
+      "elevation_unique": [0]
+    },
+    "players": [
+      {
+        "PlayerDefinition.player_id": 0,
+        "PlayerDefinition.name": "Tutorial Player",
+        "PlayerDefinition.starting_resources": [
+          {"type": "MissionWood", "amount": 0}
+        ]
+      }
+    ],
+    "EntityPlacement": [
+      {
+        "ScenarioObjectId": "PlayerVillager",
+        "entity_definition_fqon": "de2_base.data.game_entity.generic.villager.villager.Villager",
+        "PlayerId": 0,
+        "position": {"x": 8, "y": 8},
+        "rotation": 0.0,
+        "AttributeOverrides": {}
+      },
+      {
+        "ScenarioObjectId": "PlayerTownCenter",
+        "entity_definition_fqon": "de2_base.data.game_entity.generic.town_center.town_center.TownCenter",
+        "PlayerId": 0,
+        "position": {"x": 8, "y": 9},
+        "rotation": 0.0,
+        "AttributeOverrides": {}
+      },
+      {
+        "ScenarioObjectId": "EnemyVillager",
+        "entity_definition_fqon": "de2_base.data.game_entity.generic.villager.villager.Villager",
+        "PlayerId": 1,
+        "position": {"x": 1, "y": 1},
+        "rotation": 0.0,
+        "AttributeOverrides": {}
+      }
+    ],
+    "AreaDefinition": [],
+    "TriggerDefinition": [],
+    "VictoryDefinition": {
+      "kind": "objective-driven",
+      "objective_controller_path": "libopenage/gamestate/objective/objective_controller.cpp",
+      "objective_polling": "TEMPORARY DEBT (P4 will replace with MissionCompletedEvent)",
+      "required_removals": ["EnemyVillager"]
+    }
+  },
+  "trigger_graph": {
+    "trigger_count": 0,
+    "node_count": 0,
+    "edge_count": 0
+  },
+  "unsupported_or_skipped": [
+    "Original AoE2 DE Mission 1 (Path D BLOCKED; see mission1-scenario-feasibility.md)"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": "p1-reconstruction-dump-v1",
+  "produced_at_commit": "fbb23fcfb6bb05a5ba0dccb8c860573e1e11b72e",
+  "scenario_kind": "William Wallace Mission 1 MVP reconstruction",
+  "trigger_count": 0,
+  "node_count": 0,
+  "edge_count": 0,
+  "trigger_ids": [],
+  "condition_type_histogram": {},
+  "effect_type_histogram": {},
+  "unsupported_or_unknown_types": [
+    "no trigger runtime in repo - see docs/mvp/reports/mission1-scenario-feasibility.md"
+  ]
+}
