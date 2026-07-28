@@ -3,7 +3,6 @@ add_py_modules(
 	data_exporter.py
 	generate_manifest_hashes.py
 	media_exporter.py
-	output_checks.py
 	modpack_exporter.py
 )
 
