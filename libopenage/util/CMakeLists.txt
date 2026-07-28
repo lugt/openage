@@ -14,6 +14,7 @@ add_sources(libopenage
 	hash.cpp
 	hash_test.cpp
 	init.cpp
+	json_minimal.cpp
 	language.cpp
 	matrix.cpp
 	matrix_test.cpp
