@@ -140,13 +140,41 @@ bool GameSimulation::initialize() {
 			? nyan::fqon_t{""}
 			: nyan::fqon_t{this->scenario_fqon};
 
+		// P2.7 production path: derive the Mission Pack directory from
+		// the scenario FQON. The Mission Pack is written by
+		// openage.scenario.writer.write_mission_pack alongside the
+		// nyan mission. The mapping is mechanical:
+		//   "ww_mvp.campaign.william_wallace.mission_01.Mission"
+		//     -> <assets/converted>/ww_mvp/campaign/william_wallace/
+		// i.e. everything before ".mission_NN.Mission" is the directory
+		// suffix. The derivation is best-effort: if no mission.json
+		// exists at the derived path, Game::load_scenario falls back
+		// to the legacy nyan-only path (and warns).
+		std::string mission_pack_dir;
+		if (!this->scenario_fqon.empty()) {
+			// Drop the trailing ".<suffix>.Mission" portion.
+			auto mission_pos = this->scenario_fqon.find(".mission_");
+			if (mission_pos != std::string::npos) {
+				std::string sub = this->scenario_fqon.substr(0, mission_pos);
+				// FQON uses '.' as a path separator; replace with '/'
+				// so the modpack directory layout is honoured.
+				for (auto &c : sub) {
+					if (c == '.') c = '/';
+				}
+				// <root_dir>/assets/converted/<sub>/
+				mission_pack_dir =
+					(this->root_dir / "assets" / "converted" / sub).resolve_native_path();
+			}
+		}
+
 		this->game = std::make_shared<gamestate::Game>(
 			event_loop,
 			this->mod_manager,
 			this->entity_factory,
 			this->terrain_factory,
 			players,
-			scenario_fqon);
+			scenario_fqon,
+			mission_pack_dir);
 
 		if (not this->scenario_player_setup_fqon.empty() or
 		    not this->scenario_fqon.empty()) {

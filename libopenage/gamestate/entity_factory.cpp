@@ -147,6 +147,17 @@ std::shared_ptr<Player> EntityFactory::add_player(const std::shared_ptr<openage:
 	auto player = std::make_shared<Player>(this->get_next_player_id(),
 	                                       state->get_db_view()->new_child());
 
+	// Empty PlayerSetup FQON -> debug/observer player with neither civ
+	// patches nor starting resources. The Mission 1 reconstruction uses
+	// this for additional players (e.g. the EnemyVillager's owner)
+	// whose PlayerSetup is not yet modelled in the IR.
+	if (player_setup.empty()) {
+		log::log(MSG(info) << "add_player: empty PlayerSetup FQON; "
+		                   << "creating observer-only player id="
+		                   << player->get_id());
+		return player;
+	}
+
 	// Resolve the PlayerSetup nyan object. Authoring errors (missing FQON,
 	// wrong type) surface here rather than later when patches reference
 	// non-existent targets.

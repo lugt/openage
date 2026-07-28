@@ -28,6 +28,8 @@
 #include "gamestate/terrain_factory.h"
 #include "gamestate/terrain_tile.h"
 #include "gamestate/universe.h"
+#include "scenario/mission_pack.h"
+#include "scenario/mission_pack_loader.h"
 #include "time/time.h"
 #include "util/path.h"
 #include "util/strings.h"
@@ -81,12 +83,14 @@ Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
            const std::shared_ptr<EntityFactory> &entity_factory,
            const std::shared_ptr<TerrainFactory> &terrain_factory,
            const std::vector<PlayerDescriptor> &players,
-           const nyan::fqon_t &scenario_fqon) :
+           const nyan::fqon_t &scenario_fqon,
+           const std::string &mission_pack_dir) :
 	event_loop{event_loop},
 	entity_factory{entity_factory},
 	db{nyan::Database::create()},
 	state{std::make_shared<GameState>(this->db, event_loop)},
-	universe{std::make_shared<Universe>(state)} {
+	universe{std::make_shared<Universe>(state)},
+	mission_pack_dir{mission_pack_dir} {
 	// Phase G1: the only modpack dump is the single audit line emitted
 	// by Engine::initialize_runtime() after activate_modpacks. The
 	// constructor body itself does NOT touch the manager; load_data()
@@ -250,6 +254,44 @@ void Game::generate_terrain(const std::shared_ptr<TerrainFactory> &terrain_facto
 
 void Game::load_scenario(const std::shared_ptr<TerrainFactory> &terrain_factory,
                          const nyan::fqon_t &scenario_fqon) {
+	// P2.7 production path: when a Mission Pack directory is set, the
+	// canonical structural data lives on disk (written by
+	// openage.scenario.writer.write_mission_pack). The Mission Pack
+	// reader/loader wires terrain, players, and placements into the
+	// real GameState. The legacy nyan-only path is reserved for debug
+	// / no-mission-pack builds and is NOT used by the William Wallace
+	// Mission 1 reconstruction.
+	if (!this->mission_pack_dir.empty()) {
+		log::log(MSG(info) << "load_scenario: P2.7 production path; "
+		                   << "reading Mission Pack from " << this->mission_pack_dir);
+		MissionPack pack;
+		try {
+			pack = read_mission_pack(this->mission_pack_dir);
+		}
+		catch (const MissionPackError &e) {
+			throw Error{ERR << "load_scenario: Mission Pack read failed: " << e.what()};
+		}
+		try {
+			load_mission_pack_into_game_state(
+				this->event_loop,
+				this->state,
+				this->entity_factory,
+				terrain_factory,
+				pack);
+		}
+		catch (const MissionPackLoadError &e) {
+			throw Error{ERR << "load_scenario: Mission Pack load failed: " << e.what()};
+		}
+		return;
+	}
+
+	// Legacy nyan-only path. Retained for debug / empty-mission-pack
+	// builds. Mission 1 does NOT use this path.
+	log::log(MSG(warn) << "load_scenario: legacy nyan-only path; "
+	                   << "Mission 1 reconstruction must use the P2.7 "
+	                   << "mission-pack path instead (mission_pack_dir is "
+	                   << "empty)");
+
 	// 1. Resolve the scenario nyan object from the game's database view.
 	nyan::Object scenario_obj;
 	try {
