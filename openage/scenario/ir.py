@@ -271,6 +271,45 @@ class AreaDefinition:
 
 
 @dataclasses.dataclass(frozen=True)
+class TriggerCondition:
+    """A single condition inside a trigger.
+
+    Spec §6.1 / plan §7 list candidate condition kinds. The validator
+    (P2.2) decides which kinds are supported in a given Mission 1 build;
+    a condition with an unsupported kind is reported, not silently
+    accepted.
+    """
+
+    kind: str
+    target_scenario_object_id: str | None = None
+    target_area_id: str | None = None
+    target_trigger_id: str | None = None
+    target_player_id: int | None = None
+    args: dict[str, T.Any] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _ensure_nonempty_str("kind", self.kind)
+
+
+@dataclasses.dataclass(frozen=True)
+class TriggerEffect:
+    """A single effect inside a trigger.
+
+    Spec §6.1 / plan §7 list candidate effect kinds.
+    """
+
+    kind: str
+    target_scenario_object_id: str | None = None
+    target_area_id: str | None = None
+    target_trigger_id: str | None = None
+    target_player_id: int | None = None
+    args: dict[str, T.Any] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _ensure_nonempty_str("kind", self.kind)
+
+
+@dataclasses.dataclass(frozen=True)
 class TriggerDefinition:
     trigger_id: str
     initially_enabled: bool
