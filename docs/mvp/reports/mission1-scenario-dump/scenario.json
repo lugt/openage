@@ -23,6 +23,11 @@
         "PlayerDefinition.starting_resources": [
           {"type": "MissionWood", "amount": 0}
         ]
+      },
+      {
+        "PlayerDefinition.player_id": 1,
+        "PlayerDefinition.name": "Enemy",
+        "PlayerDefinition.starting_resources": []
       }
     ],
     "EntityPlacement": [
