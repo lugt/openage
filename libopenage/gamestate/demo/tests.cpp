@@ -9,6 +9,7 @@
 #include "gamestate/demo/demo_0.h"
 #include "gamestate/demo/move_demo.h"
 #include "gamestate/demo/ww_mission1_native_load.h"
+#include "gamestate/demo/ww_mission1_lifecycle.h"
 
 
 namespace openage::gamestate::tests {
@@ -56,6 +57,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	case 9:
 		// Phase P2.7: Mission Pack native integration.
 		simulation_demo_9(path);
+		break;
+
+	case 10:
+		// Phase P3.1: Mission 1 lifecycle characterization.
+		simulation_demo_10(path);
 		break;
 
 	default:

@@ -5,6 +5,7 @@ add_sources(libopenage
 	tests.cpp
 	ww_mission1_regression.cpp
 	ww_mission1_native_load.cpp
+	ww_mission1_lifecycle.cpp
 	event_loop_fractional.cpp
 )
 
