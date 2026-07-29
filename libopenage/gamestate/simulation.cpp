@@ -7,6 +7,7 @@
 #include "gamestate/entity_factory.h"
 #include "gamestate/event/drag_select.h"
 #include "gamestate/event/attack.h"
+#include "gamestate/event/apply_discrete_effect.h"
 #include "gamestate/event/process_command.h"
 #include "gamestate/event/send_command.h"
 #include "gamestate/event/spawn_entity.h"
@@ -345,12 +346,14 @@ void GameSimulation::init_event_handlers() {
 	auto command_handler = std::make_shared<gamestate::event::SendCommandHandler>();
 	auto manager_handler = std::make_shared<gamestate::event::ProcessCommandHandler>();
 	auto attack_handler = std::make_shared<gamestate::event::AttackHandler>();
+	auto apply_discrete_effect_handler = std::make_shared<gamestate::event::ApplyDiscreteEffectHandler>();
 	auto wait_handler = std::make_shared<gamestate::event::WaitHandler>();
 	this->event_loop->add_event_handler(drag_select_handler);
 	this->event_loop->add_event_handler(spawn_handler);
 	this->event_loop->add_event_handler(command_handler);
 	this->event_loop->add_event_handler(manager_handler);
 	this->event_loop->add_event_handler(attack_handler);
+	this->event_loop->add_event_handler(apply_discrete_effect_handler);
 	this->event_loop->add_event_handler(wait_handler);
 }
 

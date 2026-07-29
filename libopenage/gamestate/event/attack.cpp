@@ -154,57 +154,35 @@ void AttackHandler::invoke(openage::event::EventLoop &loop,
 			if (time >= attack_comp->get_next_attack_time()) {
 				int64_t damage = attack_comp->get_damage();
 				auto health_fqon = attack_comp->get_health_attribute_fqon();
-				auto target_live = std::dynamic_pointer_cast<component::Live>(
-					target_entity->get_component(component::component_t::LIVE));
 
-				if (damage > 0 and target_live and not health_fqon.empty()) {
-					auto current = target_live->get_attribute_value(time, health_fqon);
-					if (current.has_value()) {
-						int64_t new_value = current.value() - damage;
-						target_live->set_attribute(time, health_fqon, new_value);
-						log::log(MSG(info) << "AttackHandler: hit attacker=" << attacker_id
-						                   << " target=" << resolved_target
-						                   << " damage=" << damage
-						                   << " health " << current.value()
-						                   << " -> " << new_value);
-
-						// Increment 5: death + entity removal. When Health
-						// drops to <= 0 the target is destroyed -- remove it
-						// from the state index and stop this attacker's loop.
-						// No follow-up game.attack is scheduled, so the
-						// attack cycle ends here; any *other* attacker still
-						// mid-swing against the same target will, on its next
-						// re-evaluation, find the target gone via
-						// has_game_entity() and stop cleanly instead of
-						// throwing on get_game_entity().
-						if (new_value <= 0) {
-							gstate->remove_game_entity(resolved_target);
-							attack_comp->stop_attack();
-							log::log(MSG(info) << "AttackHandler: target " << resolved_target
-							                   << " killed (HP=" << new_value
-							                   << "); removed from state, attacker "
-							                   << attacker_id << " stops");
-							continue;
-						}
-					}
-					else {
-						log::log(MSG(warn) << "AttackHandler: target " << resolved_target
-						                   << " missing Health attribute '"
-						                   << health_fqon << "'");
-					}
+				if (damage > 0 and not health_fqon.empty()) {
+					// P3.2: route damage through the dedicated
+					// game.apply_discrete_effect event so the Live curve
+					// is mutated by ApplyDiscreteEffectHandler rather
+					// than by direct set_attribute here. The handler is
+					// responsible for the read-modify-write; AttackHandler
+					// only knows the damage amount and target attribute.
+					openage::event::EventHandler::param_map::map_t effect_params{
+						{"target_id", resolved_target},
+						{"amount", damage},
+						{"attribute_fqon", health_fqon},
+					};
+					loop.create_event("game.apply_discrete_effect",
+					                  target, state, time, effect_params);
+					log::log(MSG(info) << "AttackHandler: hit attacker=" << attacker_id
+					                   << " target=" << resolved_target
+					                   << " damage=" << damage
+					                   << " dispatched ApplyDiscreteEffect event at t=" << time);
 				}
 				else {
 					log::log(MSG(warn) << "AttackHandler: cannot hit attacker=" << attacker_id
 					                   << " target=" << resolved_target
 					                   << " damage=" << damage
-					                   << " has_live=" << (target_live ? true : false)
 					                   << " health_fqon_set=" << (not health_fqon.empty()));
 				}
 
 				// Schedule the next cooldown tick regardless of whether
-				// a hit landed (a target without Health still gets a
-				// follow-up so the attack loop terminates cleanly if the
-				// target later gains Health). next_attack_time is set on
+				// the effect was dispatched. next_attack_time is set on
 				// the Attack component so a concurrent re-entry from the
 				// same event pass does not double-fire.
 				auto next_hit = time + time::time_t::from_double(attack_comp->get_cooldown());

@@ -10,6 +10,7 @@
 #include "gamestate/demo/move_demo.h"
 #include "gamestate/demo/ww_mission1_native_load.h"
 #include "gamestate/demo/ww_mission1_lifecycle.h"
+#include "gamestate/demo/damage_effect_path.h"
 
 
 namespace openage::gamestate::tests {
@@ -62,6 +63,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	case 10:
 		// Phase P3.1: Mission 1 lifecycle characterization.
 		simulation_demo_10(path);
+		break;
+
+	case 11:
+		// Phase P3.2: Damage routed through ApplyDiscreteEffect handler.
+		simulation_demo_11(path);
 		break;
 
 	default:
