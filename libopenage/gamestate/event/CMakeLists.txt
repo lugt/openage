@@ -2,6 +2,7 @@ add_sources(libopenage
     attack.cpp
     apply_discrete_effect.cpp
     death.cpp
+    removal.cpp
     drag_select.cpp
     process_command.cpp
     send_command.cpp

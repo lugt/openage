@@ -8,6 +8,7 @@ add_sources(libopenage
 	ww_mission1_lifecycle.cpp
 	damage_effect_path.cpp
 	generic_death.cpp
+	deferred_removal.cpp
 	event_loop_fractional.cpp
 )
 

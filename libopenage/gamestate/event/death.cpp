@@ -30,8 +30,8 @@ void DeathEventHandler::setup_event(
 
 
 void DeathEventHandler::invoke(
-	openage::event::EventLoop & /* loop */,
-	const std::shared_ptr<openage::event::EventEntity> & /* target */,
+	openage::event::EventLoop &loop,
+	const std::shared_ptr<openage::event::EventEntity> &target,
 	const std::shared_ptr<openage::event::State> &state,
 	const time::time_t &time,
 	const param_map &params) {
@@ -41,10 +41,10 @@ void DeathEventHandler::invoke(
 	auto target_id = params.get("target_id", openage::gamestate::entity_id_t{0});
 
 	// Stale-event safety: target may have been removed between the
-	// event being scheduled and this invoke. P3.4 will defer the
-	// actual remove_game_entity into a RemovalEvent so this branch
-	// is rare; today the inline P3.2 removal still runs, so a stale
-	// death event for an already-removed entity is a clean no-op.
+	// event being scheduled and this invoke. P3.4 deferred removal
+	// makes this branch slightly more common (the death event can
+	// arrive before the removal event has settled), so the drop is
+	// still a clean no-op.
 	if (not gstate->has_game_entity(target_id)) {
 		log::log(MSG(info) << "DeathEventHandler: target " << target_id
 		                   << " missing at t=" << time
@@ -55,8 +55,8 @@ void DeathEventHandler::invoke(
 	auto entity = gstate->get_game_entity(target_id);
 
 	// Idempotency gate: only the FIRST death event for this entity
-	// does the mark_dead + stop_attackers work. Subsequent events
-	// for the same target are no-ops (no log spam).
+	// does the mark_dead + dispatch removal + stop_attackers work.
+	// Subsequent events for the same target are no-ops (no log spam).
 	if (not entity->mark_dead()) {
 		return;
 	}
@@ -65,12 +65,16 @@ void DeathEventHandler::invoke(
 	                   << " HP transition fired at t=" << time
 	                   << " -- entity marked dead (idempotent gate)");
 
-	// P3.3: remove from GameState here. P3.4 will replace this with
-	// a deferred RemovalEvent so the dispatcher's call stack never
-	// mutates the GameState entity container mid-iteration. For now
-	// the synchronous remove preserves the demo 7/10/11 invariants
-	// (entity gone at t=21.28976, etc.).
-	gstate->remove_game_entity(target_id);
+	// P3.4: dispatch the removal as a separate event so the
+	// dispatcher's call stack never mutates the GameState entity
+	// container mid-iteration. The RemovalEventHandler (below in the
+	// pipeline) is the sole owner of remove_game_entity. DeathHandler
+	// only flips the dead flag and stops attackers.
+	openage::event::EventHandler::param_map::map_t removal_params{
+		{"target_id", target_id},
+		{"time", time},
+	};
+	loop.create_event("game.removal", target, state, time, removal_params);
 
 	// Stop any attacker that currently has this target set. Iterate
 	// over all alive entities and check their Attack component; this
