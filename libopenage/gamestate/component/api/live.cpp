@@ -45,6 +45,22 @@ void Live::set_attribute(const time::time_t &time,
 				              cb(value);
 			              });
 		}
+
+		// Threshold listeners (P3.3). The "drop below" pattern is the
+		// canonical death / resource-drained listener; one-shot per
+		// listener (any listener that fires is permanently disarmed).
+		// Listeners are snapshot-copied before invocation so a
+		// re-entrant registration cannot invalidate the iterator.
+		auto th_it = this->threshold_listeners.find(attribute);
+		if (th_it != this->threshold_listeners.end()) {
+			auto listeners = th_it->second;
+			for (auto &listener : listeners) {
+				if (listener.armed and value <= listener.threshold) {
+					listener.armed = false;
+					listener.callback(value);
+				}
+			}
+		}
 	}
 	else {
 		// TODO: fail here
@@ -78,5 +94,15 @@ void Live::remove_attribute(const time::time_t &time,
 void Live::on_attribute_change(const nyan::fqon_t &attribute,
                                attribute_change_callback_t callback) {
 	this->change_callbacks[attribute].push_back(std::move(callback));
+}
+
+void Live::on_threshold_drop(const nyan::fqon_t &attribute,
+                             int64_t threshold,
+                             threshold_callback_t callback) {
+	threshold_listener_t listener;
+	listener.threshold = threshold;
+	listener.callback = std::move(callback);
+	listener.armed = true;
+	this->threshold_listeners[attribute].push_back(std::move(listener));
 }
 } // namespace openage::gamestate::component

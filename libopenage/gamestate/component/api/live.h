@@ -103,6 +103,33 @@ public:
 	void on_attribute_change(const nyan::fqon_t &attribute,
 	                         attribute_change_callback_t callback);
 
+	/**
+	 * Register a callback fired when the named attribute's post-write
+	 * value drops to <= threshold for the first time. Idempotent: the
+	 * callback fires AT MOST ONCE per attribute per Live instance, even
+	 * if subsequent writes also fall below threshold. A subsequent
+	 * write that takes the value back ABOVE the threshold does NOT
+	 * re-arm the listener (the "one shot per Live" rule is permanent).
+	 *
+	 * Used by the death system (P3.3) to derive a DeathEvent from an
+	 * HP<=0 transition. The callback is fired inside set_attribute()
+	 * after a successful write so the listener sees the post-write
+	 * value (matching the on_attribute_change semantics).
+	 *
+	 * The threshold direction is fixed at "drop below" (the typical
+	 * death / resource-drained / objective-failed pattern); future
+	 * "rise above" listeners can be added without breaking this API.
+	 *
+	 * @param attribute Attribute identifier (FQON of the nyan object).
+	 * @param threshold Threshold value; the callback fires when the
+	 *                  post-write value <= threshold.
+	 * @param callback Callable invoked once after the triggering write.
+	 */
+	using threshold_callback_t = std::function<void(int64_t new_value)>;
+	void on_threshold_drop(const nyan::fqon_t &attribute,
+	                       int64_t threshold,
+	                       threshold_callback_t callback);
+
 private:
 	using attribute_storage_t = curve::UnorderedMap<nyan::fqon_t,
 	                                                std::shared_ptr<curve::Discrete<int64_t>>>;
@@ -120,6 +147,23 @@ private:
 	 * write succeeds, with the new value handed back to the callback.
 	 */
 	std::unordered_map<nyan::fqon_t, std::vector<attribute_change_callback_t>> change_callbacks;
+
+	/**
+	 * Threshold listeners keyed by attribute FQON. Each entry stores
+	 * (threshold, callback) tuples plus an "armed" flag. A listener
+	 * is armed at registration; the first post-write value that drops
+	 * to <= threshold fires the callback and permanently disarms it.
+	 *
+	 * Idempotency: even if the same FQON is registered twice (e.g.
+	 * two death systems subscribe), the per-Live one-shot rule means
+	 * the callback fires at most once.
+	 */
+	struct threshold_listener_t {
+		int64_t threshold;
+		threshold_callback_t callback;
+		bool armed{true};
+	};
+	std::unordered_map<nyan::fqon_t, std::vector<threshold_listener_t>> threshold_listeners;
 };
 
 } // namespace openage::gamestate::component

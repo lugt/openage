@@ -11,6 +11,7 @@
 #include "gamestate/demo/ww_mission1_native_load.h"
 #include "gamestate/demo/ww_mission1_lifecycle.h"
 #include "gamestate/demo/damage_effect_path.h"
+#include "gamestate/demo/generic_death.h"
 
 
 namespace openage::gamestate::tests {
@@ -68,6 +69,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	case 11:
 		// Phase P3.2: Damage routed through ApplyDiscreteEffect handler.
 		simulation_demo_11(path);
+		break;
+
+	case 12:
+		// Phase P3.3: Generic death event.
+		simulation_demo_12(path);
 		break;
 
 	default:

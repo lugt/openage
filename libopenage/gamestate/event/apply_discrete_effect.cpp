@@ -32,8 +32,8 @@ void ApplyDiscreteEffectHandler::setup_event(
 
 
 void ApplyDiscreteEffectHandler::invoke(
-	openage::event::EventLoop & /* loop */,
-	const std::shared_ptr<openage::event::EventEntity> & /* target */,
+	openage::event::EventLoop &loop,
+	const std::shared_ptr<openage::event::EventEntity> &target,
 	const std::shared_ptr<openage::event::State> &state,
 	const time::time_t &time,
 	const param_map &params) {
@@ -94,25 +94,21 @@ void ApplyDiscreteEffectHandler::invoke(
 	                   << " at t=" << time
 	                   << " value " << current.value() << " -> " << new_value);
 
-	// P3.2 temporary: the OLD inline death path that lived in
-	// AttackHandler pre-refactor. P3.3 replaces this with a generic
-	// DeathEvent dispatched off the Live::on_attribute_change callback;
-	// P3.4 then defers the actual remove_game_entity to a separate
-	// RemovalEvent so the AttackHandler / EffectHandler call stacks
-	// never mutate the GameState entity container mid-iteration.
-	//
-	// The semantics preserved across the move:
-	//   * remove_game_entity only when the post-effect HP <= 0
-	//   * removal is a no-op (with WARN) if the target already gone
-	//   * the effect handler does NOT touch attacker state -- the
-	//     attacker's Attack component re-evaluates range/target on its
-	//     next game.attack dispatch via the existing
-	//     has_game_entity() check and stops cleanly.
+	// P3.3: generic death event. When the post-effect value crosses
+	// the <= 0 threshold, dispatch a "game.death" event. The actual
+	// entity removal + attacker-stop logic lives in DeathEventHandler;
+	// that handler is idempotent (GameEntity::mark_dead) so duplicate
+	// death dispatches (e.g. two effects at the same timestamp that
+	// both push the value negative) produce one death. P3.4 will move
+	// the entity removal out of DeathEventHandler into a deferred
+	// RemovalEvent; until then DeathEventHandler is the single owner
+	// of the remove_game_entity call.
 	if (new_value <= 0) {
-		gstate->remove_game_entity(target_id);
-		log::log(MSG(info) << "ApplyDiscreteEffectHandler: target " << target_id
-		                   << " HP=" << new_value
-		                   << " <= 0; inline remove (P3.2 temporary, P3.3 replaces)");
+		openage::event::EventHandler::param_map::map_t death_params{
+			{"target_id", target_id},
+			{"time", time},
+		};
+		loop.create_event("game.death", target, state, time, death_params);
 	}
 }
 

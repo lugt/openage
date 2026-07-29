@@ -100,6 +100,37 @@ public:
 	bool has_component(component::component_t type);
 
 	/**
+	 * Death-state flag.
+	 *
+	 * Set by the DeathEvent handler (P3.3) once a generic threshold
+	 * listener has derived an HP<=0 transition. Idempotent: subsequent
+	 * calls are no-ops. Used by AttackHandler (and any future
+	 * damage-source) to detect "target already dead" without
+	 * depending on GameState membership alone -- a target that has
+	 * not yet been removed from the GameState container (P3.4
+	 * defers removal) but is logically dead still rejects new
+	 * damage and the attacker stops cleanly.
+	 *
+	 * P3.4 replaces the logical-dead check with a stricter "removed
+	 * from GameState" check once the deferred RemovalEvent lands.
+	 */
+	bool is_dead() const { return this->dead; }
+
+	/**
+	 * Mark the entity dead. Idempotent -- if already dead, this is a
+	 * no-op (returns false); on the first transition returns true.
+	 * Callers can use the return value to log "death fired" lines
+	 * exactly once per entity.
+	 */
+	bool mark_dead() {
+		if (this->dead) {
+			return false;
+		}
+		this->dead = true;
+		return true;
+	}
+
+	/**
 	 * Update the render entity.
 	 *
 	 * @param time Simulation time of the update.
@@ -148,6 +179,12 @@ private:
 	 * Event manager.
 	 */
 	std::shared_ptr<GameEntityManager> manager;
+
+	/**
+	 * Whether this entity has been declared dead. See is_dead() /
+	 * mark_dead() for the lifecycle.
+	 */
+	bool dead{false};
 };
 
 } // namespace gamestate
