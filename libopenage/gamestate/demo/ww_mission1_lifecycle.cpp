@@ -28,10 +28,11 @@
 //     removed target is a no-op (the AttackHandler's
 //     has_game_entity(target) check returns false and the attack is
 //     dropped with a "target gone, stopping attack" log).
-//   - Objective polling: WilliamWallaceMission01ObjectiveController's
-//     on_update() must be called once per event batch (the H0.5
-//     temporary debt, recorded in the report as TEMPORARY and
-//     marked for replacement by P4's MissionCompletedEvent).
+//   - Objective polling: closed in P4.1. The Mission 1
+//     WilliamWallaceMission01ObjectiveController is now event-driven
+//     via gamestate::event::ObjectiveRemovalHandler subscribed to
+//     game.removal. Per-batch polling (the H0.5 temporary debt) is
+//     removed; the counter is now zero.
 //
 // Failure semantics: this demo does NOT throw on discovered bugs --
 // it RECORDS the current behavior and reports it. A refactor that
@@ -266,13 +267,16 @@ void simulation_demo_10(const util::Path &path) {
 	// separately in the demo 7 log evidence: "target gone, stopping
 	// attack" / AttackHandler drops the event.
 
-	// ---- Objective polling TEMP characterization (H0.5 debt) -----
-	// P3.1 records the polling behavior; P4 must replace it with a
-	// MissionCompletedEvent lifecycle hook.
+	// ---- Objective polling TEMP characterization (CLOSED in P4.1) -----
+	// P4.1 replaced the per-batch poll with an event-driven
+	// ObjectiveRemovalHandler subscribed to game.removal; the
+	// polling TEMPORARY DEBT is now closed. We keep the log line as
+	// a zero-counter marker so the demo's log shape is stable across
+	// P3 -> P4.
 	log::log(MSG(info) << "demo 10: [CHARACTERIZATION] objective polling: "
-	                   << "TEMPORARY DEBT (H0.5) -- one poll per event "
-	                   << "batch in production; P4 replaces with "
-	                   << "MissionCompletedEvent");
+	                   << "REMOVED in P4.1 (objective_poll_count=0; "
+	                   << "ObjectiveRemovalHandler subscribes to "
+	                   << "game.removal)");
 
 	log::log(MSG(info) << "DEMO 10: PASS (lifecycle characterization recorded)");
 }

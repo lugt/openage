@@ -195,10 +195,8 @@ void simulation_demo_7(const util::Path &path) {
 	// e.g. on event-batches visibly fails. We name them precisely:
 	//   time_advances        -- number of peek_next_event_time() queries
 	//   event_batches        -- number of reach_time() calls
-	//   objective_poll_count -- number of tick_objective_controller() calls
 	size_t time_advances = 0;
 	size_t event_batches = 0;
-	size_t objective_poll_count = 0;
 	time::time_t final_dispatched_time = time::time_t::from_int(0);
 
 	bool enemy_removed = false;
@@ -218,20 +216,14 @@ void simulation_demo_7(const util::Path &path) {
 			break;
 		}
 
-		// Step 3: dispatch the event(s) scheduled at `next`.
+		// Step 3: dispatch the event(s) scheduled at `next`. The
+		// game.removal event handler is now subscribed to the
+		// ObjectiveRemovalHandler (P4.1), so dispatching the
+		// removal event is sufficient to complete the objective --
+		// no per-batch tick_objective_controller() call is needed.
 		event_loop->reach_time(next, state);
 		++event_batches;
 		final_dispatched_time = next;
-
-		// Step 4: Phase D TEMPORARY DEBT. The objective controller
-		// currently polls the game state once per simulation step
-		// rather than consuming an explicit MissionCompletedEvent.
-		// Until Phase D rewires this, we replicate run()'s per-step
-		// on_update here so headless tests can observe Victory. Phase D
-		// event-driven objective controller will allow deletion of
-		// tick_objective_controller / objective_poll_count.
-		simulation->tick_objective_controller(next);
-		++objective_poll_count;
 
 		enemy_removed = not state->has_game_entity(enemy_id);
 		objective_finished = simulation->is_objective_finished();
@@ -245,13 +237,11 @@ void simulation_demo_7(const util::Path &path) {
 	          "EnemyVillager not removed before deadline "
 	              "(time_advances=" << time_advances
 	              << " event_batches=" << event_batches
-	              << " objective_poll_count=" << objective_poll_count
 	              << " last_dispatched_t=" << final_dispatched_time << ")");
 	WW1_ASSERT(objective_finished,
 	          "Mission 1 objective not finished (Victory not reached; "
 	              "time_advances=" << time_advances
 	              << " event_batches=" << event_batches
-	              << " objective_poll_count=" << objective_poll_count
 	              << " last_dispatched_t=" << final_dispatched_time << ")");
 
 	if (assertion_failed) {
@@ -265,7 +255,6 @@ void simulation_demo_7(const util::Path &path) {
 	                       << " objective_finished=" << objective_finished
 	                       << " time_advances=" << time_advances
 	                       << " event_batches=" << event_batches
-	                       << " objective_poll_count=" << objective_poll_count
 	                       << " last_dispatched_t=" << final_dispatched_time << ")");
 }
 
