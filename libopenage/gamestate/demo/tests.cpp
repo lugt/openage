@@ -13,6 +13,7 @@
 #include "gamestate/demo/damage_effect_path.h"
 #include "gamestate/demo/generic_death.h"
 #include "gamestate/demo/deferred_removal.h"
+#include "gamestate/demo/event_driven_objective.h"
 
 
 namespace openage::gamestate::tests {
@@ -80,6 +81,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	case 13:
 		// Phase P3.4: Deferred dead-entity removal.
 		simulation_demo_13(path);
+		break;
+
+	case 14:
+		// Phase P4.1: Event-driven Mission 1 objective.
+		simulation_demo_14(path);
 		break;
 
 	default:

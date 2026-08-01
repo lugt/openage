@@ -10,6 +10,7 @@ add_sources(libopenage
 	generic_death.cpp
 	deferred_removal.cpp
 	event_loop_fractional.cpp
+	event_driven_objective.cpp
 )
 
 pxdgen(
