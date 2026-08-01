@@ -26,9 +26,37 @@ P3 gameplay lifecycle refactor verified end-to-end:
 | Demo 13 (deferred removal) | demo 13 | rc=0, PASS |
 | Scenario pytest | `pytest openage/scenario/tests/` | 103 passed |
 | Validate-nyan pytest | `pytest openage/validate_nyan/tests/` | 3 passed |
-| Production headless smoke | `bin/run main --scenario --headless --no-convert --no-prompts` | Initialize OK; loader spawns 3 entities (SIGTERM via timeout = expected) |
+| Production headless smoke | `bin/run main --scenario --headless --no-convert --no-prompts` | Initialize OK; loader spawns 3 entities (SIGTERM via timeout = expected). **Scope**: see "Production smoke" section below — proves loader init + entity spawn + lifecycle Initialized + no crash only. The full AttackCommand chain is proven by demos 7/10/11/12/13. |
 
 **No crash, no abort, no segfault.** `git diff --check` clean.
+
+---
+
+## Remote synchronization evidence
+
+Verified on 2026-08-01 immediately before push:
+
+```bash
+$ git fetch fork
+(no output)
+
+$ git rev-list --left-right --count fork/mvp/william-wallace...HEAD
+0	0
+
+$ git rev-parse HEAD
+d0e60c0c35551db951001f86ccb1cea162e32b21
+
+$ git rev-parse fork/mvp/william-wallace
+d0e60c0c35551db951001f86ccb1cea162e32b21
+
+$ git ls-remote fork refs/heads/mvp/william-wallace
+d0e60c0c35551db951001f86ccb1cea162e32b21	refs/heads/mvp/william-wallace
+
+$ git status --short --branch
+## mvp/william-wallace...fork/mvp/william-wallace
+```
+
+Local HEAD, remote-tracking ref, and `ls-remote` all point to the same commit hash `d0e60c0c...`; ahead/behind is `0 0`.
 
 ---
 
@@ -75,6 +103,19 @@ ww-mission1-p3-lifecycle-complete
 Type: **annotated**
 Message: `William Wallace Mission 1 P3 gameplay lifecycle complete`
 Pushed: YES (`git ls-remote fork refs/tags/ww-mission1-p3-lifecycle-complete` confirms `d7d3e709`)
+Target commit: `ad6d819ec6df6ff24dc665279b2a4030dfe3b0a2` (the `docs: record P3 gameplay lifecycle handoff` commit, which is the stable P3 implementation lock point)
+
+The tag is **NOT** at HEAD — HEAD has since moved to `d0e60c0c` (the post-sync handoff doc commit). The tag deliberately pins the implementation lock point; the handoff doc is appended afterwards and is not part of the P3 lock.
+
+**Verification command (corrected)** — do NOT use `git tag --points-at HEAD`, which would falsely report no tag:
+
+```bash
+git rev-parse ww-mission1-p3-lifecycle-complete^{commit}
+# Expected: ad6d819ec6df6ff24dc665279b2a4030dfe3b0a2
+
+git merge-base --is-ancestor ww-mission1-p3-lifecycle-complete HEAD
+# Expected: exit 0 (no output)
+```
 
 ---
 
@@ -112,13 +153,23 @@ Zero stashes. Nothing to recover.
 
 ## Untracked files audited
 
-| File | Size | Source | Commit? |
-|---|---|---|---|
-| `p2-result.md` | 2598 lines | `/export p2-result.md` artifact | NO (Claude Code export transcript, not source) |
-| `p2.finish.md` | 5264 lines | `/export p2.finish.md` artifact | NO |
-| `ph3-handoff.md` | 2524 lines | `/export ph3-handoff.md` artifact | NO |
+| File | Size at audit | Source | Commit? | Disposition |
+|---|---|---|---|---|
+| `p2-result.md` | 140 KB | `/export p2-result.md` artifact | NO (Claude Code export transcript) | moved to `/tmp/claude-code-exports-20260801/` |
+| `p2.finish.md` | 285 KB | `/export p2.finish.md` artifact | NO | moved to `/tmp/claude-code-exports-20260801/` |
+| `ph3-handoff.md` | 148 KB | `/export ph3-handoff.md` artifact | NO | moved to `/tmp/claude-code-exports-20260801/` |
+| `p4.md` | 228 KB | `/export p4.md` artifact (created during this audit) | NO | moved to `/tmp/claude-code-exports-20260801/` |
 
-These are session-export transcripts. They are NOT committed. macOS user can safely `rm` them or move them outside the repo.
+These were session-export transcripts whose content is fully covered by committed reports (`docs/mvp/reports/p2.*`, `docs/mvp/reports/p3.*`). Hash references found in the transcripts (e.g. `0497a675`, `08fe0925`, `1e764d6b`, `02f5467c`, `46b34e3f`, `2453f310`, `6591470`) all correspond to commits already documented in the committed reports. No unique evidence required harvesting.
+
+After disposition:
+
+```bash
+$ git status --porcelain
+(empty output)
+```
+
+Working tree is clean. macOS user does not need to delete anything in the repo.
 
 Ignored files audit: 14151 entries, all `.bin/`, `.venv/`, `.qt/`, or `assets/converted/` (the converted DE2 bundle, 3.1 GB). All properly `.gitignore`d. Largest tracked file is 1 MB (a renderer demo MP4).
 
@@ -186,7 +237,35 @@ INFO engine: runtime initialized (initialized=true; loop() may now spawn workers
 SIGTERM received (termination requested, e.g. kill); exiting
 ```
 
-Exit code 124 = timeout (expected). No crash, no abort, no segfault. Three entities spawned via the production Mission Pack loader (P2.7), confirming the full chain AttackCommand → game.attack → game.apply_discrete_effect → game.death → game.removal can be wired into a fresh launch.
+Exit code 124 = timeout (expected). No crash, no abort, no segfault.
+
+**Proof boundary — what the smoke actually proves:**
+
+The production smoke ONLY proves:
+
+- The Mission Pack loader (P2.7) initializes successfully on a fresh launch.
+- The loader spawns the three Mission 1 entities (PlayerVillager, PlayerTownCenter, EnemyVillager) with stable ScenarioObjectId → GameEntityId mapping.
+- `GameSimulation::initialize` reaches the `Initialized` lifecycle state.
+- The process is stable (no crash, no abort, no segfault) through that initialization.
+
+The production smoke does NOT dispatch any user command and does NOT execute any combat events. Therefore it does NOT prove the attack chain.
+
+**The full AttackCommand chain is proven by the dedicated C++ headless tests:**
+
+```text
+AttackCommand
+→ game.attack
+→ game.apply_discrete_effect
+→ Health Curve
+→ game.death
+→ game.removal
+```
+
+- Demo 7 (`gamestate.tests.simulation_demo 7`) — end-to-end Mission 1 headless regression through the production runtime
+- Demo 10 (`gamestate.tests.simulation_demo 10`) — direct C++ state inspection of the lifecycle (ScenarioObjectId mapping, HP, removal timestamp)
+- Demo 11 (`gamestate.tests.simulation_demo 11`) — proves damage flows through `game.apply_discrete_effect`, not direct `Live::set_attribute`
+- Demo 12 (`gamestate.tests.simulation_demo 12`) — proves generic `game.death` (idempotent, same-time duplicate safe)
+- Demo 13 (`gamestate.tests.simulation_demo 13`) — proves deferred `game.removal` (stale attack / effect / removal event safe)
 
 ---
 
@@ -218,13 +297,23 @@ git fetch --all --tags
 # 3. Switch to the P3 feature branch (already long-term; do NOT rename)
 git switch mvp/william-wallace
 
-# 4. Verify state
-git status
-git log -1 --oneline
-git tag --points-at HEAD
-# Expected: ww-mission1-p3-lifecycle-complete
+# 4. Verify remote synchronization (must show 0 0 ahead/behind)
+git rev-list --left-right --count fork/mvp/william-wallace...HEAD
+# Expected: 0\t0
 
-# 5. (Optional) Inspect the P3 commit chain
+# 5. Verify the P3 tag is present and ancestor of HEAD (NOT necessarily
+#    at HEAD — see "P3 tag" section)
+git rev-parse ww-mission1-p3-lifecycle-complete^{commit}
+# Expected: ad6d819ec6df6ff24dc665279b2a4030dfe3b0a2
+
+git merge-base --is-ancestor ww-mission1-p3-lifecycle-complete HEAD
+# Expected: exit 0 (no output)
+
+# 6. Verify clean tree (no untracked files)
+git status --porcelain
+# Expected: (empty output)
+
+# 7. (Optional) Inspect the P3 commit chain
 git log --oneline --decorate ad6d819e^^^^..ad6d819e
 # Expected:
 #   ad6d819e docs: record P3 gameplay lifecycle handoff
@@ -265,18 +354,26 @@ After checkout:
 # 1. Build (memory-safe parallelism)
 ninja -j1 -C .bin/g++-debug-Oauto-sanitize-none
 
-# 2. Run the P3 demos (verify the chain end-to-end)
+# 2. Verify remote sync state BEFORE running tests
+git rev-list --left-right --count fork/mvp/william-wallace...HEAD
+# Expected: 0\t0
+git status --porcelain
+# Expected: (empty)
+git merge-base --is-ancestor ww-mission1-p3-lifecycle-complete HEAD
+# Expected: exit 0
+
+# 3. Run the P3 demos (verify the chain end-to-end)
 for n in 7 8 9 10 11 12 13; do
     bin/run test --demo gamestate.tests.simulation_demo "$n"
 done
 
-# 3. Run scenario + validate_nyan pytest
+# 4. Run scenario + validate_nyan pytest
 .venv/bin/python -m pytest openage/scenario/tests/ openage/validate_nyan/tests/ -q
 
-# 4. (Optional) Production headless smoke
+# 5. (Optional) Production headless smoke — proves loader + spawn only
 timeout 25 bin/run main --scenario --headless --no-convert --no-prompts
 
-# 5. Read the P3 reports
+# 6. Read the P3 reports
 ls docs/mvp/reports/p3.*
 #   p3.1-lifecycle-characterization.md
 #   p3.2-damage-effect-integration.md
