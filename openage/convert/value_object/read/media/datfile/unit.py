@@ -16,11 +16,35 @@ from .lookup_dicts import COMMAND_ABILITY, OWNER_TYPE, RESOURCE_HANDLING, RESOUR
     MINIMAP_MODES, UNIT_LEVELS, OBSTRUCTION_TYPES, SELECTION_EFFECTS, \
     ATTACK_MODES, BOUNDARY_IDS, BLAST_OFFENSE_TYPES, CREATABLE_TYPES, \
     GARRISON_TYPES
+from .de2_profile import (
+    DAMAGE_GRAPHIC_LAYOUT_V2,
+    De2DatLayoutProfile,
+    UnsupportedDatProfileError,
+)
 
 if typing.TYPE_CHECKING:
     from openage.convert.value_object.init.game_version import GameVersion
     from openage.convert.value_object.read.member_access import MemberAccess
     from openage.convert.value_object.read.read_members import ReadMember
+
+
+def _de2_profile(game_version: GameVersion) -> De2DatLayoutProfile:
+    """
+    Return the DE2 dat layout profile carried by ``game_version``.
+
+    DAT layout decisions in this module route through the profile; the
+    ``update_number`` string label is not consulted for the five known
+    8.4 <-> 8.9 diffs.  Raises :class:`UnsupportedDatProfileError` if
+    the profile was never set (i.e. the reader was not given a DE2
+    ``.dat`` to resolve a version string from).
+    """
+    profile = getattr(game_version, "de2_profile", None)
+    if profile is None:
+        raise UnsupportedDatProfileError(
+            "DE2 dat layout profile missing on GameVersion; the reader "
+            "must call resolve_de2_dat_profile() on the post-decrypt "
+            "version string before invoking the datfile reader")
+    return profile
 
 
 class UnitCommand(GenieStructure):
@@ -94,6 +118,17 @@ class UnitCommand(GenieStructure):
                 # sound to play on resource drop
                 (READ_GEN, "wwise_resource_deposit_sound_id", StorageType.ID_MEMBER, "uint32_t"),
             ])
+
+        # 8.9 appended a 2-byte int16 trail (observed value -1) to every
+        # UnitCommand/Task record. Without skipping it the per-command size
+        # is 67 instead of 69, so the cumulative offset drifts across the
+        # unit_commands array and the walker eventually runs off the end of
+        # the raw dat. Confirmed by cmd_id 0..N incrementing correctly when
+        # records are aligned at 69B.
+        de2 = _de2_profile(game_version)
+        if de2.unit_command_trailer_bytes:
+            data_format.append((READ_UNKNOWN, "de2_command_trail",
+                                StorageType.ID_MEMBER, "int16_t"))
 
         return data_format
 
@@ -189,6 +224,41 @@ class DamageGraphic(GenieStructure):
                 type_name="damage_draw_type",
                 lookup_dict=DAMAGE_DRAW_TYPE
             )),
+        ]
+
+        return data_format
+
+
+class DamageGraphic89(GenieStructure):
+    """
+    8.9 building damage-graphic record (5 bytes).
+
+    8.9 inserted a fixed 3-element damage-graphic array into UnitObject for
+    buildings only (unit_type == 80), sitting between the count-gated
+    damage_graphics array and the sound block. Each record is 5 bytes but the
+    field order differs from the legacy DamageGraphic: a leading int8 (always 0
+    in the DE2 8.9 dat, likely a relocated old_apply_mode) precedes graphic_id.
+    Reading the records as legacy DamageGraphic shifts graphic_id by one byte
+    and yields implausible ids (e.g. 0x5200 = 20992 instead of 0x1252 = 4690);
+    this reordered layout gives consecutive graphic ids plus the classic
+    50/75/255 damage_percent thresholds, confirmed across ARRG3 / Barracks /
+    ARRG4 / BLAC3.
+    """
+
+    @classmethod
+    @cache
+    def get_data_format_members(
+        cls,
+        game_version: GameVersion
+    ) -> list[tuple[MemberAccess, str, StorageType, typing.Union[str, ReadMember]]]:
+        """
+        Return the members in this struct.
+        """
+        data_format = [
+            (SKIP, "old_apply_mode", StorageType.ID_MEMBER, "int8_t"),
+            (READ_GEN, "graphic_id", StorageType.ID_MEMBER, "int16_t"),
+            (READ_GEN, "damage_percent", StorageType.INT_MEMBER, "int8_t"),
+            (SKIP, "apply_mode", StorageType.ID_MEMBER, "int8_t"),
         ]
 
         return data_format
@@ -502,6 +572,30 @@ class UnitObject(GenieStructure):
                 ref_type=DamageGraphic,
                 length="damage_graphic_count",
             )),
+        ])
+
+        de2 = _de2_profile(game_version)
+        if de2.building_damage_graphic_layout == DAMAGE_GRAPHIC_LAYOUT_V2:
+            # 8.9 inserts a fixed 3-element damage-graphic array here for
+            # buildings only (unit_type == 80), between the count-gated
+            # damage_graphics array and the sound block (15 bytes total). It
+            # is absent for every other unit type. UnitObject's data format
+            # is shared across all unit types, so the array length is
+            # resolved at read time from the multisubtype unit_type tag
+            # that _walk_array stashes on the values namespace -- non-
+            # buildings read 0 elements and are byte-for-byte unaffected.
+            # Without this skip, the 15 bytes shift the sound block +
+            # name_len, the blown name length cascades into a ~260 KiB
+            # over-read, and the next unit's unit_type lands on 0x40
+            # padding (KeyError 64 in unit_type_id).
+            data_format.append(
+                (READ_GEN, "de2_building_damage_graphics",
+                 StorageType.ARRAY_CONTAINER, SubdataMember(
+                     ref_type=DamageGraphic89,
+                     length=lambda v: 3 if getattr(v, "unit_type", -1) == 80 else 0,
+                 )))
+
+        data_format.extend([
             (READ_GEN, "selection_sound_id", StorageType.ID_MEMBER, "int16_t"),
             (READ_GEN, "dying_sound_id", StorageType.ID_MEMBER, "int16_t"),
         ])
@@ -511,8 +605,16 @@ class UnitObject(GenieStructure):
                 (READ_GEN, "wwise_creation_sound_id", StorageType.ID_MEMBER, "uint32_t"),
                 (READ_GEN, "wwise_damage_sound_id", StorageType.ID_MEMBER, "uint32_t"),
                 (READ_GEN, "wwise_selection_sound_id", StorageType.ID_MEMBER, "uint32_t"),
-                (READ_GEN, "wwise_dying_sound_id", StorageType.ID_MEMBER, "uint32_t"),
             ])
+            # 8.9 removed wwise_dying_sound_id from this 4-field sound block
+            # (now 3 fields, -4 bytes). Reading the old 4th uint32 shifts
+            # every later UnitObject field by 4: name_len is then read from
+            # inside the name string and the blown length cascades into
+            # attack_count/armor_count.
+            de2 = _de2_profile(game_version)
+            if de2.has_wwise_dying_sound_id:
+                data_format.append(
+                    (READ_GEN, "wwise_dying_sound_id", StorageType.ID_MEMBER, "uint32_t"))
 
         data_format.extend([
             (SKIP, "old_attack_mode", StorageType.ID_MEMBER, EnumLookupMember(  # obsolete, as it's copied when converting the unit
@@ -863,8 +965,20 @@ class MissileUnit(ProjectileUnit):
             # graphics, not pass-through damage)
             (READ_GEN, "penetration_mode", StorageType.ID_MEMBER, "int8_t"),
             (READ_GEN, "area_of_effect_special", StorageType.INT_MEMBER, "int8_t"),
-            (READ_GEN, "projectile_arc", StorageType.FLOAT_MEMBER, "float"),
         ]
+
+        # 8.9 inserted 16 unknown bytes between area_of_effect_special and
+        # projectile_arc on missile units. Without skipping them,
+        # projectile_arc is read as a garbage float (-2.5e38) and the next
+        # unit's unit_type lands 16B too early (on 0xFF padding), failing
+        # dispatch. Content not yet decoded.
+        de2 = _de2_profile(game_version)
+        if de2.missile_trailer_bytes:
+            data_format.append((READ_UNKNOWN, "de2_missile_trailer",
+                                StorageType.ARRAY_INT,
+                                f"uint8_t[{de2.missile_trailer_bytes}]"))
+
+        data_format.append((READ_GEN, "projectile_arc", StorageType.FLOAT_MEMBER, "float"))
 
         return data_format
 
@@ -991,6 +1105,18 @@ class LivingUnit(ProjectileUnit):
 
         # unit stats display of pierce armor
         data_format.append((SKIP, "pierce_armor_displayed", StorageType.INT_MEMBER, "int16_t"))
+
+        # 8.9 appended a 47-byte trailer to every LivingUnit record (after
+        # pierce_armor_displayed, before the next unit). Without skipping it
+        # the next unit's unit_type is read 47B too early (lands on 0xFF
+        # padding) and dispatch fails. Content not yet decoded -- skipped
+        # as opaque bytes. Applies to LivingUnit and its BuildingUnit
+        # subclass (both carry pierce_armor).
+        de2 = _de2_profile(game_version)
+        if de2.living_unit_trailer_bytes:
+            data_format.append((READ_UNKNOWN, "de2_living_trailer",
+                                StorageType.ARRAY_INT,
+                                f"uint8_t[{de2.living_unit_trailer_bytes}]"))
 
         return data_format
 

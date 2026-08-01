@@ -14,6 +14,12 @@ import typing
 from ..read.media_types import MediaType
 from .game_file_version import GameFileVersion
 
+if typing.TYPE_CHECKING:
+    # Avoid an import cycle: de2_profile lives under
+    # value_object.read.media.datfile, which is loaded by readers that
+    # themselves consume GameVersion.
+    from ..read.media.datfile.de2_profile import De2DatLayoutProfile
+
 
 @enum.unique
 class Support(enum.Enum):
@@ -208,4 +214,13 @@ class GameVersion:
     # same edition, such as the 'Battle for Greece' DLC dat format ("VER 8.4").
     # It is part of the (hashable) identity so that @cache'd format lookups
     # return the correct variant.
+    #
+    # ``update_number`` is preserved for non-DAT-layout converter code paths
+    # (DLC handling, edition dispatch, etc.).  For DE2 DAT layout decisions,
+    # use ``de2_profile`` instead; reader code is not allowed to branch on
+    # ``update_number`` for the five known 8.4 <-> 8.9 diffs.
     update_number: typing.Any = None
+    # DE2 ``.dat`` layout profile.  Set by the reader after resolving the
+    # post-decrypt version string.  ``None`` until resolved; readers must
+    # raise rather than guess if the profile is missing.
+    de2_profile: typing.Optional["De2DatLayoutProfile"] = None

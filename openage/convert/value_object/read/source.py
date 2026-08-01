@@ -284,22 +284,43 @@ class GenieSource:
             info("genie_source: reusing cached raw at %s", cache_path)
         del compressed
 
-        # BfG detection must run on the decompressed bytes: the raw .dat is
-        # zlib-wrapped, so its first bytes are a compression header, not the
-        # versionstr. Detect here (post-decompress) and rebuild game_version
-        # with update_number="BfG" so struct layouts include the BfG +16/+25
-        # byte extensions. Mirrors the legacy check in gamedata.py but on the
-        # correct (decompressed) bytes.
+        # Version detection must run on the decompressed bytes: the raw .dat
+        # is zlib-wrapped, so its first bytes are a compression header, not
+        # the versionstr. Detect here (post-decompress) and rebuild
+        # game_version with both the legacy update_number label and the
+        # DE2 dat layout profile. The profile is the authoritative input to
+        # the datfile reader; update_number is preserved for non-DAT-layout
+        # converter paths.
         if (game_version is not None
                 and game_version.edition.game_id == "AOE2DE"
-                and getattr(game_version, "update_number", None) != "BfG"):
+                and getattr(game_version, "update_number", None) != "BfG"
+                and getattr(game_version, "de2_profile", None) is None):
             with open(cache_path, "rb") as vf:
                 vs = vf.read(8).rstrip(b"\x00").decode("ascii", errors="ignore")
+            from dataclasses import replace
+            from openage.convert.value_object.read.media.datfile.de2_profile import (
+                resolve_de2_dat_profile,
+            )
             if vs == "VER 8.4":
-                from dataclasses import replace
-                game_version = replace(game_version, update_number="BfG")
+                profile = resolve_de2_dat_profile(vs)
+                game_version = replace(
+                    game_version,
+                    update_number="BfG",
+                    de2_profile=profile,
+                )
                 info("genie_source: detected BfG (VER 8.4); "
-                     "update_number -> BfG")
+                     "update_number -> BfG, de2_profile -> %s",
+                     profile.profile_id)
+            elif vs == "VER 8.9":
+                profile = resolve_de2_dat_profile(vs)
+                game_version = replace(
+                    game_version,
+                    update_number="8.9",
+                    de2_profile=profile,
+                )
+                info("genie_source: detected VER 8.9; "
+                     "update_number -> 8.9, de2_profile -> %s",
+                     profile.profile_id)
 
         fd = open(cache_path, "rb")
         try:

@@ -1,6 +1,7 @@
 add_py_modules(
 	__init__.py
 	civ.py
+	de2_profile.py
 	empiresdat.py
 	graphic.py
 	lookup_dicts.py
@@ -11,4 +12,6 @@ add_py_modules(
 	tech.py
 	terrain.py
 	unit.py
+	tests/__init__.py
+	tests/test_de2_profiles.py
 )

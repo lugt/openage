@@ -271,7 +271,13 @@ expansions      = []
 
   [AOE2DE.installpaths]
   linux = ["~/.steam/steam/steamapps/common/AoE2DE"]
-  macos = ["~/.steam/steam/steamapps/common/AoE2DE"]
+  macos = [
+    # macOS Feral port (2026): game data lives under AgeOfEmpires2Data/,
+    # which is the source-dir the mediapaths are relative to. Prefer it;
+    # fall back to the bundle parent for completeness.
+    "~/Library/Application Support/Steam/steamapps/common/AoE2DE/AgeOfEmpires2Data",
+    "~/Library/Application Support/Steam/steamapps/common/AoE2DE",
+  ]
   windows = [
     "C:/Program Files/Steam/steamapps/common/AoE2DE",
     "C:/Program Files (x86)/Steam/steamapps/common/AoE2DE",
