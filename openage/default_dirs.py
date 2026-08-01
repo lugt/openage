@@ -43,6 +43,19 @@ WINDOWS_DIRS = {
 }
 
 
+# macOS-specific paths (Apple File System guidelines).
+# User data goes under $HOME/Library/Application Support/<app>; cache under
+# $HOME/Library/Caches/<app>.  For the data_home we use
+# ~/Library/Application Support/openage to match the Linux XDG default's role
+# (per-user, persistent, no system-wide fallback).  The XDG_*_HOME env vars
+# are honored on macOS too because the openage launch scripts may set them.
+MACOS_DIRS = {
+    "config_home": ("XDG_CONFIG_HOME", ("{HOME}/Library/Application Support", {"HOME"})),
+    "data_home":   ("XDG_DATA_HOME",   ("{HOME}/Library/Application Support", {"HOME"})),
+    "cache_home":  ("XDG_CACHE_HOME",  ("{HOME}/Library/Caches",              {"HOME"})),
+}
+
+
 def get_dir(which):
     """
     Returns directories used for data and config storage.
@@ -55,7 +68,7 @@ def get_dir(which):
         platform_table = LINUX_DIRS
 
     elif sys.platform.startswith("darwin"):
-        raise RuntimeError("macOS not really supported")
+        platform_table = MACOS_DIRS
 
     elif sys.platform.startswith("win32"):
         platform_table = WINDOWS_DIRS
