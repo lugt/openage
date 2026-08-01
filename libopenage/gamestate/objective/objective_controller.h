@@ -100,12 +100,35 @@ public:
 	 * @param id Unique step id.
 	 * @param name Short identifier (for logging / debug).
 	 * @param hint_text Hint shown in the HUD while this step is active.
-	 * @param check Completion predicate; evaluated each tick.
+	 * @param check Completion predicate; evaluated each tick. May be
+	 *               null if the step is purely event-driven.
 	 */
 	void add_step(step_id_t id,
 	              std::string name,
 	              std::string hint_text,
 	              completion_check_t check);
+
+	/**
+	 * P4.1: register a step that is completed when a game.removal
+	 * event fires for an entity whose id is in \p targets. The
+	 * polling predicate for the step is null; the step is driven
+	 * solely by notify_entity_removed().
+	 *
+	 * Adding a step whose id already exists is a no-op (first
+	 * registration wins).
+	 *
+	 * @param id Unique step id.
+	 * @param name Short identifier (for logging / debug).
+	 * @param hint_text Hint shown in the HUD while this step is active.
+	 * @param targets Entity ids whose removal completes this step.
+	 *               Empty set => step can never complete (defensive:
+	 *               no false victory when the scenario registered
+	 *               no enemy instance).
+	 */
+	void add_event_step(step_id_t id,
+	                    std::string name,
+	                    std::string hint_text,
+	                    std::vector<entity_id_t> targets);
 
 	/**
 	 * Jump to a specific step id. Used for scripted replays and for
@@ -125,6 +148,23 @@ public:
 	 * @param id Step id to mark complete.
 	 */
 	void mark_completed(step_id_t id);
+
+	/**
+	 * Event-driven completion notification (P4.1).
+	 *
+	 * Called by the ObjectiveRemovalHandler when a game.removal event
+	 * fires. The controller checks whether \p entity_id corresponds to
+	 * any active step's target set; if it does, the step is marked
+	 * completed and the trigger advances.
+	 *
+	 * This method is the SOLE event-driven completion path; the legacy
+	 * on_update() polling path no longer advances the defeat_enemy
+	 * step. The method is idempotent: duplicate notifications for the
+	 * same \p entity_id after the step is finished are no-ops.
+	 *
+	 * @param entity_id The entity id reported by the removal event.
+	 */
+	void notify_entity_removed(entity_id_t entity_id);
 
 	/**
 	 * Get the hint text for the current step. The reference is stable
@@ -154,16 +194,32 @@ public:
 
 private:
 	/**
-	 * One entry in the linear scenario. \p check is the predicate the
-	 * trigger polls each tick; \p completed is flipped on first
-	 * satisfaction (or via \p mark_completed) and prevents double-
-	 * advancing if \p check returns true repeatedly.
+	 * One entry in the linear scenario.
+	 *
+	 * \p check is the legacy polling predicate retained for non-
+	 * event-driven steps (e.g. resource thresholds, scripted
+	 * sequences). The P4.1 event-driven path uses
+	 * \p removal_targets_remaining: a step is complete when this
+	 * set is empty. Each notify_entity_removed() call for an id in
+	 * the set removes it; the step is marked completed when the
+	 * set becomes empty.
+	 *
+	 * A step may use either path; in practice a step uses one or the
+	 * other, not both. The polling path is preserved for the
+	 * not-yet-event-driven missions (2-5) so their factories do not
+	 * have to migrate all at once.
 	 */
 	struct Step {
 		step_id_t id;
 		std::string name;
 		std::string hint_text;
 		completion_check_t check;
+		// Entity ids whose removal completes this step. The
+		// notify_entity_removed() call for an id in this set
+		// removes it; the step completes when the set is empty.
+		// Empty set => step is not event-driven; only the polling
+		// predicate (if any) can complete it.
+		std::vector<entity_id_t> removal_targets_remaining;
 		bool completed = false;
 	};
 

@@ -2,6 +2,7 @@
 
 #include "objective_controller.h"
 
+#include <algorithm>
 #include <nyan/nyan.h>
 
 #include "gamestate/game_state.h"
@@ -24,6 +25,12 @@ WilliamWallaceMission01ObjectiveController::WilliamWallaceMission01ObjectiveCont
 }
 
 void WilliamWallaceMission01ObjectiveController::on_update(const time::time_t & /* now */) {
+	// P4.1: the polling path is removed. P3 demos that call on_update
+	// (or the H0.5 GameSimulation::run loop) are now event-driven
+	// for any step that registers a removal target. Steps without a
+	// removal target retain their legacy polling predicate so the
+	// not-yet-event-driven missions (2-5) keep working without a
+	// forced migration.
 	if (this->finished || this->steps.empty()) {
 		return;
 	}
@@ -44,6 +51,15 @@ void WilliamWallaceMission01ObjectiveController::on_update(const time::time_t & 
 		return;
 	}
 
+	// P4.1: event-driven steps do not poll. If the step registered
+	// removal targets, it can only be completed via
+	// notify_entity_removed(); the on_update() call is a no-op for
+	// that step. Legacy steps without removal targets keep the
+	// polling predicate.
+	if (not step.removal_targets_remaining.empty()) {
+		return;
+	}
+
 	// Poll the predicate. Missing predicates are treated as never-
 	// completing - the user spec promises the API compiles even when
 	// the engine hasn't wired the underlying query yet.
@@ -53,6 +69,49 @@ void WilliamWallaceMission01ObjectiveController::on_update(const time::time_t & 
 	}
 
 	if (done) {
+		step.completed = true;
+		this->advance();
+	}
+}
+
+void WilliamWallaceMission01ObjectiveController::notify_entity_removed(entity_id_t entity_id) {
+	if (this->finished || this->steps.empty()) {
+		return;
+	}
+	if (this->current_idx >= this->steps.size()) {
+		this->finished = true;
+		return;
+	}
+
+	auto &step = this->steps[this->current_idx];
+	if (step.completed) {
+		// Idempotent: a duplicate removal event for an already-completed
+		// step is a silent no-op (matches the contract of the
+		// production RemovalEventHandler).
+		return;
+	}
+
+	// Event-driven step: only act if the step registered removal
+	// targets. If the step does not use the event-driven path
+	// (empty removal_targets_remaining), this is a no-op.
+	if (step.removal_targets_remaining.empty()) {
+		return;
+	}
+
+	// Find and remove the entity id. Multi-target objectives stay
+	// ACTIVE until every target is removed; single-target objectives
+	// complete on the first matching removal.
+	auto it = std::find(
+		step.removal_targets_remaining.begin(),
+		step.removal_targets_remaining.end(),
+		entity_id);
+	if (it == step.removal_targets_remaining.end()) {
+		// Removal of a non-target entity: silent no-op.
+		return;
+	}
+	step.removal_targets_remaining.erase(it);
+
+	if (step.removal_targets_remaining.empty()) {
 		step.completed = true;
 		this->advance();
 	}
@@ -85,6 +144,29 @@ void WilliamWallaceMission01ObjectiveController::add_step(WilliamWallaceMission0
 		std::move(name),
 		std::move(hint_text),
 		std::move(check),
+		{},  // no removal_targets; legacy polling path
+		false,
+	});
+}
+
+void WilliamWallaceMission01ObjectiveController::add_event_step(
+	WilliamWallaceMission01ObjectiveController::step_id_t id,
+	std::string name,
+	std::string hint_text,
+	std::vector<entity_id_t> targets) {
+	// First-registration-wins semantics (matches add_step).
+	for (const auto &existing : this->steps) {
+		if (existing.id == id) {
+			return;
+		}
+	}
+
+	this->steps.push_back(Step{
+		id,
+		std::move(name),
+		std::move(hint_text),
+		nullptr,  // no polling predicate; event-driven only
+		std::move(targets),
 		false,
 	});
 }
@@ -207,29 +289,22 @@ std::shared_ptr<WilliamWallaceMission01ObjectiveController> make_defeat_enemy_ob
 
 	auto trigger = std::make_shared<WilliamWallaceMission01ObjectiveController>(state);
 
-	// Snapshot the target set by value so later mutation of the caller's
-	// vector cannot change the predicate. The step completes iff the set
-	// is non-empty AND every target is gone from the index. Empty set =>
-	// never completes (the scenario registered no enemy instance; failing
-	// closed prevents a false victory). Only target_ids are polled, so a
-	// player unit or bystander dying cannot satisfy the step.
-	auto targets = std::make_shared<std::vector<entity_id_t>>(target_ids);
-	trigger->add_step(
+	// P4.1: snapshot the target set by value (so later mutation of the
+	// caller's vector cannot change the predicate) and register it as
+	// an event-driven step. The step is completed by the
+	// ObjectiveRemovalHandler when a game.removal event fires for any
+	// of the target ids. Empty set => never completes (the scenario
+	// registered no enemy instance; failing closed prevents a false
+	// victory). Removal of a non-target entity does not complete the
+	// step because notify_entity_removed() checks the membership
+	// explicitly.
+	std::vector<entity_id_t> targets = target_ids;
+	trigger->add_event_step(
 		1,
 		"defeat_enemy",
 		"Destroy the enemy unit(s). The mission is won when every "
 		"objective target is eliminated.",
-		[targets](const std::shared_ptr<GameState> &s) -> bool {
-			if (targets->empty()) {
-				return false;
-			}
-			for (auto tid : *targets) {
-				if (s->has_game_entity(tid)) {
-					return false;
-				}
-			}
-			return true;
-		});
+		std::move(targets));
 
 	return trigger;
 }

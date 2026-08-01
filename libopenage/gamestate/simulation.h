@@ -6,6 +6,7 @@
 
 #include "util/path.h"
 
+#include "gamestate/event/removal.h"
 #include "gamestate/objective/objective_controller.h"
 
 namespace openage {
@@ -174,18 +175,14 @@ public:
 	}
 
 	/**
-	 * Tick the registered objective controller at `now`, mirroring the
-	 * call that `run()` makes between `EventLoop::reach_time` iterations.
-	 * Phase H0 tests / demos use this so the headless regression can
-	 * advance the controller off-thread (it normally advances inside
-	 * `run()`'s while-loop predicate, which the manual-time driver
-	 * never enters).
+	 * P4.1: tick_objective_controller removed. The objective
+	 * controller is now event-driven via
+	 * gamestate::event::ObjectiveRemovalHandler (subscribed to
+	 * game.removal). Phase H0 demos and tests must construct the
+	 * GameSimulation with a registered handler; the manual-time
+	 * driver does NOT need an explicit per-tick objective advance
+	 * call.
 	 */
-	void tick_objective_controller(time::time_t now) {
-		if (this->objective_controller) {
-			this->objective_controller->on_update(now);
-		}
-	}
 
 	/**
 	 * Get the root directory of the simulation executable.
@@ -269,6 +266,15 @@ private:
 	 * Initialize event handlers.
 	 */
 	void init_event_handlers();
+
+	/**
+	 * P4.1: register the ObjectiveRemovalHandler so the mission-1
+	 * objective controller is notified of game.removal events.
+	 * Split from init_event_handlers() because the controller is
+	 * created after the scenario FQON is resolved. A null
+	 * controller or event loop is a no-op.
+	 */
+	void register_objective_handler();
 
 	/**
 	 * Lifecycle state machine. Only modified under `this->mutex`; read
@@ -359,6 +365,16 @@ private:
 	 * simulation step.
 	 */
 	std::shared_ptr<WilliamWallaceMission01ObjectiveController> objective_controller;
+
+	/**
+	 * P4.1: handle to the production RemovalEventHandler so we can
+	 * register the mission-1 objective controller as an observer
+	 * AFTER the controller is created (the event loop supports one
+	 * handler per event name, so the observer pattern is the only
+	 * sane extension point). Set in init_event_handlers(); used by
+	 * register_objective_handler().
+	 */
+	std::shared_ptr<gamestate::event::RemovalEventHandler> removal_handler;
 
 	/**
 	 * Pick the right mission trigger factory by suffix-matching the

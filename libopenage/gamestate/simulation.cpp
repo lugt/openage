@@ -182,6 +182,12 @@ bool GameSimulation::initialize() {
 		if (not this->scenario_player_setup_fqon.empty() or
 		    not this->scenario_fqon.empty()) {
 			this->objective_controller = this->create_objective_controller();
+			// P4.1: register the ObjectiveRemovalHandler after the
+			// controller is created. The handler subscribes to
+			// game.removal and forwards notifications to the
+			// controller, replacing the per-batch polling that
+			// lived here as H0.5 temporary debt.
+			this->register_objective_handler();
 		}
 	}
 	catch (...) {
@@ -244,9 +250,12 @@ void GameSimulation::run() {
 		time::time_t current_time = this->time_loop->get_clock()->get_time();
 		this->event_loop->reach_time(current_time, this->game->get_state());
 
-		if (this->objective_controller) {
-			this->objective_controller->on_update(current_time);
-		}
+		// P4.1: removed tick_objective_controller(current_time).
+		// The objective controller is now event-driven via
+		// gamestate::event::ObjectiveRemovalHandler (subscribed to
+		// game.removal). The on_update() path is retained for the
+		// not-yet-event-driven missions (2-5) but does nothing for
+		// the Mission 1 defeat_enemy step.
 
 		if (current_time - last_logged_at >= time::time_t{5000}) {
 			log::log(DBG << "GameSimulation::run: simulation time advanced to "
@@ -350,7 +359,7 @@ void GameSimulation::init_event_handlers() {
 	auto attack_handler = std::make_shared<gamestate::event::AttackHandler>();
 	auto apply_discrete_effect_handler = std::make_shared<gamestate::event::ApplyDiscreteEffectHandler>();
 	auto death_handler = std::make_shared<gamestate::event::DeathEventHandler>();
-	auto removal_handler = std::make_shared<gamestate::event::RemovalEventHandler>();
+	this->removal_handler = std::make_shared<gamestate::event::RemovalEventHandler>();
 	auto wait_handler = std::make_shared<gamestate::event::WaitHandler>();
 	this->event_loop->add_event_handler(drag_select_handler);
 	this->event_loop->add_event_handler(spawn_handler);
@@ -359,8 +368,31 @@ void GameSimulation::init_event_handlers() {
 	this->event_loop->add_event_handler(attack_handler);
 	this->event_loop->add_event_handler(apply_discrete_effect_handler);
 	this->event_loop->add_event_handler(death_handler);
-	this->event_loop->add_event_handler(removal_handler);
+	this->event_loop->add_event_handler(this->removal_handler);
 	this->event_loop->add_event_handler(wait_handler);
+}
+
+void GameSimulation::register_objective_handler() {
+	// P4.1: subscribe the mission-1 objective controller to
+	// game.removal so completion is driven by the event handler chain
+	// instead of per-batch polling. The handler is registered as an
+	// observer on the production RemovalEventHandler (the openage
+	// event loop supports one handler per event name, so the
+	// observer pattern is the only sane extension point).
+	//
+	// This is split from init_event_handlers() because the
+	// objective_controller is created later (after the scenario
+	// FQON is resolved). A null controller is a no-op.
+	if (not this->objective_controller) {
+		return;
+	}
+	if (not this->removal_handler) {
+		return;
+	}
+	this->removal_handler->add_observer(
+		[this](openage::gamestate::entity_id_t target_id) {
+			this->objective_controller->notify_entity_removed(target_id);
+		});
 }
 
 } // namespace openage::gamestate

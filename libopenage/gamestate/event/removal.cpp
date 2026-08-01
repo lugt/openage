@@ -17,6 +17,11 @@ RemovalEventHandler::RemovalEventHandler() :
 }
 
 
+void RemovalEventHandler::add_observer(observer_t observer) {
+	this->observers.push_back(std::move(observer));
+}
+
+
 void RemovalEventHandler::setup_event(
 	const std::shared_ptr<openage::event::Event> & /* event */,
 	const std::shared_ptr<openage::event::State> & /* state */) {
@@ -48,6 +53,14 @@ void RemovalEventHandler::invoke(
 	}
 
 	gstate->remove_game_entity(target_id);
+
+	// P4.1: notify registered observers AFTER the GameState mutation
+	// succeeds. Observers include the mission-1 objective controller
+	// (event-driven ACTIVE -> COMPLETED transition).
+	for (auto &observer : this->observers) {
+		observer(target_id);
+	}
+
 	log::log(MSG(info) << "RemovalEventHandler: target " << target_id
 	                   << " removed at t=" << time
 	                   << " (deferred from DeathEvent)");
