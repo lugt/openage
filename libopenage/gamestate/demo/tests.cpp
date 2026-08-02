@@ -19,6 +19,7 @@
 #include "gamestate/demo/trigger_evaluation_demo.h"
 #include "gamestate/demo/trigger_delay_demo.h"
 #include "gamestate/demo/trigger_effect_order_demo.h"
+#include "gamestate/demo/trigger_data_driven_victory_demo.h"
 
 
 namespace openage::gamestate::tests {
@@ -117,6 +118,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	case 19:
 		// Phase P4.2: multi-effect ordering (stable effect_index).
 		simulation_demo_19(path);
+		break;
+
+	case 20:
+		// Phase P4.3: Mission 1 data-driven victory (production path).
+		simulation_demo_20(path);
 		break;
 
 	default:
