@@ -12,6 +12,10 @@ add_sources(libopenage
 	event_loop_fractional.cpp
 	event_driven_objective.cpp
 	nyan_contract_negative.cpp
+	trigger_condition_demo.cpp
+	trigger_evaluation_demo.cpp
+	trigger_delay_demo.cpp
+	trigger_effect_order_demo.cpp
 )
 
 pxdgen(

@@ -15,6 +15,10 @@
 #include "gamestate/demo/deferred_removal.h"
 #include "gamestate/demo/event_driven_objective.h"
 #include "gamestate/demo/nyan_contract_negative.h"
+#include "gamestate/demo/trigger_condition_demo.h"
+#include "gamestate/demo/trigger_evaluation_demo.h"
+#include "gamestate/demo/trigger_delay_demo.h"
+#include "gamestate/demo/trigger_effect_order_demo.h"
 
 
 namespace openage::gamestate::tests {
@@ -93,6 +97,26 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		// Phase P4.1.1: nyan contract negative test (empty-FQON
 		// contract gate; see gamestate/nyan_contracts.h).
 		simulation_demo_15(path);
+		break;
+
+	case 16:
+		// Phase P4.2: EntityRemovedCondition unit test.
+		simulation_demo_16(path);
+		break;
+
+	case 17:
+		// Phase P4.2: trigger evaluation single-shot dispatch.
+		simulation_demo_17(path);
+		break;
+
+	case 18:
+		// Phase P4.2: trigger delay (WAITING_DELAY state machine).
+		simulation_demo_18(path);
+		break;
+
+	case 19:
+		// Phase P4.2: multi-effect ordering (stable effect_index).
+		simulation_demo_19(path);
 		break;
 
 	default:
