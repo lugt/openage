@@ -256,11 +256,19 @@ void simulation_demo_11(const util::Path &path) {
 	}
 
 	// ---- Assert P3.1 invariants still hold under the new path.
-	// Note: 5 hits, values {19, 13, 7, 1, -5}; removal at t=21.28976.
-	D11_ASSERT(hp_changes.size() == 5,
-	           "Expected 5 HP changes from the attack lifecycle, got "
+	// P4.1.1: with the strict-weak-ordering + sorted FQON fixes,
+	// the macOS run deterministically picks BuildingNoPort
+	// (amount=3) so each hit decrements HP by 3. With starting
+	// HP=25, it takes 9 hits to reach -2 (the death threshold is
+	// HP<=0). The full sequence is {22, 19, 16, 13, 10, 7, 4, 1,
+	// -2} and the entity is removed at t=29.28976. The Ubuntu
+	// baseline was 5 hits at damage=6 ({19, 13, 7, 1, -5}) because
+	// unordered iteration happened to pick StoneDefense; the
+	// crosscheck is pending. See p4.1.1 report §3.
+	D11_ASSERT(hp_changes.size() == 9,
+	           "Expected 9 HP changes from the attack lifecycle, got "
 		           << hp_changes.size());
-	const std::vector<int64_t> expected_values{19, 13, 7, 1, -5};
+	const std::vector<int64_t> expected_values{22, 19, 16, 13, 10, 7, 4, 1, -2};
 	for (size_t i = 0; i < expected_values.size(); ++i) {
 		if (i < hp_changes.size()) {
 			D11_ASSERT(hp_changes[i] == expected_values[i],
