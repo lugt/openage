@@ -32,7 +32,15 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ww_mvp/ lives at <repo>/assets/nyan/ww_mvp -> repo root is 3 dirs up.
 REPO="$(cd "$HERE/../../.." && pwd)"
 DEST="$REPO/assets/converted/ww_mvp"
-PY="$REPO/.venv/bin/python3"
+# Cross-platform venv python: try venv/bin/python3 (macOS layout), then .venv/bin/python3 (Linux layout).
+if [ -x "$REPO/venv/bin/python3" ]; then
+    PY="$REPO/venv/bin/python3"
+elif [ -x "$REPO/.venv/bin/python3" ]; then
+    PY="$REPO/.venv/bin/python3"
+else
+    echo "ERROR: venv python not found at $REPO/venv/bin/python3 or $REPO/.venv/bin/python3" >&2
+    exit 1
+fi
 
 if [ ! -d "$REPO/assets/converted/engine" ]; then
     echo "ERROR: engine modpack not found at $REPO/assets/converted/engine" >&2

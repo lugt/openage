@@ -46,7 +46,7 @@ echo "timestamp        : $TS"
 echo "repo             : $REPO"
 echo "commit           : $(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo '(not a git repo)')"
 echo "branch           : $(git -C "$REPO" branch --show-current 2>/dev/null || echo '-')"
-echo "python           : $("$REPO/.venv/bin/python3" --version 2>&1 || echo 'MISSING .venv/bin/python3')"
+echo "python           : $("$REPO/venv/bin/python3" --version 2>&1 || "$REPO/.venv/bin/python3" --version 2>&1 || echo 'MISSING venv python')"
 echo "executable       : $REPO/bin/run"
 echo "asset dir        : $REPO/assets/converted"
 echo "scenario FQON    : $SCENARIO_FQON"
@@ -56,7 +56,8 @@ for m in ww_mvp engine de2_base; do
 	f="$REPO/assets/converted/$m/modpack.toml"
 	if [ -f "$f" ]; then
 		ver="$(grep -E '^version' "$f" | head -1 | sed 's/.*= *"\(.*\)".*/\1/')"
-		mt="$(stat -c '%y' "$f" 2>/dev/null | cut -d. -f1)"
+		# Cross-platform mtime: `date -r FILE` works on both BSD (macOS) and GNU date.
+		mt="$(date -r "$f" +'%F %T' 2>/dev/null || echo 'unknown')"
 		echo "  - $m v$ver  (modpack.toml mtime: $mt)"
 	else
 		echo "  - $m  MISSING modpack.toml"
@@ -74,14 +75,18 @@ check() {
 	fi
 }
 check "$REPO/bin/run"                 "executable"
-check "$REPO/.venv/bin/python3"       "venv python"
+# venv python may live at venv/bin/python3 (macOS layout) or .venv/bin/python3 (Linux layout).
+if [ ! -x "$REPO/venv/bin/python3" ] && [ ! -x "$REPO/.venv/bin/python3" ]; then
+	echo "CHECK FAIL: missing venv python: $REPO/venv/bin/python3 (or .venv)" >&2
+	fail=1
+fi
 check "$REPO/assets/converted/engine/modpack.toml"   "engine modpack def"
 check "$REPO/assets/converted/de2_base/modpack.toml" "de2_base modpack def"
 check "$REPO/assets/converted/ww_mvp/campaign/william_wallace/mission_01.nyan" "mission_01 scenario nyan"
-# Built library (libopenage.so) -- the build dir layout is fixed by the project.
-so="$(find "$REPO/.bin" -name 'libopenage.so*' 2>/dev/null | head -1)"
+# Built library -- the extension differs by platform: .so on Linux, .dylib on macOS.
+so="$(find "$REPO/.bin" \( -name 'libopenage.so*' -o -name 'libopenage.*.dylib' \) 2>/dev/null | head -1)"
 if [ -z "$so" ]; then
-	echo "CHECK FAIL: libopenage.so not found under $REPO/.bin (build the engine first)" >&2
+	echo "CHECK FAIL: libopenage.{so,dylib} not found under $REPO/.bin (build the engine first)" >&2
 	fail=1
 else
 	echo "libopenage       : $so"

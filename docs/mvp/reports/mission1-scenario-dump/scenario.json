@@ -8,7 +8,7 @@
         "ScenarioObjectId": "PlayerVillager",
         "entity_definition_fqon": "de2_base.data.game_entity.generic.villager.villager.Villager",
         "position": {
-          "x": 8,
+          "x": 6,
           "y": 8
         },
         "rotation": 0.0
@@ -20,7 +20,7 @@
         "entity_definition_fqon": "de2_base.data.game_entity.generic.town_center.town_center.TownCenter",
         "position": {
           "x": 8,
-          "y": 9
+          "y": 8
         },
         "rotation": 0.0
       },
@@ -30,8 +30,8 @@
         "ScenarioObjectId": "EnemyVillager",
         "entity_definition_fqon": "de2_base.data.game_entity.generic.villager.villager.Villager",
         "position": {
-          "x": 1,
-          "y": 1
+          "x": 10,
+          "y": 8
         },
         "rotation": 0.0
       }
