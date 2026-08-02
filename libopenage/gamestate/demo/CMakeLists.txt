@@ -18,6 +18,7 @@ add_sources(libopenage
 	trigger_effect_order_demo.cpp
 	trigger_data_driven_victory_demo.cpp
 	selected_view_demo.cpp
+	selection_events_demo.cpp
 )
 
 pxdgen(

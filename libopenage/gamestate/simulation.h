@@ -237,6 +237,19 @@ public:
 	}
 
 	/**
+	 * P4.4A: register an observer on the production
+	 * RemovalEventHandler. The SelectionModel uses this to
+	 * fire EntityRemoved and clear selection on death. The
+	 * observer receives the removed entity id after the
+	 * GameState has removed it.
+	 */
+	void add_removal_observer(gamestate::event::RemovalEventHandler::observer_t cb) {
+		if (this->removal_handler) {
+			this->removal_handler->add_observer(std::move(cb));
+		}
+	}
+
+	/**
 	 * Get the entity factory. Exposed so tests can spawn additional
 	 * entities (e.g. a bystander movable for victory-semantics coverage)
 	 * through the same init_components path as the scenario loader.

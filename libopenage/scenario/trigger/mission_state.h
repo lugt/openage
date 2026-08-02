@@ -26,6 +26,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -135,10 +136,25 @@ public:
 	 */
 	const std::string &victory_reason() const { return this->victory_reason_; }
 
+	// --- Change notification (P4.4A) ------------------------------------
+
+	/**
+	 * Set a callback fired exactly once when declare_victory is
+	 * called for the first time (lifecycle transition
+	 * RUNNING/DEFEAT -> VICTORY). Subsequent calls are no-ops.
+	 *
+	 * Used by the ViewModel layer to push the MissionStateChanged
+	 * event to the HUD without polling.
+	 */
+	void set_victory_listener(std::function<void(const std::string &reason)> cb) {
+		this->victory_listener_ = std::move(cb);
+	}
+
 private:
 	std::unordered_map<std::string, ObjectiveState> objectives_;
 	MissionLifecycle lifecycle_{MissionLifecycle::RUNNING};
 	std::string victory_reason_;
+	std::function<void(const std::string &reason)> victory_listener_;
 };
 
 

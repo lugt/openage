@@ -72,6 +72,9 @@ void MissionState::declare_victory(const std::string &reason) {
 	this->victory_reason_ = reason;
 	log::log(MSG(info) << "MissionState::declare_victory: reason='"
 	                    << reason << "' lifecycle=VICTORY");
+	if (this->victory_listener_) {
+		this->victory_listener_(reason);
+	}
 }
 
 
