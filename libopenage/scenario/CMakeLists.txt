@@ -10,6 +10,8 @@ add_sources(libopenage
 	mission_pack_loader.cpp
 )
 
+add_subdirectory("trigger")
+
 pxdgen(
 	mission_pack.h
 	mission_pack_loader.h
