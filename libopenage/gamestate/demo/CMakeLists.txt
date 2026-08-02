@@ -19,6 +19,7 @@ add_sources(libopenage
 	trigger_data_driven_victory_demo.cpp
 	selected_view_demo.cpp
 	selection_events_demo.cpp
+	hud_adapter_demo.cpp
 )
 
 pxdgen(

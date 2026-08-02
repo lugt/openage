@@ -22,6 +22,7 @@
 #include "gamestate/demo/trigger_data_driven_victory_demo.h"
 #include "gamestate/demo/selected_view_demo.h"
 #include "gamestate/demo/selection_events_demo.h"
+#include "gamestate/demo/hud_adapter_demo.h"
 
 
 namespace openage::gamestate::tests {
@@ -135,6 +136,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	case 23:
 		// Phase P4.4A: SelectionModel event wiring.
 		simulation_demo_23(path);
+		break;
+
+	case 24:
+		// Phase P4.4A: HudQmlAdapter Q_PROPERTY contract.
+		simulation_demo_24(path);
 		break;
 
 	default:
