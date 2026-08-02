@@ -14,6 +14,7 @@
 #include "gamestate/demo/generic_death.h"
 #include "gamestate/demo/deferred_removal.h"
 #include "gamestate/demo/event_driven_objective.h"
+#include "gamestate/demo/nyan_contract_negative.h"
 
 
 namespace openage::gamestate::tests {
@@ -86,6 +87,12 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	case 14:
 		// Phase P4.1: Event-driven Mission 1 objective.
 		simulation_demo_14(path);
+		break;
+
+	case 15:
+		// Phase P4.1.1: nyan contract negative test (empty-FQON
+		// contract gate; see gamestate/nyan_contracts.h).
+		simulation_demo_15(path);
 		break;
 
 	default:

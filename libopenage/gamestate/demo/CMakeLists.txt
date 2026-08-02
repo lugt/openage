@@ -11,6 +11,7 @@ add_sources(libopenage
 	deferred_removal.cpp
 	event_loop_fractional.cpp
 	event_driven_objective.cpp
+	nyan_contract_negative.cpp
 )
 
 pxdgen(
