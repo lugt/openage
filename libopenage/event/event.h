@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 
 #include "event/eventhandler.h"
@@ -69,6 +70,25 @@ public:
 
 	/**
 	 * For sorting events by their trigger time.
+	 *
+	 * P4.1.1: this comparator MUST establish a strict weak ordering.
+	 * The previous implementation compared only by time, which meant
+	 * that two events with the same time were treated as equal --
+	 * violating strict weak ordering and leaving the dispatch order
+	 * up to the EventQueue's internal storage (which is a
+	 * platform-dependent container). The fix is a total order over
+	 * the stable key (time, handler_id, entity_fqon, creation_seq)
+	 * so the same input produces the same dispatch order on every
+	 * platform and on every run.
+	 *
+	 * Time dominates. handler_id is the canonical name of the
+	 * event handler that owns the event. entity_fqon is the FQON of
+	 * the target entity, or empty for handler-level events. creation_seq
+	 * is a monotonically increasing counter assigned at event
+	 * construction; it is the tie-breaker for events that match
+	 * on all three preceding keys. None of the four fields depend
+	 * on pointer address, allocation order, or hash randomization,
+	 * so the order is platform-independent.
 	 */
 	bool operator<(const Event &other) const;
 
@@ -114,6 +134,24 @@ private:
 
 	/** Precalculated std::hash for the event */
 	event_hash_t myhash;
+
+	/**
+	 * P4.1.1: monotonic creation sequence for the strict-weak-order
+	 * comparator. Assigned at construction time. Two events with
+	 * the same (time, handler_id, entity_fqon) are ordered by this
+	 * field, which is independent of pointer address, allocation
+	 * order, or hash randomization. Stored as a class-static
+	 * counter so it survives across multiple Event instances.
+	 */
+	uint64_t creation_seq;
+
+public:
+	/**
+	 * P4.1.1: per-process monotonic counter used to break ties in
+	 * Event::operator<. Reset to 0 at process start; no
+	 * cross-process meaning.
+	 */
+	static std::atomic<uint64_t> next_creation_seq;
 };
 
 
