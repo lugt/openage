@@ -17,6 +17,7 @@ add_sources(libopenage
 	trigger_delay_demo.cpp
 	trigger_effect_order_demo.cpp
 	trigger_data_driven_victory_demo.cpp
+	selected_view_demo.cpp
 )
 
 pxdgen(

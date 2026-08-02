@@ -20,6 +20,7 @@
 #include "gamestate/demo/trigger_delay_demo.h"
 #include "gamestate/demo/trigger_effect_order_demo.h"
 #include "gamestate/demo/trigger_data_driven_victory_demo.h"
+#include "gamestate/demo/selected_view_demo.h"
 
 
 namespace openage::gamestate::tests {
@@ -123,6 +124,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	case 20:
 		// Phase P4.3: Mission 1 data-driven victory (production path).
 		simulation_demo_20(path);
+		break;
+
+	case 22:
+		// Phase P4.4A: SelectedEntityView + MissionView contract.
+		simulation_demo_22(path);
 		break;
 
 	default:

@@ -226,6 +226,17 @@ public:
 	const std::shared_ptr<gamestate::event::Commander> get_commander();
 
 	/**
+	 * P4.4A: get the data-driven trigger runtime (MissionState +
+	 * trigger instances). Used by the ViewModel layer
+	 * (MissionView, future SelectionView) to read the single
+	 * source of truth for objective lifecycle and victory.
+	 */
+	const std::shared_ptr<scenario::trigger::TriggerRuntime> &
+	get_trigger_runtime() const {
+		return this->trigger_runtime;
+	}
+
+	/**
 	 * Get the entity factory. Exposed so tests can spawn additional
 	 * entities (e.g. a bystander movable for victory-semantics coverage)
 	 * through the same init_components path as the scenario loader.
