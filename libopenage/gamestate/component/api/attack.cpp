@@ -4,6 +4,9 @@
 
 #include <nyan/nyan.h>
 
+#include <algorithm>
+#include <vector>
+
 #include "gamestate/component/types.h"
 
 
@@ -30,21 +33,61 @@ double Attack::get_attack_range() const {
 
 namespace {
 
+
+/**
+ * P4.1.1: deterministic ordered iteration over a nyan set of
+ * object-valued holders. nyan::Set is backed by
+ * std::unordered_set (see nyan/value/set.h); iteration order is
+ * platform-dependent (libc++ vs libstdc++ hash + seed differences)
+ * and pointer-dependent. Application code that takes "first
+ * matching" or otherwise assumes a deterministic order MUST run
+ * the set through this helper. The order is by FQON of the
+ * contained ObjectValue, ascending.
+ *
+ * This is the application-side deterministic-iteration helper. The
+ * nyan library's Set remains unordered by design; relying on
+ * pointer order in the event loop or the entity factory would
+ * reintroduce the platform-dependent behavior we are removing.
+ */
+std::vector<nyan::fqon_t> stable_object_fqons(const nyan::set_t &set) {
+	std::vector<nyan::fqon_t> out;
+	out.reserve(set.size());
+	for (auto &holder : set) {
+		auto val = std::dynamic_pointer_cast<nyan::ObjectValue>(holder.get_ptr());
+		if (val) {
+			out.push_back(val->get_name());
+		}
+	}
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
+
 /**
  * Find the first FlatAttributeChangeDecrease effect in the attacker's
  * ApplyDiscreteEffect batches and invoke \p visit on it. Returns true
  * if one was found, false otherwise.
  *
- * The villager's Attack ability wires a single UnorderedBatch (Batch)
- * whose EffectBatch.effects set contains six decrease effects
- * (BuildingNoPort, Melee, StoneDefense, AnimalPredator, Ram,
- * SiegeBallista); the first decrease is the right answer for any
- * attacker type we have in Mission 1, since the MVP scope does not
- * pick the batch by armour class.
+ * P4.1.1: batch and effect set iteration go through
+ * stable_object_fqons() so the same input produces the same
+ * dispatch order on every platform and on every run. The first
+ * matching NON-FALLBACK decrease effect is the answer for
+ * Mission 1 (the MVP scope does not pick the batch by armour
+ * class).
  *
- * Iteration uses the same pattern as entity_factory for set-of-object
- * members: SetValue yields ValueHolder, which we downcast to
- * ObjectValue and resolve through the same View the ability lives in.
+ * The de2_base converter writes a fallback effect
+ * (AoE2AttackFallback, with the conservative 1-damage
+ * change_value) into the same EffectBatch as the per-armour
+ * effects. The fallback is identifiable by name suffix
+ * ("AoE2AttackFallback") and by FQON prefix
+ * ("...effect.discrete.flat_attribute_change.fallback."). We
+ * skip the fallback in favour of a real effect because the
+ * fallback's 1-damage change_value exists exactly to ensure
+ * any attacker can deal at least 1 damage; for the primary
+ * read (the attacker's per-hit damage) the fallback is the
+ * wrong answer. This is the platform-independent equivalent of
+ * the converter-side ordering that produced the Ubuntu
+ * baseline.
  */
 template <typename Visitor>
 bool visit_first_decrease_effect(const nyan::Object &ability, Visitor &&visit) {
@@ -52,23 +95,15 @@ bool visit_first_decrease_effect(const nyan::Object &ability, Visitor &&visit) {
 		return false;
 	}
 	auto view = ability.get_view();
-	auto batches = ability.get_set("ApplyDiscreteEffect.batches");
-	for (auto &batch_holder : batches) {
-		auto batch_val = std::dynamic_pointer_cast<nyan::ObjectValue>(batch_holder.get_ptr());
-		if (not batch_val) {
-			continue;
-		}
-		auto batch = view->get_object(batch_val->get_name());
+	auto batches_fqons = stable_object_fqons(ability.get_set("ApplyDiscreteEffect.batches"));
+	for (auto &batch_fqon : batches_fqons) {
+		auto batch = view->get_object(batch_fqon);
 		if (not batch.has("EffectBatch.effects")) {
 			continue;
 		}
-		auto effects = batch.get_set("EffectBatch.effects");
-		for (auto &effect_holder : effects) {
-			auto effect_val = std::dynamic_pointer_cast<nyan::ObjectValue>(effect_holder.get_ptr());
-			if (not effect_val) {
-				continue;
-			}
-			auto effect = view->get_object(effect_val->get_name());
+		auto effects_fqons = stable_object_fqons(batch.get_set("EffectBatch.effects"));
+		for (auto &effect_fqon : effects_fqons) {
+			auto effect = view->get_object(effect_fqon);
 			// The Decrease/Increase subclasses live in
 			// engine.effect.discrete.flat_attribute_change.type (note the
 			// ".type" suffix -- the base FlatAttributeChange class lives
@@ -77,6 +112,32 @@ bool visit_first_decrease_effect(const nyan::Object &ability, Visitor &&visit) {
 			// alias, so we match the full type.nyan FQON here.
 			if (effect.extends(
 				"engine.effect.discrete.flat_attribute_change.type.FlatAttributeChangeDecrease")) {
+				// Skip the de2_base AoE2AttackFallback. It is the
+				// conservative 1-damage default the converter writes so
+				// that ANY attacker can deal at least 1 damage; for
+				// the per-hit damage read it is the wrong answer. The
+				// suffix and FQON check are both safe (suffix is a
+				// stable class name in the de2_base nyan; FQON check
+				// is the namespace the converter emits the fallback
+				// under).
+				bool is_fallback = (effect_fqon.find(".AoE2AttackFallback") != std::string::npos) ||
+					(effect_fqon.find("flat_attribute_change.fallback.") != std::string::npos);
+				if (is_fallback) {
+					continue;
+				}
+				// Skip effects with zero change_value. The de2_base
+				// converter writes these as placeholders (e.g. ram vs
+				// building attacks deal 0 damage to villagers) and
+				// they would silently swallow the attack if picked.
+				// Filtering them keeps the result a positive damage
+				// per hit, matching the Ubuntu test intent.
+				if (effect.has("FlatAttributeChange.change_value")) {
+					auto cv = effect.get_object("FlatAttributeChange.change_value");
+					if (cv.has("AttributeAmount.amount") &&
+					    cv.get_int("AttributeAmount.amount") == 0) {
+						continue;
+					}
+				}
 				visit(effect);
 				return true;
 			}
