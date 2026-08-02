@@ -21,7 +21,8 @@
 // TODO
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
-#include "gamestate/objective/objective_controller.h"
+#include "scenario/mission_pack.h"
+#include "scenario/trigger/trigger_runtime.h"
 
 namespace openage::gamestate {
 
@@ -56,42 +57,64 @@ GameSimulation::GameSimulation(const util::Path &root_dir,
 // initialization lifecycle is visible at a glance from the top of the
 // file).
 
-std::shared_ptr<WilliamWallaceMission01ObjectiveController> GameSimulation::create_objective_controller() {
-	const auto &state = this->game->get_state();
+// P4.3: synthesize the data-driven defeat_enemy trigger IR from the
+// Mission Pack's VictoryDefinition.required_removals. The committed
+// dump (docs/mvp/reports/mission1-scenario-dump/) is contractually
+// zero-trigger -- test_p1_dump.py pins trigger_count==0 because the
+// original scenario source is BLOCKED (Path D) -- so the trigger
+// cannot live in scenario.json yet. Instead the production wiring
+// translates required_removals (the committed data signal) into a
+// MissionTriggerDefinition that the TriggerRuntime executes. When
+// Path C unblocks the original scenario data and the dump carries
+// TriggerDefinition records, pack.triggers is fed directly and this
+// synthesis becomes a fallback.
+//
+// Mission 1 has a single required_removal ("EnemyVillager"), so one
+// trigger declares victory on its destruction. A multi-removal
+// victory condition is future work (would need an AND-aggregator).
+gamestate::MissionTriggerDefinition make_defeat_enemy_trigger_ir(
+	const std::string &required_removal) {
 
-	// Suffix-match the scenario FQON against the 5 known mission names.
-	// This way the simulation doesn't need a separate "mission id" CLI
-	// flag - the scenario's name encodes the mission.
-	auto pick = [&](const std::string &suffix, auto factory) -> std::shared_ptr<WilliamWallaceMission01ObjectiveController> {
-		if (this->scenario_fqon.find(suffix) != std::string::npos) {
-			return factory(state);
-		}
-		return nullptr;
-	};
+	gamestate::MissionTriggerDefinition def;
+	def.trigger_id = "mission_01.defeat_" + required_removal;
+	def.initially_enabled = true;
+	def.looping = false;
+	def.delay = 0.0;
 
-	if (auto t = pick(".mission_01.Mission", &create_mission_1_trigger)) {
-		return t;
-	}
-	if (auto t = pick(".mission_02.Mission", &create_mission_2_trigger)) {
-		return t;
-	}
-	if (auto t = pick(".mission_03.Mission", &create_mission_3_trigger)) {
-		return t;
-	}
-	if (auto t = pick(".mission_04.Mission", &create_mission_4_trigger)) {
-		return t;
-	}
-	if (auto t = pick(".mission_05.Mission", &create_mission_5_trigger)) {
-		return t;
-	}
+	// Condition: the required-removal entity is destroyed. The
+	// loader registers named entities under BOTH the full instance
+	// FQON and the short scenario_object_id, so the short name from
+	// required_removals resolves directly via
+	// GameState::get_entity_id_by_instance.
+	gamestate::MissionTriggerCondition cond;
+	cond.kind = "EntityDestroyed";
+	cond.target_scenario_object_id = required_removal;
+	def.conditions.push_back(cond);
 
-	// Default: William Wallace Mission 1 MVP. Lets the user run `--scenario` with whatever
-	// scenario FQON they have and still get a working (if simplistic)
-	// trigger, instead of a silent no-op.
-	log::log(MSG(info) << "create_objective_controller: no mission suffix matched; "
-	                   << "falling back to Mission 1");
-	return create_mission_1_trigger(state);
+	// Effects (stable effect_index order):
+	//   0: SetObjective(ACTIVE)  -- mark the objective active
+	//   1: CompleteObjective     -- mark the objective completed
+	//   2: DeclareVictory        -- MissionState -> VICTORY
+	const std::string objective_id = "mission_01.defeat_enemy";
+	gamestate::MissionTriggerEffect eff_active;
+	eff_active.kind = "SetObjective";
+	eff_active.target_scenario_object_id = objective_id;
+	eff_active.target_area_id = "ACTIVE";
+	def.effects.push_back(eff_active);
+
+	gamestate::MissionTriggerEffect eff_complete;
+	eff_complete.kind = "CompleteObjective";
+	eff_complete.target_scenario_object_id = objective_id;
+	def.effects.push_back(eff_complete);
+
+	gamestate::MissionTriggerEffect eff_victory;
+	eff_victory.kind = "DeclareVictory";
+	eff_victory.target_scenario_object_id = "enemy_removed";
+	def.effects.push_back(eff_victory);
+
+	return def;
 }
+
 
 
 const char *to_string(SimulationLifecycle s) {
@@ -181,13 +204,22 @@ bool GameSimulation::initialize() {
 
 		if (not this->scenario_player_setup_fqon.empty() or
 		    not this->scenario_fqon.empty()) {
-			this->objective_controller = this->create_objective_controller();
-			// P4.1: register the ObjectiveRemovalHandler after the
-			// controller is created. The handler subscribes to
-			// game.removal and forwards notifications to the
-			// controller, replacing the per-batch polling that
-			// lived here as H0.5 temporary debt.
-			this->register_objective_handler();
+			// P4.3: construct the data-driven TriggerRuntime. The
+			// runtime replaces the hand-rolled
+			// WilliamWallaceMission01ObjectiveController for Mission 1:
+			// the defeat_enemy trigger (EntityDestroyed +
+			// SetObjective + CompleteObjective + DeclareVictory) is
+			// synthesized from the Mission Pack's
+			// VictoryDefinition.required_removals (the committed data
+			// signal) and executed by the runtime. The runtime owns
+			// the MissionState; is_objective_finished() reads its
+			// victory state.
+			this->trigger_runtime = std::make_shared<
+				scenario::trigger::TriggerRuntime>(
+				this->event_loop, this->game->get_state());
+			this->trigger_runtime->register_handlers();
+			this->wire_trigger_data(mission_pack_dir);
+			this->register_trigger_handler();
 		}
 	}
 	catch (...) {
@@ -198,7 +230,7 @@ bool GameSimulation::initialize() {
 	}
 
 	log::log(MSG(info) << "GameSimulation::initialize: phase complete "
-	                       "(game + objective ready; lifecycle=Initialized)");
+	                       "(game + trigger runtime ready; lifecycle=Initialized)");
 	return true;
 }
 
@@ -250,12 +282,12 @@ void GameSimulation::run() {
 		time::time_t current_time = this->time_loop->get_clock()->get_time();
 		this->event_loop->reach_time(current_time, this->game->get_state());
 
-		// P4.1: removed tick_objective_controller(current_time).
-		// The objective controller is now event-driven via
-		// gamestate::event::ObjectiveRemovalHandler (subscribed to
-		// game.removal). The on_update() path is retained for the
-		// not-yet-event-driven missions (2-5) but does nothing for
-		// the Mission 1 defeat_enemy step.
+		// P4.3: no per-tick objective work. Mission 1 victory is
+		// event-driven: DeathEventHandler -> game.removal ->
+		// RemovalEventHandler fires the TriggerRuntime observer ->
+		// trigger.evaluate -> defeat_enemy trigger fires ->
+		// DeclareVictory -> MissionState::VICTORY. reach_time() alone
+		// dispatches the whole chain within the current batch.
 
 		if (current_time - last_logged_at >= time::time_t{5000}) {
 			log::log(DBG << "GameSimulation::run: simulation time advanced to "
@@ -372,18 +404,65 @@ void GameSimulation::init_event_handlers() {
 	this->event_loop->add_event_handler(wait_handler);
 }
 
-void GameSimulation::register_objective_handler() {
-	// P4.1: subscribe the mission-1 objective controller to
-	// game.removal so completion is driven by the event handler chain
-	// instead of per-batch polling. The handler is registered as an
-	// observer on the production RemovalEventHandler (the openage
-	// event loop supports one handler per event name, so the
-	// observer pattern is the only sane extension point).
-	//
-	// This is split from init_event_handlers() because the
-	// objective_controller is created later (after the scenario
-	// FQON is resolved). A null controller is a no-op.
-	if (not this->objective_controller) {
+void GameSimulation::wire_trigger_data(const std::string &mission_pack_dir) {
+	// P4.3: feed the Mission Pack's trigger data into the runtime.
+	// The pack was already read once inside Game::load_scenario (and
+	// discarded); re-reading here is a one-time init cost that keeps
+	// the change localized to GameSimulation (no Game/GameState header
+	// changes to retain the pack). A read failure is logged and
+	// downgraded to a triggerless runtime -- the simulation still
+	// runs, it just never declares victory.
+	if (not this->trigger_runtime or mission_pack_dir.empty()) {
+		return;
+	}
+	gamestate::MissionPack pack;
+	try {
+		pack = gamestate::read_mission_pack(mission_pack_dir);
+	}
+	catch (const std::exception &e) {
+		log::log(MSG(err) << "GameSimulation::wire_trigger_data: "
+		                   << "could not re-read mission pack from '"
+		                   << mission_pack_dir << "' (" << e.what()
+		                   << "); trigger runtime will have no triggers");
+		return;
+	}
+
+	// Data-driven triggers (empty for the Mission 1 reconstruction
+	// until Path C unblocks the original scenario data).
+	for (const auto &td : pack.triggers) {
+		this->trigger_runtime->add_trigger(td);
+	}
+
+	// Fallback synthesis: translate the pack's
+	// VictoryDefinition.required_removals into defeat_enemy triggers.
+	// This is the path Mission 1 takes today (the dump carries zero
+	// TriggerDefinition records but a non-empty required_removals
+	// list). Each required_removal becomes one EntityDestroyed ->
+	// SetObjective + CompleteObjective + DeclareVictory trigger.
+	for (const auto &removal : pack.victory.required_removals) {
+		this->trigger_runtime->add_trigger(
+			make_defeat_enemy_trigger_ir(removal));
+	}
+
+	log::log(MSG(info) << "GameSimulation::wire_trigger_data: "
+	                   << "triggers=" << pack.triggers.size()
+	                   << " (data) + " << pack.victory.required_removals.size()
+	                   << " (synthesized from required_removals)"
+	                   << "; runtime trigger_count="
+	                   << this->trigger_runtime->trigger_count());
+}
+
+
+void GameSimulation::register_trigger_handler() {
+	// P4.3: subscribe the TriggerRuntime to game.removal so trigger
+	// evaluation is driven by the event handler chain instead of
+	// per-batch polling. The runtime's notify_entity_removed takes a
+	// simulation time; the observer obtains it from
+	// time_loop->get_clock()->get_time() (the same source the run()
+	// loop uses for reach_time). The runtime stays a pure policy
+	// object and never consults the clock itself. A null runtime or
+	// removal handler is a no-op.
+	if (not this->trigger_runtime) {
 		return;
 	}
 	if (not this->removal_handler) {
@@ -391,8 +470,16 @@ void GameSimulation::register_objective_handler() {
 	}
 	this->removal_handler->add_observer(
 		[this](openage::gamestate::entity_id_t target_id) {
-			this->objective_controller->notify_entity_removed(target_id);
+			auto at = this->time_loop->get_clock()->get_time();
+			this->trigger_runtime->notify_entity_removed(target_id, at);
 		});
+}
+
+
+bool GameSimulation::is_objective_finished() const {
+	// P4.3: the runtime's MissionState is the single source of truth.
+	return this->trigger_runtime
+	       and this->trigger_runtime->mission_state().is_victory();
 }
 
 } // namespace openage::gamestate

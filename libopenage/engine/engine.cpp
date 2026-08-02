@@ -137,7 +137,7 @@ void Engine::initialize_runtime() {
 	//   - load nyan data (engine / de2_base / ww_mvp)
 	//   - add the PlayerSetup
 	//   - load the scenario (terrain + initial PlacedEntity spawns)
-	//   - construct the WilliamWallaceMission01ObjectiveController
+	//   - construct the data-driven TriggerRuntime + wire trigger data
 	// All of this runs on the main thread so that no worker thread has
 	// to allocate against the same heap pages as the nyan parser.
 	this->simulation->initialize();

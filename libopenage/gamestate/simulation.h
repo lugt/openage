@@ -7,7 +7,6 @@
 #include "util/path.h"
 
 #include "gamestate/event/removal.h"
-#include "gamestate/objective/objective_controller.h"
 
 namespace openage {
 
@@ -31,12 +30,14 @@ namespace time {
 class TimeLoop;
 } // namespace time
 
+namespace scenario::trigger {
+class TriggerRuntime;
+}
+
 namespace gamestate {
 class EntityFactory;
 class Game;
 class TerrainFactory;
-
-class WilliamWallaceMission01ObjectiveController;
 
 namespace event {
 class Commander;
@@ -104,7 +105,7 @@ public:
 	 *   - `Game::load_data` (nyan / engine schema / scenario data load)
 	 *   - `Game::add_player` for the configured PlayerSetup
 	 *   - `Game::load_scenario` (terrain + initial PlacedEntity spawns)
-	 *   - objective controller construction (Mission 1 MVP)
+	 *   - TriggerRuntime construction + trigger-data wiring (Mission 1 MVP)
 	 *
 	 * Idempotent? **No** — calling `initialize()` after a successful
 	 * `initialize()` is a hard error. Re-entry attempts return false via
@@ -163,25 +164,21 @@ public:
 	}
 
 	/**
-	 * True iff the active Mission 1 MVP objective controller has marked
-	 * the scenario completed. Phase H0 uses this from tests/demos to
-	 * poll for Victory without exposing the private objective_controller
-	 * pointer. Returns false when no objective controller is currently
-	 * registered (non-scenario runs).
+	 * P4.3: True iff the data-driven TriggerRuntime has declared
+	 * victory. Replaces the P4.1 hand-rolled objective_controller
+	 * query; the runtime's MissionState is now the single source of
+	 * truth for mission completion. Defined out-of-line so the header
+	 * only needs a forward-declare of TriggerRuntime. Returns false
+	 * when no runtime is registered (non-scenario runs).
 	 */
-	bool is_objective_finished() const {
-		return this->objective_controller
-		       and this->objective_controller->is_finished();
-	}
+	bool is_objective_finished() const;
 
 	/**
-	 * P4.1: tick_objective_controller removed. The objective
-	 * controller is now event-driven via
-	 * gamestate::event::ObjectiveRemovalHandler (subscribed to
-	 * game.removal). Phase H0 demos and tests must construct the
-	 * GameSimulation with a registered handler; the manual-time
-	 * driver does NOT need an explicit per-tick objective advance
-	 * call.
+	 * P4.3: no per-tick objective call. Mission 1 victory is fully
+	 * event-driven through the TriggerRuntime (DeathEventHandler ->
+	 * game.removal -> TriggerRuntime observer -> trigger.evaluate ->
+	 * DeclareVictory). The manual-time driver only needs
+	 * reach_time(); the chain dispatches within a single batch.
 	 */
 
 	/**
@@ -268,13 +265,24 @@ private:
 	void init_event_handlers();
 
 	/**
-	 * P4.1: register the ObjectiveRemovalHandler so the mission-1
-	 * objective controller is notified of game.removal events.
-	 * Split from init_event_handlers() because the controller is
-	 * created after the scenario FQON is resolved. A null
-	 * controller or event loop is a no-op.
+	 * P4.3: register the TriggerRuntime as an observer on the
+	 * production RemovalEventHandler so entity removals drive
+	 * trigger evaluation. Split from init_event_handlers() because
+	 * the runtime is created after the scenario FQON is resolved
+	 * (it needs the GameState). A null runtime or removal handler
+	 * is a no-op.
 	 */
-	void register_objective_handler();
+	void register_trigger_handler();
+
+	/**
+	 * P4.3: feed the Mission Pack's trigger data into the runtime.
+	 * Reads pack.triggers (data-driven; empty for the Mission 1
+	 * reconstruction until Path C unblocks) and synthesizes a
+	 * defeat_enemy trigger from pack.victory.required_removals so
+	 * Mission 1 victory is data-driven even though the dump carries
+	 * zero TriggerDefinition records (pinned by test_p1_dump.py).
+	 */
+	void wire_trigger_data(const std::string &mission_pack_dir);
 
 	/**
 	 * Lifecycle state machine. Only modified under `this->mutex`; read
@@ -359,29 +367,24 @@ private:
 	std::string scenario_fqon;
 
 	/**
-	 * Active objective controller (William Wallace Mission 1 MVP). Constructed in
-	 * start() by matching scenario_fqon against the known
-	 * mission FQONs (Mission1..Mission5). Ticked from run() once per
-	 * simulation step.
+	 * P4.3: the data-driven trigger runtime. Owns the MissionState
+	 * (objective lifecycle + victory state) and the per-load trigger
+	 * instances. Constructed in initialize() after the Game (and its
+	 * GameState) exist; the runtime registers its own event handlers
+	 * (trigger.evaluate, set_objective_state, activate_trigger,
+	 * declare_victory) on the event loop.
 	 */
-	std::shared_ptr<WilliamWallaceMission01ObjectiveController> objective_controller;
+	std::shared_ptr<scenario::trigger::TriggerRuntime> trigger_runtime;
 
 	/**
-	 * P4.1: handle to the production RemovalEventHandler so we can
-	 * register the mission-1 objective controller as an observer
-	 * AFTER the controller is created (the event loop supports one
-	 * handler per event name, so the observer pattern is the only
-	 * sane extension point). Set in init_event_handlers(); used by
-	 * register_objective_handler().
+	 * P4.1/P4.3: handle to the production RemovalEventHandler so we
+	 * can register the TriggerRuntime as an observer AFTER the
+	 * runtime is created (the event loop supports one handler per
+	 * event name, so the observer pattern is the only sane extension
+	 * point). Set in init_event_handlers(); used by
+	 * register_trigger_handler().
 	 */
 	std::shared_ptr<gamestate::event::RemovalEventHandler> removal_handler;
-
-	/**
-	 * Pick the right mission trigger factory by suffix-matching the
-	 * scenario FQON against the 5 known mission names. Falls back to
-	 * Mission 1 if no match is found.
-	 */
-	std::shared_ptr<WilliamWallaceMission01ObjectiveController> create_objective_controller();
 
 	/**
 	 * Mutex for thread-safe access to the simulation.

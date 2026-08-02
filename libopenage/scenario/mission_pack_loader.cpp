@@ -251,10 +251,12 @@ void load_mission_pack_into_game_state(
 		state->add_game_entity(entity);
 
 		// 5. ScenarioObjectId -> GameEntityId mapping.
-		// Register BOTH the full PlacedEntity instance FQON (what
-		// the openage objective_controller / legacy Game::load_scenario
-		// keyed on) AND the short scenario_object_id (what the
-		// openage.scenario IR exposes). The id returned by
+		// Register BOTH the full PlacedEntity instance FQON (what the
+		// TriggerRuntime's EntityRemovedCondition resolves via
+		// GameState::get_entity_id_by_instance, and what the legacy
+		// Game::load_scenario / objective_controller keyed on) AND the
+		// short scenario_object_id (what the openage.scenario IR
+		// exposes). The id returned by
 		// get_next_entity_id is monotonically increasing in
 		// placement-list order (see
 		// EntityFactory::get_next_entity_id), which matches the
@@ -285,14 +287,20 @@ void load_mission_pack_into_game_state(
 	log::log(MSG(info) << "load_mission_pack_into_game_state: triggers="
 	                   << pack.triggers.size() << " (definitions only; P4 wires execution)");
 
-	// 8. Initial objective events. The MVP reconstruction's
-	//    VictoryDefinition.required_removals maps directly onto the
-	//    SetObjective events the openage objective_controller expects.
+	// 8. Initial objective targets. The MVP reconstruction's
+	//    VictoryDefinition.required_removals lists the entities whose
+	//    removal completes the mission. GameSimulation::wire_trigger_data
+	//    synthesizes one defeat_enemy trigger per required_removal
+	//    (EntityDestroyed condition + SetObjective/CompleteObjective/
+	//    DeclareVictory effects) on the TriggerRuntime, so this list is
+	//    the data source for the production objective lifecycle -- the
+	//    legacy ObjectiveController is no longer on the production path.
 	for (const auto &sid : pack.victory.required_removals) {
 		log::log(MSG(info) << "load_mission_pack_into_game_state: "
-		                   << "initial SetObjective target="
+		                   << "victory required_removal target="
 		                   << sid
-		                   << " (handled by objective_controller.cpp)");
+		                   << " (synthesized into a defeat_enemy trigger "
+		                   << "by GameSimulation::wire_trigger_data)");
 	}
 }
 
