@@ -9,7 +9,7 @@
         "entity_definition_fqon": "de2_base.data.game_entity.generic.villager.villager.Villager",
         "position": {
           "x": 6,
-          "y": 8
+          "y": 4
         },
         "rotation": 0.0
       },
@@ -31,7 +31,7 @@
         "entity_definition_fqon": "de2_base.data.game_entity.generic.villager.villager.Villager",
         "position": {
           "x": 10,
-          "y": 8
+          "y": 4
         },
         "rotation": 0.0
       }

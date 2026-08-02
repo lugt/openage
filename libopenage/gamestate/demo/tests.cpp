@@ -23,6 +23,7 @@
 #include "gamestate/demo/selected_view_demo.h"
 #include "gamestate/demo/selection_events_demo.h"
 #include "gamestate/demo/hud_adapter_demo.h"
+#include "gamestate/demo/footprint_demo.h"
 
 
 namespace openage::gamestate::tests {
@@ -141,6 +142,21 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	case 24:
 		// Phase P4.4A: HudQmlAdapter Q_PROPERTY contract.
 		simulation_demo_24(path);
+		break;
+
+	case 25:
+		// Phase P4.4B: Footprint construction contract.
+		simulation_demo_25(path);
+		break;
+
+	case 26:
+		// Phase P4.4B: PlacementValidator contract.
+		simulation_demo_26(path);
+		break;
+
+	case 27:
+		// Phase P4.4B: StaticOccupancyGrid contract.
+		simulation_demo_27(path);
 		break;
 
 	default:

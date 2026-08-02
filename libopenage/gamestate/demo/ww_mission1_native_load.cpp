@@ -129,7 +129,7 @@ void simulation_demo_9(const util::Path & /*path*/) {
 	};
 
 	const MissionEntityPlacement *pv = find_placement("PlayerVillager");
-	if (!pv || pv->player_id != 0 || pv->pos_x != 6 || pv->pos_y != 8) {
+	if (!pv || pv->player_id != 0 || pv->pos_x != 6 || pv->pos_y != 4) {
 		throw std::runtime_error{"PlayerVillager placement wrong"};
 	}
 	const MissionEntityPlacement *tc = find_placement("PlayerTownCenter");
@@ -137,7 +137,7 @@ void simulation_demo_9(const util::Path & /*path*/) {
 		throw std::runtime_error{"PlayerTownCenter placement wrong"};
 	}
 	const MissionEntityPlacement *ev = find_placement("EnemyVillager");
-	if (!ev || ev->player_id != 1 || ev->pos_x != 10 || ev->pos_y != 8) {
+	if (!ev || ev->player_id != 1 || ev->pos_x != 10 || ev->pos_y != 4) {
 		throw std::runtime_error{"EnemyVillager placement wrong"};
 	}
 

@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "gamestate/component/types.h"
+#include "gamestate/component/api/footprint.h"
 #include "gamestate/types.h"
 #include "time/time.h"
 
@@ -22,6 +23,7 @@ class GameEntityManager;
 
 namespace component {
 class Component;
+class Footprint;
 }
 
 /**
@@ -99,6 +101,18 @@ public:
 	 */
 	bool has_component(component::component_t type);
 
+	// --- P4.4B: gameplay footprint ---
+	// Footprint is plain data (NOT an openage Component), stored
+	// as a field on the entity. See component/api/footprint.h.
+	// The default-constructed (empty) footprint reports
+	// radius=0 and the entity is a point with no collision.
+	void set_footprint(const component::Footprint &fp) {
+		this->footprint_ = fp;
+		this->has_footprint_ = true;
+	}
+	bool has_footprint() const { return this->has_footprint_; }
+	const component::Footprint &footprint() const { return this->footprint_; }
+
 	/**
 	 * Death-state flag.
 	 *
@@ -169,6 +183,10 @@ private:
 	 * TODO: Multiple components of the same type.
 	 */
 	std::unordered_map<component::component_t, std::shared_ptr<component::Component>> components;
+
+	// P4.4B: gameplay footprint (plain data, not a Component).
+	component::Footprint footprint_{};
+	bool has_footprint_{false};
 
 	/**
 	 * Render entity for pushing updates to the renderer. Can be \p nullptr.

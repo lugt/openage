@@ -21,6 +21,8 @@
 #include "gamestate/terrain.h"
 #include "gamestate/terrain_chunk.h"
 #include "gamestate/terrain_factory.h"
+#include "scenario/placement_validator.h"
+#include "scenario/static_occupancy_grid.h"
 #include "log/log.h"
 #include "log/message.h"
 
@@ -133,6 +135,54 @@ void load_mission_pack_into_game_state(
 		throw MissionPackLoadError{"load_mission_pack_into_game_state: terrain_factory is null"};
 	}
 
+	// P4.4B: build the StaticOccupancyGrid + PlacementValidator.
+	// The map extent is derived from the pack's terrain chunks
+	// (the runtime map is not yet attached to state at this
+	// point in the load order; the loader is the one that
+	// builds it). The grid and validator are local to this load
+	// and are not stored on the GameState; the runtime
+	// NavigationGrid (consumed by P4.4C's A*) is constructed
+	// in a follow-up that owns the StaticOccupancyGrid
+	// instance.
+	int map_min_x = 0;
+	int map_min_y = 0;
+	int map_max_x = 0;
+	int map_max_y = 0;
+	bool first_chunk = true;
+	for (const auto &chunk : pack.map.chunks) {
+		const int ox = static_cast<int>(chunk.offset_x);
+		const int oy = static_cast<int>(chunk.offset_y);
+		const int sx = static_cast<int>(chunk.size_x);
+		const int sy = static_cast<int>(chunk.size_y);
+		if (first_chunk) {
+			map_min_x = ox;
+			map_min_y = oy;
+			map_max_x = ox + sx;
+			map_max_y = oy + sy;
+			first_chunk = false;
+		}
+		else {
+			if (ox < map_min_x) map_min_x = ox;
+			if (oy < map_min_y) map_min_y = oy;
+			if (ox + sx > map_max_x) map_max_x = ox + sx;
+			if (oy + sy > map_max_y) map_max_y = oy + sy;
+		}
+	}
+	if (first_chunk) {
+		throw MissionPackLoadError{
+			"load_mission_pack_into_game_state: no terrain chunks"
+		};
+	}
+	auto occ = std::make_shared<openage::gamestate::scenario::StaticOccupancyGrid>(
+		map_min_x, map_min_y, map_max_x, map_max_y);
+	openage::gamestate::scenario::PlacementValidator validator{
+		occ, map_min_x, map_min_y, map_max_x, map_max_y};
+
+	log::log(MSG(info) << "load_mission_pack_into_game_state: placement "
+	                   << "validator ready (map=[" << map_min_x
+	                   << "," << map_max_x << ") x ["
+	                   << map_min_y << "," << map_max_y << "))");
+
 	log::log(MSG(info) << "load_mission_pack_into_game_state: scenario_kind="
 	                   << pack.scenario_kind
 	                   << " fqon=" << pack.scenario_fqon
@@ -232,6 +282,38 @@ void load_mission_pack_into_game_state(
 				static_cast<coord::tile_t>(ep.pos_y),
 			}.to_phys3();
 			entity_pos->set_position(now, pos);
+		}
+
+		// P4.4B: validate the placement and (on accept) occupy
+		// the static grid. The entity's Footprint was mounted
+		// by the factory from the nyan Collision ability; we
+		// set its center here (the factory has the extents
+		// from Collision.hitbox, but the center is unknown
+		// until the placement position is wired).
+		if (entity->has_footprint()) {
+			auto fp = entity->footprint();
+			fp.set_center(static_cast<double>(ep.pos_x),
+			             static_cast<double>(ep.pos_y));
+			entity->set_footprint(fp);
+			openage::gamestate::scenario::PlacementRequest req;
+			req.entity = entity->get_id();
+			req.entity_fqon = ep.entity_definition_fqon;
+			req.scenario_object_id = ep.scenario_object_id;
+			req.center_x = static_cast<double>(ep.pos_x);
+			req.center_y = static_cast<double>(ep.pos_y);
+			req.radius_x = fp.radius_x();
+			req.radius_y = fp.radius_y();
+			req.blocks_placement = fp.blocks_placement();
+			auto pf = validator.validate_and_occupy(req);
+			if (not pf.ok()) {
+				throw MissionPackLoadError{
+					"load_mission_pack_into_game_state: "
+					"placement REJECTED for scenario_object_id="
+					+ ep.scenario_object_id
+					+ " entity_fqon=" + ep.entity_definition_fqon
+					+ " reason=" + pf.reason_string()
+					+ " context=" + pf.context};
+			}
 		}
 
 		// Wire ownership component.

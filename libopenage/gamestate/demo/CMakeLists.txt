@@ -20,6 +20,9 @@ add_sources(libopenage
 	selected_view_demo.cpp
 	selection_events_demo.cpp
 	hud_adapter_demo.cpp
+	footprint_demo.cpp
+	placement_validator_demo.cpp
+	static_occupancy_demo.cpp
 )
 
 pxdgen(
