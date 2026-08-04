@@ -210,6 +210,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		simulation_demo_46(path);
 		break;
 
+	case 47:
+		// Phase P4.4F.1: MovementReservation + narrow passage.
+		simulation_demo_47(path);
+		break;
+
 	default:
 		log::log(MSG(err) << "Unknown renderer demo requested: " << demo_id << ".");
 		break;
