@@ -231,7 +231,7 @@ public:
 	 * (MissionView, future SelectionView) to read the single
 	 * source of truth for objective lifecycle and victory.
 	 */
-	const std::shared_ptr<scenario::trigger::TriggerRuntime> &
+	const std::shared_ptr<::openage::scenario::trigger::TriggerRuntime> &
 	get_trigger_runtime() const {
 		return this->trigger_runtime;
 	}
@@ -398,7 +398,7 @@ private:
 	 * (trigger.evaluate, set_objective_state, activate_trigger,
 	 * declare_victory) on the event loop.
 	 */
-	std::shared_ptr<scenario::trigger::TriggerRuntime> trigger_runtime;
+	std::shared_ptr<::openage::scenario::trigger::TriggerRuntime> trigger_runtime;
 
 	/**
 	 * P4.1/P4.3: handle to the production RemovalEventHandler so we
