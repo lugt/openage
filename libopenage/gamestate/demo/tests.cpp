@@ -215,6 +215,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		simulation_demo_47(path);
 		break;
 
+	case 48:
+		// Phase P4.4F.1: group move via GroupMoveHandler.
+		simulation_demo_48(path);
+		break;
+
 	default:
 		log::log(MSG(err) << "Unknown renderer demo requested: " << demo_id << ".");
 		break;

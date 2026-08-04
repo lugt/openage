@@ -9,6 +9,7 @@ add_sources(libopenage
 	navigation_service.cpp
 	attack_approach.cpp
 	formation_planner.cpp
+	group_move_handler.cpp
 	movement_reservation.cpp
     integrator.cpp
 	path.cpp

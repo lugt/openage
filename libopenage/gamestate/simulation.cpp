@@ -9,12 +9,14 @@
 #include "gamestate/event/attack.h"
 #include "gamestate/event/apply_discrete_effect.h"
 #include "gamestate/event/death.h"
+#include "gamestate/event/movement.h"
 #include "gamestate/event/removal.h"
 #include "gamestate/event/process_command.h"
 #include "gamestate/event/send_command.h"
 #include "gamestate/event/spawn_entity.h"
 #include "gamestate/event/wait.h"
 #include "gamestate/terrain_factory.h"
+#include "pathfinding/group_move_handler.h"
 #include "time/clock.h"
 #include "time/time_loop.h"
 
@@ -215,7 +217,7 @@ bool GameSimulation::initialize() {
 			// the MissionState; is_objective_finished() reads its
 			// victory state.
 			this->trigger_runtime = std::make_shared<
-				scenario::trigger::TriggerRuntime>(
+				::openage::scenario::trigger::TriggerRuntime>(
 				this->event_loop, this->game->get_state());
 			this->trigger_runtime->register_handlers();
 			this->wire_trigger_data(mission_pack_dir);
@@ -393,6 +395,11 @@ void GameSimulation::init_event_handlers() {
 	auto death_handler = std::make_shared<gamestate::event::DeathEventHandler>();
 	this->removal_handler = std::make_shared<gamestate::event::RemovalEventHandler>();
 	auto wait_handler = std::make_shared<gamestate::event::WaitHandler>();
+	auto waypoint_handler = std::make_shared<gamestate::event::WaypointReachedHandler>();
+	auto movement_arrived_handler = std::make_shared<gamestate::event::MovementArrivedHandler>();
+	auto group_move_handler = std::make_shared<
+		openage::gamestate::event::GroupMoveHandler>(
+			std::shared_ptr<openage::gamestate::GameSimulation>{});
 	this->event_loop->add_event_handler(drag_select_handler);
 	this->event_loop->add_event_handler(spawn_handler);
 	this->event_loop->add_event_handler(command_handler);
@@ -402,6 +409,9 @@ void GameSimulation::init_event_handlers() {
 	this->event_loop->add_event_handler(death_handler);
 	this->event_loop->add_event_handler(this->removal_handler);
 	this->event_loop->add_event_handler(wait_handler);
+	this->event_loop->add_event_handler(waypoint_handler);
+	this->event_loop->add_event_handler(movement_arrived_handler);
+	this->event_loop->add_event_handler(group_move_handler);
 }
 
 void GameSimulation::wire_trigger_data(const std::string &mission_pack_dir) {
