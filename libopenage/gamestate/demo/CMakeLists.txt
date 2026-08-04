@@ -26,6 +26,8 @@ add_sources(libopenage
 	footprint_contract_demo.cpp
 	semantic_action_demo.cpp
 	context_action_demo.cpp
+	attack_approach_demo.cpp
+	pointer_combat_demo.cpp
 	grid_astar_demo.cpp
 	mover_clearance_demo.cpp
 	waypoint_movement_demo.cpp

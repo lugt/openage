@@ -19,6 +19,8 @@ namespace openage::gamestate::tests {
  * Demo 32 - P4.4C Mission 1 TC obstacle routing.
  * Demo 35 - P4.4D ContextActionResolver contract.
  * Demo 36 - P4.4D windowed-style move routing.
+ * Demo 37 - P4.4D.1 AttackApproach service contract.
+ * Demo 38 - P4.4D.1 pointer-driven Mission 1 combat lifecycle.
  */
 void simulation_demo_25(const util::Path &path);
 void simulation_demo_26(const util::Path &path);
@@ -30,6 +32,8 @@ void simulation_demo_31(const util::Path &path);
 void simulation_demo_32(const util::Path &path);
 void simulation_demo_35(const util::Path &path);
 void simulation_demo_36(const util::Path &path);
+void simulation_demo_37(const util::Path &path);
+void simulation_demo_38(const util::Path &path);
 
 
 } // namespace openage::gamestate::tests

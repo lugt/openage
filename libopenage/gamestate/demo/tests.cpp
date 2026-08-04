@@ -194,6 +194,16 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		simulation_demo_36(path);
 		break;
 
+	case 37:
+		// Phase P4.4D.1: AttackApproach service contract.
+		simulation_demo_37(path);
+		break;
+
+	case 38:
+		// Phase P4.4D.1: pointer-driven Mission 1 combat lifecycle.
+		simulation_demo_38(path);
+		break;
+
 	default:
 		log::log(MSG(err) << "Unknown renderer demo requested: " << demo_id << ".");
 		break;
