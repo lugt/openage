@@ -10,6 +10,7 @@ add_sources(libopenage
 	mission_pack_loader.cpp
 	placement_validator.cpp
 	static_occupancy_grid.cpp
+	dynamic_occupancy.cpp
 )
 
 add_subdirectory("trigger")
