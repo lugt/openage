@@ -38,10 +38,14 @@ void HudQmlAdapter::attach(
 		&sim, [](auto *) {});
 
 	model.subscribe_selection_changed(
-		[this](std::optional<openage::gamestate::entity_id_t> new_id,
-		       std::optional<openage::gamestate::entity_id_t> /*old*/) {
-			if (new_id.has_value()) this->sel_id_ = *new_id;
-			else this->sel_id_ = -1;
+		[this](openage::presenter::viewmodel::SelectionSnapshot new_snap,
+		       openage::presenter::viewmodel::SelectionSnapshot /*old*/) {
+			if (new_snap.primary.has_value()) {
+				this->sel_id_ = *new_snap.primary;
+			}
+			else {
+				this->sel_id_ = -1;
+			}
 			this->refresh_selection();
 			emit this->selected_changed();
 		});

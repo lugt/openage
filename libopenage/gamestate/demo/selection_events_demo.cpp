@@ -104,10 +104,11 @@ void simulation_demo_23(const util::Path &path) {
 
 	presenter::viewmodel::SelectionModel model{simulation};
 	model.subscribe_selection_changed(
-		[&](std::optional<entity_id_t> n, std::optional<entity_id_t> o) {
+		[&](presenter::viewmodel::SelectionSnapshot n,
+		    presenter::viewmodel::SelectionSnapshot o) {
 			sel_changes += 1;
-			last_sel_new = n;
-			last_sel_old = o;
+			last_sel_new = n.primary;
+			last_sel_old = o.primary;
 		});
 	model.subscribe_health_changed(
 		[&](entity_id_t id, int64_t v) {

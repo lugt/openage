@@ -17,29 +17,72 @@
 
 #include <nyan/nyan.h>
 
+#include <algorithm>
+
 
 namespace openage::presenter::viewmodel {
+
+
+namespace {
+
+
+// Sort + dedup a vector of entity ids. Stable for the
+// multi-selection contract: the resulting vector is in
+// strictly ascending order, with duplicates removed.
+std::vector<openage::gamestate::entity_id_t>
+sort_dedup(std::vector<openage::gamestate::entity_id_t> v) {
+	std::sort(v.begin(), v.end());
+	v.erase(std::unique(v.begin(), v.end()), v.end());
+	return v;
+}
+
+
+}  // namespace
 
 
 SelectionModel::SelectionModel(
 	const std::shared_ptr<openage::gamestate::GameSimulation> &sim) :
 	sim_{sim} {
 
-	// Wire the removal observer on the production RemovalEventHandler.
-	// On every removal, fire EntityRemoved; if the removed entity is
-	// the current selection, clear the selection and emit
-	// SelectionChanged (new=nullopt) BEFORE the EntityRemoved event
-	// so the HUD can null-out the panel before reporting the death.
+	// Wire the removal observer. On every removal, drop
+	// the entity from the selection; if it was primary,
+	// promote the lowest-id remaining; if the selection is
+	// now empty, fire SelectionChanged with empty snapshot.
 	if (this->sim_) {
 		this->sim_->add_removal_observer(
 			[this](openage::gamestate::entity_id_t removed_id) {
-				bool was_selected = this->selected_.has_value()
-					&& *this->selected_ == removed_id;
-				if (was_selected) {
-					auto old = this->selected_;
-					this->selected_.reset();
+				auto it = std::find(
+					this->selected_.begin(),
+					this->selected_.end(),
+					removed_id);
+				if (it == this->selected_.end()) {
+					for (auto &cb : this->rm_cbs_) {
+						cb(removed_id);
+					}
+					return;
+				}
+				// Capture old snapshot BEFORE mutation so
+				// the SelectionChanged callback sees the
+				// pre-removal state.
+				SelectionSnapshot prev{
+					this->selected_, this->primary_};
+				this->selected_.erase(it);
+				if (this->primary_ == removed_id) {
+					if (this->selected_.empty()) {
+						this->primary_.reset();
+					}
+					else {
+						// Lowest-id remaining; vector is
+						// sorted, so front is min.
+						this->primary_ = this->selected_.front();
+					}
+				}
+				SelectionSnapshot next{
+					this->selected_, this->primary_};
+				if (prev.entities != next.entities
+				    or prev.primary != next.primary) {
 					for (auto &cb : this->sel_cbs_) {
-						cb(std::nullopt, old);
+						cb(next, prev);
 					}
 				}
 				for (auto &cb : this->rm_cbs_) {
@@ -62,30 +105,26 @@ SelectionModel::SelectionModel(
 SelectionModel::~SelectionModel() = default;
 
 
-void SelectionModel::set_selected(
-	std::optional<openage::gamestate::entity_id_t> entity_id) {
-
-	auto old = this->selected_;
-	if (old == entity_id) {
-		return;
+void SelectionModel::replace_selection(
+	std::vector<openage::gamestate::entity_id_t> new_selected,
+	std::optional<openage::gamestate::entity_id_t> new_primary) {
+	SelectionSnapshot prev{this->selected_, this->primary_};
+	this->selected_ = std::move(new_selected);
+	this->primary_ = new_primary;
+	SelectionSnapshot next{this->selected_, this->primary_};
+	if (prev.entities != next.entities or prev.primary != next.primary) {
+		for (auto &cb : this->sel_cbs_) {
+			cb(next, prev);
+		}
 	}
-	this->selected_ = entity_id;
-
-	// Emit SelectionChanged.
-	for (auto &cb : this->sel_cbs_) {
-		cb(entity_id, old);
-	}
-
-	// Re-wire the HealthChanged callback for the newly selected
-	// entity. We register a fresh callback on each set_selected;
-	// the previous Live instance is left alone (callbacks fire
-	// only on set_attribute, and the previous entity is no
-	// longer selected so no HUD will see its events). When
-	// selection clears (nullopt), we don't register anything.
-	if (entity_id.has_value() && this->sim_) {
+	// Re-wire the health callback for the new primary. We
+	// don't unsubscribe the old one (the callback lives on
+	// the previous Live instance; it cannot fire because
+	// the previous entity is no longer the primary).
+	if (new_primary.has_value() && this->sim_) {
 		auto state = this->sim_->get_game()->get_state();
 		if (state) {
-			auto entity = state->get_game_entity(*entity_id);
+			auto entity = state->get_game_entity(*new_primary);
 			if (entity) {
 				this->wire_health_callback(entity);
 			}
@@ -94,12 +133,90 @@ void SelectionModel::set_selected(
 }
 
 
+void SelectionModel::set_selected(
+	std::optional<openage::gamestate::entity_id_t> entity_id) {
+	std::vector<openage::gamestate::entity_id_t> new_selected;
+	if (entity_id.has_value()) {
+		new_selected.push_back(*entity_id);
+	}
+	this->replace_selection(
+		std::move(new_selected), entity_id);
+}
+
+
+void SelectionModel::set_multi_selection(
+	const std::vector<openage::gamestate::entity_id_t> &ids) {
+	auto sorted = sort_dedup(ids);
+	std::optional<openage::gamestate::entity_id_t> primary;
+	if (not sorted.empty()) {
+		primary = sorted.front();
+	}
+	this->replace_selection(std::move(sorted), primary);
+}
+
+
+void SelectionModel::add_to_selection(
+	openage::gamestate::entity_id_t entity_id) {
+	if (this->sim_) {
+		auto state = this->sim_->get_game()->get_state();
+		if (not state or not state->has_game_entity(entity_id)) {
+			return;
+		}
+	}
+	auto it = std::find(
+		this->selected_.begin(), this->selected_.end(),
+		entity_id);
+	if (it != this->selected_.end()) {
+		// Already selected: promote to primary (FIFO
+		// "most-recent").
+		SelectionSnapshot prev{this->selected_, this->primary_};
+		this->primary_ = entity_id;
+		SelectionSnapshot next{this->selected_, this->primary_};
+		for (auto &cb : this->sel_cbs_) {
+			cb(next, prev);
+		}
+		return;
+	}
+	SelectionSnapshot prev{this->selected_, this->primary_};
+	this->selected_.push_back(entity_id);
+	std::sort(this->selected_.begin(), this->selected_.end());
+	this->primary_ = entity_id;
+	SelectionSnapshot next{this->selected_, this->primary_};
+	for (auto &cb : this->sel_cbs_) {
+		cb(next, prev);
+	}
+}
+
+
+void SelectionModel::remove_from_selection(
+	openage::gamestate::entity_id_t entity_id) {
+	auto it = std::find(
+		this->selected_.begin(), this->selected_.end(),
+		entity_id);
+	if (it == this->selected_.end()) {
+		return;
+	}
+	SelectionSnapshot prev{this->selected_, this->primary_};
+	this->selected_.erase(it);
+	if (this->primary_ == entity_id) {
+		if (this->selected_.empty()) {
+			this->primary_.reset();
+		}
+		else {
+			this->primary_ = this->selected_.front();
+		}
+	}
+	SelectionSnapshot next{this->selected_, this->primary_};
+	for (auto &cb : this->sel_cbs_) {
+		cb(next, prev);
+	}
+}
+
+
 void SelectionModel::wire_health_callback(
 	const std::shared_ptr<openage::gamestate::GameEntity> &entity) {
 
-	// Find the Health attribute FQON via the Attack component (the
-	// attribute the AttackSystem damages). Fall back to a no-op
-	// wiring for entities with no Attack component.
+	// Find the Health attribute FQON via the Attack component.
 	nyan::fqon_t health_fqon;
 	auto attack = std::dynamic_pointer_cast<
 		openage::gamestate::component::Attack>(
