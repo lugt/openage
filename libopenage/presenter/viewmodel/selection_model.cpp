@@ -105,6 +105,21 @@ SelectionModel::SelectionModel(
 SelectionModel::~SelectionModel() = default;
 
 
+std::shared_ptr<openage::gamestate::GameSimulation>
+SelectionModel::get_simulation() const {
+	return this->sim_;
+}
+
+
+std::shared_ptr<openage::gamestate::GameState>
+SelectionModel::get_state() const {
+	if (not this->sim_) return nullptr;
+	auto g = this->sim_->get_game();
+	if (not g) return nullptr;
+	return g->get_state();
+}
+
+
 void SelectionModel::replace_selection(
 	std::vector<openage::gamestate::entity_id_t> new_selected,
 	std::optional<openage::gamestate::entity_id_t> new_primary) {

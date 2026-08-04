@@ -163,6 +163,17 @@ public:
 		this->set_selected(std::nullopt);
 	}
 
+	/**
+	 * Read-only accessors used by SelectionOverlay and
+	 * other presentation layers that need to look up
+	 * ownership / footprints for the currently-selected
+	 * entities.
+	 */
+	std::shared_ptr<openage::gamestate::GameSimulation>
+	get_simulation() const;
+	std::shared_ptr<openage::gamestate::GameState>
+	get_state() const;
+
 	// Subscribe API.
 	void subscribe_selection_changed(SelectionChangedCallback cb) {
 		this->sel_cbs_.push_back(std::move(cb));
