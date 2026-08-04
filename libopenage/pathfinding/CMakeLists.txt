@@ -3,8 +3,11 @@ add_sources(libopenage
 	definitions.cpp
 	field_cache.cpp
     flow_field.cpp
+	grid_astar.cpp
 	grid.cpp
 	integration_field.cpp
+	navigation_service.cpp
+	attack_approach.cpp
     integrator.cpp
 	path.cpp
 	pathfinder.cpp
