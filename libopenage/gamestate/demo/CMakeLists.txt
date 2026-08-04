@@ -28,6 +28,7 @@ add_sources(libopenage
 	context_action_demo.cpp
 	attack_approach_demo.cpp
 	pointer_combat_demo.cpp
+	formation_demo.cpp
 	grid_astar_demo.cpp
 	mover_clearance_demo.cpp
 	waypoint_movement_demo.cpp

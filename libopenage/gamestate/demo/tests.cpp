@@ -204,6 +204,12 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		simulation_demo_38(path);
 		break;
 
+	case 46:
+		// Phase P4.4D.2 + P4.4F: multi-unit formation +
+		// dynamic occupancy.
+		simulation_demo_46(path);
+		break;
+
 	default:
 		log::log(MSG(err) << "Unknown renderer demo requested: " << demo_id << ".");
 		break;
