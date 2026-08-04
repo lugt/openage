@@ -23,6 +23,13 @@ add_sources(libopenage
 	footprint_demo.cpp
 	placement_validator_demo.cpp
 	static_occupancy_demo.cpp
+	footprint_contract_demo.cpp
+	semantic_action_demo.cpp
+	context_action_demo.cpp
+	grid_astar_demo.cpp
+	mover_clearance_demo.cpp
+	waypoint_movement_demo.cpp
+	tc_obstacle_routing_demo.cpp
 )
 
 pxdgen(

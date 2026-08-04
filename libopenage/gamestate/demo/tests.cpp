@@ -159,6 +159,41 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		simulation_demo_27(path);
 		break;
 
+	case 28:
+		// Phase P4.4C: required/optional Footprint contract.
+		simulation_demo_28(path);
+		break;
+
+	case 29:
+		// Phase P4.4C: GridAStarPathfinder contract.
+		simulation_demo_29(path);
+		break;
+
+	case 30:
+		// Phase P4.4C: mover footprint clearance.
+		simulation_demo_30(path);
+		break;
+
+	case 31:
+		// Phase P4.4C: segmented movement + waypoint events.
+		simulation_demo_31(path);
+		break;
+
+	case 32:
+		// Phase P4.4C: Mission 1 TC obstacle routing.
+		simulation_demo_32(path);
+		break;
+
+	case 35:
+		// Phase P4.4D: ContextActionResolver contract.
+		simulation_demo_35(path);
+		break;
+
+	case 36:
+		// Phase P4.4D: windowed-style move routing.
+		simulation_demo_36(path);
+		break;
+
 	default:
 		log::log(MSG(err) << "Unknown renderer demo requested: " << demo_id << ".");
 		break;
