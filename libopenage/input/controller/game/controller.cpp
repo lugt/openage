@@ -1,4 +1,19 @@
 // Copyright 2021-2023 the openage authors. See copying.md for legal info.
+//
+// P4.4D: Right-click binding now goes through
+// input::resolve_context_action (semantic action resolver). The
+// resolver sees a SelectionSnapshot (built from the controller's
+// current selection) and a PickResult (entity at the pointer's
+// world coord, or empty ground), and returns one of:
+//   - MOVE   -> send MoveCommand to the selection
+//   - ATTACK -> send AttackCommand to the picked hostile entity
+//   - REJECTED / UNSUPPORTED / NO_OP -> no command (logged)
+//
+// The resolver is a pure function; this binding is the only
+// place that knows the difference between MoveCommand and
+// AttackCommand. The Move / Attack runtime (system/move.cpp,
+// event/attack.cpp) does NOT branch on FQON or display name;
+// they branch on command_t::MOVE vs command_t::ATTACK.
 
 #include "controller.h"
 
@@ -7,13 +22,19 @@
 #include "event/event_loop.h"
 #include "event/evententity.h"
 #include "event/state.h"
+#include "gamestate/component/api/attack.h"
+#include "gamestate/component/api/move.h"
 #include "gamestate/component/internal/commands/types.h"
+#include "gamestate/component/internal/ownership.h"
+#include "gamestate/component/internal/position.h"
+#include "gamestate/component/types.h"
 #include "gamestate/event/send_command.h"
 #include "gamestate/event/spawn_entity.h"
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
 #include "gamestate/simulation.h"
 #include "input/controller/game/binding_context.h"
+#include "input/semantic_action.h"
 #include "time/clock.h"
 #include "time/time_loop.h"
 
