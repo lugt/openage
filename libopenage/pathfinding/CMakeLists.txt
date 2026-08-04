@@ -8,6 +8,7 @@ add_sources(libopenage
 	integration_field.cpp
 	navigation_service.cpp
 	attack_approach.cpp
+	formation_planner.cpp
     integrator.cpp
 	path.cpp
 	pathfinder.cpp
