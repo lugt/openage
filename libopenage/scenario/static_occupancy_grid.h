@@ -57,6 +57,16 @@ struct CellPosition {
 	bool operator==(const CellPosition &o) const {
 		return x == o.x && y == o.y;
 	}
+	bool operator!=(const CellPosition &o) const {
+		return not(*this == o);
+	}
+	bool operator<(const CellPosition &o) const {
+		// Lexicographic order: P4.4C deterministic A* uses
+		// std::map / std::set on CellPosition, so this
+		// comparison defines the iteration sequence.
+		if (x != o.x) return x < o.x;
+		return y < o.y;
+	}
 };
 
 

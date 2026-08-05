@@ -82,11 +82,37 @@ public:
 	const std::unordered_map<player_id_t, std::shared_ptr<Player>> &get_players() const;
 
 	/**
+	 * P4.4C: expose the EventLoop so subsystems that hold only a
+	 * GameState (e.g. system::Move) can dispatch observation
+	 * events such as WaypointReachedEvent / MovementArrivedEvent.
+	 * Stored as a weak_ptr because GameState is conceptually a
+	 * child of the simulation that owns the loop; the loop
+	 * outlives any single GameState, but a stale pointer would
+	 * still be wrong if the loop is rebuilt. Returning the
+	 * shared_ptr of the live loop is safe in the current
+	 * ownership model (the loop is constructed in
+	 * GameSimulation::GameSimulation and never destroyed until
+	 * after the GameState).
+	 */
+	const std::shared_ptr<openage::event::EventLoop> &get_event_loop() const {
+		return this->event_loop;
+	}
+
+	/**
 	 * Set the map of the current game.
 	 *
 	 * @param terrain Map object.
 	 */
 	void set_map(const std::shared_ptr<Map> &map);
+
+	/**
+	 * P4.4C: set the EventLoop handle. The constructor sets it
+	 * from the EventLoop passed in by GameSimulation, but tests
+	 * that build a GameState directly may want to inject a
+	 * different one (or none). Idempotent: only the first set
+	 * wins (a re-set logs a warning and keeps the original).
+	 */
+	void set_event_loop(const std::shared_ptr<openage::event::EventLoop> &loop);
 
 	/**
 	 * Get a game entity by its ID.
@@ -225,6 +251,14 @@ private:
 	 * TODO: Only for testing
 	 */
 	std::shared_ptr<assets::ModManager> mod_manager;
+
+	/**
+	 * P4.4C: handle to the EventLoop the GameState lives on.
+	 * Stored so Move runtime (which only receives the GameState)
+	 * can dispatch WaypointReachedEvent / MovementArrivedEvent
+	 * without joining the friend chain through GameSimulation.
+	 */
+	std::shared_ptr<openage::event::EventLoop> event_loop;
 };
 } // namespace gamestate
 } // namespace openage

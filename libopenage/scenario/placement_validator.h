@@ -1,29 +1,36 @@
 // Copyright 2026 the openage authors. See copying.md for legal info.
 //
-// P4.4B: PlacementValidator.
+// P4.4B.1 §2: PlacementValidator -- pure AABB overlap, decoupled
+// from the static occupancy grid.
 //
-// Validates a requested entity placement against the map extent,
-// terrain passability, the static occupancy grid, and the set of
-// already-accepted placements. Production policy is FAIL LOUD:
-// an invalid placement produces a PlacementFailure with the
-// blocker identified and a context message; the loader does not
-// silently relocate.
+// The validator's job is placement-time overlap checking, not
+// runtime pathfinding walkability. It maintains its own list of
+// accepted (entity, bounds, is_static) records and rejects any new
+// placement whose bounds overlap a previously-accepted one
+// (STATIC_OBSTACLE if the blocker is static, ENTITY_OVERLAP
+// otherwise). The static occupancy grid (StaticOccupancyGrid) is
+// a separate concern owned by the loader / runtime pathfinder
+// (P4.4C) and is occupied separately, only for entities that are
+// is_static && blocks_pathfinding. Moving units do NOT enter the
+// static grid.
 //
-// The validator is intentionally decoupled from the loader so it
-// can be exercised in isolation (demo 26) and so future debug
-// modes can add a find_nearest_valid_position policy on top.
+// Production policy is FAIL LOUD: an invalid placement produces a
+// PlacementFailure with reason, blocking entity id, bounds, and
+// context (FQON, ScenarioObjectId). The debug relocate policy
+// (find_nearest_valid) is stable + bounded; production must not
+// call it.
 
 #pragma once
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "gamestate/component/api/footprint.h"
 #include "gamestate/types.h"
-#include "scenario/static_occupancy_grid.h"
 
 
 namespace openage::gamestate::scenario {
@@ -31,11 +38,11 @@ namespace openage::gamestate::scenario {
 
 enum class PlacementFailureReason : uint8_t {
 	OK = 0,
-	OUT_OF_MAP,         // footprint extends beyond the map extent
-	UNWALKABLE_TERRAIN,  // footprint overlaps non-walkable terrain
-	STATIC_OBSTACLE,     // footprint overlaps an already-occupied cell
-	ENTITY_OVERLAP,      // footprint overlaps a previously-accepted placement
-	INVALID_FOOTPRINT,   // half-extents non-finite / non-positive
+	OUT_OF_MAP,
+	UNWALKABLE_TERRAIN,
+	STATIC_OBSTACLE,
+	ENTITY_OVERLAP,
+	INVALID_FOOTPRINT,
 };
 
 
@@ -61,11 +68,6 @@ struct PlacementFailure {
 };
 
 
-/**
- * The placement request. center is in tile units (1 tile = 1
- * cell). The footprint's center is the entity's anchor; bounds
- * are derived from (center, radius_x, radius_y).
- */
 struct PlacementRequest {
 	entity_id_t entity{0};
 	std::string entity_fqon;
@@ -75,54 +77,50 @@ struct PlacementRequest {
 	double radius_x{0.0};
 	double radius_y{0.0};
 	bool blocks_placement{false};
-	// For tests/debug: the validator can skip the
-	// ENTITY_OVERLAP / STATIC_OBSTACLE checks if the caller has
-	// already registered the placement elsewhere. Default false.
-	bool skip_overlap_check{false};
+	bool is_static{false};
 };
 
 
 class PlacementValidator {
 public:
-	PlacementValidator(
-		const std::shared_ptr<StaticOccupancyGrid> &occupancy,
-		int map_min_x, int map_min_y, int map_max_x, int map_max_y);
+	PlacementValidator(int map_min_x, int map_min_y,
+	                  int map_max_x, int map_max_y);
 
 	/**
-	 * Validate a placement request. The validator does NOT
-	 * occupy the grid on accept (the caller calls
-	 * StaticOccupancyGrid::occupy after a successful validate).
-	 * On reject, the placement is left untouched.
+	 * Validate a placement request against the map extent, the
+	 * INVALID_FOOTPRINT contract, and the AABB overlap with
+	 * every previously-accepted placement. On OK, the
+	 * placement is recorded in the internal accepted list so
+	 * subsequent placements see it. The validator does NOT
+	 * touch the StaticOccupancyGrid; the loader does that
+	 * separately (only for is_static && blocks_placement).
 	 */
-	PlacementFailure validate(const PlacementRequest &req) const;
+	PlacementFailure validate(const PlacementRequest &req);
 
 	/**
-	 * Production convenience: validate and (on success) occupy.
-	 * On failure, the occupancy grid is unchanged. The caller
-	 * receives a PlacementFailure whose context includes the
-	 * ScenarioObjectId and entity FQON.
+	 * Drop every accepted placement owned by `entity` from the
+	 * validator's accepted list. Used when an entity is
+	 * removed (e.g. by the loader re-spawning after a
+	 * retry). Does not touch the static grid; the grid's
+	 * release() is a separate call.
 	 */
-	PlacementFailure validate_and_occupy(const PlacementRequest &req);
+	void forget(entity_id_t entity);
 
-	/**
-	 * Stable nearest-valid search for debug fixtures ONLY. The
-	 * search is deterministic (scans the bounding box of the
-	 * request in a fixed order: row-major, starting from the
-	 * closest cell to the requested center). Returns the
-	 * accepted center on success, nullopt if no cell within
-	 * max_radius_tiles passes validation.
-	 *
-	 * Production must NOT call this. It is gated behind a
-	 * debug policy in the loader; the Mission Pack default is
-	 * fail-loud.
-	 */
-	std::optional<std::pair<double, double>> find_nearest_valid(
-		const PlacementRequest &req,
-		double max_radius_tiles) const;
+	std::optional<std::pair<double, double>>
+	find_nearest_valid(const PlacementRequest &req,
+	                   double max_radius_tiles) const;
+
+	size_t accepted_count() const { return this->accepted_.size(); }
 
 private:
-	std::shared_ptr<StaticOccupancyGrid> occ_;
+	struct Accepted {
+		entity_id_t entity;
+		openage::gamestate::component::FootprintBounds bounds;
+		bool is_static;
+	};
+
 	int min_x_, min_y_, max_x_, max_y_;
+	std::vector<Accepted> accepted_;
 };
 
 

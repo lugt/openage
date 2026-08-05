@@ -16,7 +16,18 @@ namespace openage::gamestate {
 GameState::GameState(const std::shared_ptr<nyan::Database> &db,
                      const std::shared_ptr<openage::event::EventLoop> &event_loop) :
 	event::State{event_loop},
-	db_view{db->new_view()} {
+	db_view{db->new_view()},
+	event_loop{event_loop} {
+}
+
+
+void GameState::set_event_loop(const std::shared_ptr<openage::event::EventLoop> &loop) {
+	if (this->event_loop && this->event_loop != loop) {
+		log::log(MSG(warn) << "GameState::set_event_loop: replacing existing loop "
+		                   << "handle (P4.4C observability hook); new loop will "
+		                   << "receive future dispatch requests");
+	}
+	this->event_loop = loop;
 }
 
 const std::shared_ptr<nyan::View> &GameState::get_db_view() {

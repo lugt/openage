@@ -176,7 +176,14 @@ void load_mission_pack_into_game_state(
 	auto occ = std::make_shared<openage::gamestate::scenario::StaticOccupancyGrid>(
 		map_min_x, map_min_y, map_max_x, map_max_y);
 	openage::gamestate::scenario::PlacementValidator validator{
-		occ, map_min_x, map_min_y, map_max_x, map_max_y};
+		map_min_x, map_min_y, map_max_x, map_max_y};
+
+	// P4.4C: the list of static obstacle FootprintBounds to feed
+	// to the NavigationService. Accumulated in the placement loop
+	// below so we don't have to re-derive each building's bounds
+	// from the StaticOccupancyGrid (which only knows cell ids).
+	std::vector<openage::gamestate::component::FootprintBounds>
+		static_obstacles;
 
 	log::log(MSG(info) << "load_mission_pack_into_game_state: placement "
 	                   << "validator ready (map=[" << map_min_x
@@ -284,12 +291,15 @@ void load_mission_pack_into_game_state(
 			entity_pos->set_position(now, pos);
 		}
 
-		// P4.4B: validate the placement and (on accept) occupy
-		// the static grid. The entity's Footprint was mounted
-		// by the factory from the nyan Collision ability; we
-		// set its center here (the factory has the extents
-		// from Collision.hitbox, but the center is unknown
-		// until the placement position is wired).
+		// P4.4B.1: validate the placement (pure AABB overlap
+		// against the validator's accepted list) and, if the
+		// entity is a static building, register it in the
+		// StaticOccupancyGrid. Moving units (Villager, Enemy)
+		// are validated for AABB overlap but NOT written to
+		// the static grid -- their own tile stays walkable
+		// for the pathfinder. The entity's Footprint was
+		// mounted by the factory from the nyan Collision
+		// ability; we set its center here.
 		if (entity->has_footprint()) {
 			auto fp = entity->footprint();
 			fp.set_center(static_cast<double>(ep.pos_x),
@@ -304,7 +314,20 @@ void load_mission_pack_into_game_state(
 			req.radius_x = fp.radius_x();
 			req.radius_y = fp.radius_y();
 			req.blocks_placement = fp.blocks_placement();
-			auto pf = validator.validate_and_occupy(req);
+			// Per spec §VIII, units are dynamic (not static).
+			// Buildings are static. The default in the
+			// factory is is_static=false; the loader
+			// classifies a static-occupying entity by
+			// blocks_pathfinding + a future Mission Pack
+			// override flag. For the P4.4B MVP, the
+			// TownCenter is the only static entity; we
+			// detect it by fqon (TownCenter is in the
+			// entity_definition_fqon). The pathfinder
+			// never sees Villager/Enemy as a static
+			// obstacle.
+			req.is_static = (ep.entity_definition_fqon.find(
+				"town_center") != std::string::npos);
+			auto pf = validator.validate(req);
 			if (not pf.ok()) {
 				throw MissionPackLoadError{
 					"load_mission_pack_into_game_state: "
@@ -313,6 +336,22 @@ void load_mission_pack_into_game_state(
 					+ " entity_fqon=" + ep.entity_definition_fqon
 					+ " reason=" + pf.reason_string()
 					+ " context=" + pf.context};
+			}
+			// Static occupancy: only static+blocks_pathfinding
+			// entities write to the grid. Units (Villager,
+			// Enemy) do NOT permanently block any cell.
+			if (req.is_static && fp.blocks_pathfinding()) {
+				auto conflict = occ->occupy(req.entity, pf.requested_bounds);
+				if (conflict.has_value()) {
+					throw MissionPackLoadError{
+						"load_mission_pack_into_game_state: "
+						"static occupy conflict for entity "
+						+ std::to_string(req.entity)
+						+ " blocker=" + std::to_string(*conflict)};
+				}
+				// P4.4C: record the bounds for the NavigationService
+				// so the A* can inflate them per-mover.
+				static_obstacles.push_back(pf.requested_bounds);
 			}
 		}
 
@@ -359,6 +398,25 @@ void load_mission_pack_into_game_state(
 		                   << " (short=" << ep.scenario_object_id << ")"
 		                   << " entity_id=" << entity->get_id()
 		                   << " entity_fqon=" << ep.entity_definition_fqon);
+	}
+
+	// P4.4C: build the deterministic NavigationService now that
+	// StaticOccupancyGrid + placements are settled. The
+	// TerrainNavigationGrid composes the StaticOccupancyGrid and
+	// the Terrain into the walkability view that the A* queries.
+	// The static obstacle list is the FootprintBounds we recorded
+	// in the placement loop above; the loader is the single
+	// source of truth for which placements blocked which cells.
+	{
+		auto nav_grid = std::make_shared<
+			openage::gamestate::scenario::TerrainNavigationGrid>(
+				occ, map->get_terrain());
+		map->set_navigation_service(nav_grid,
+			std::move(static_obstacles));
+		log::log(MSG(info) << "load_mission_pack_into_game_state: "
+		                   << "NavigationService ready (static_obstacles="
+		                   << map->get_navigation_service()->static_obstacle_count()
+		                   << ")");
 	}
 
 	// 6. Areas (definitions only; dependency watchers are P4 work).

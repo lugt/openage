@@ -348,61 +348,60 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 			// calculator.
 		}
 		else if (ability_parent == "engine.ability.type.Collision") {
-			// P4.4B: read the gameplay footprint from the
-			// nyan Collision.hitbox (radius_x, radius_y) and
-			// mount a Footprint component. 1 world unit = 1
-			// tile (openage tile coord system, FixedPoint(16)
-			// with 65536 phys per tile), so the radius is
-			// already in tile units. The Footprint's center
-			// is set by the mission_pack_loader once the
-			// entity's Position is wired (the factory adds
-			// the component before Position is set, so the
-			// center is unknown at this point).
-			//
-			// The nyan read is defensive: if the path is
-			// missing or non-finite, the entity gets no
-			// Footprint component (a unit without collision
-			// is a legal case per the P4.4B spec). A later
-			// PlacementValidator call with blocks_placement
-			// on such an entity produces INVALID_FOOTPRINT
-			// or ENTITY_OVERLAP diagnostics.
+			// P4.4B.1 §1: REQUIRED Footprint. The entity
+			// declares the Collision ability, so a valid
+			// gameplay Footprint is required. A missing or
+			// malformed hitbox throws with full context
+			// (entity FQON + ability + source + values).
+			// TownCenter and Villager both have valid
+			// hitboxes in de2_base; non-collision entities
+			// (e.g., ambience) never reach this branch.
+			double rx = 0.0;
+			double ry = 0.0;
+			std::string hitbox_fqon;
 			try {
-				// Collision.hitbox references a Hitbox object
-				// (VillagerHitbox, TownCenterHitbox, ...).
+				// Collision.hitbox references a Hitbox
+				// object (VillagerHitbox, TownCenterHitbox, ...).
 				// ObjectValue only stores the fqon; resolve
 				// it via the db view to get a nyan::Object
 				// that exposes get_float on Hitbox.radius_x/y.
 				auto hitbox_val = ability_obj.get<nyan::ObjectValue>(
 					"Collision.hitbox");
-				auto hitbox_obj = owner_db_view->get_object(
-					hitbox_val->get_name());
-				double rx = hitbox_obj.get_float("Hitbox.radius_x");
-				double ry = hitbox_obj.get_float("Hitbox.radius_y");
-				if (std::isfinite(rx) && std::isfinite(ry)
-				    && rx >= 0.0 && ry >= 0.0) {
-					// Build the Footprint (plain data;
-					// Footprint is NOT a Component).
-					// blocks_* defaults: a Collision-
-					// having entity blocks placement
-					// and pathfinding; the loader
-					// upgrades static buildings
-					// via Mission Pack override.
-					auto fp = component::Footprint::make_rectangle(
-						rx, ry,
-						/*blocks_placement=*/true,
-						/*blocks_pathfinding=*/true,
-						/*is_static=*/false);
-					entity->set_footprint(fp);
-				}
+				hitbox_fqon = hitbox_val->get_name();
+				auto hitbox_obj = owner_db_view->get_object(hitbox_fqon);
+				rx = hitbox_obj.get_float("Hitbox.radius_x");
+				ry = hitbox_obj.get_float("Hitbox.radius_y");
 			}
 			catch (const std::exception &e) {
-				// No Collision.hitbox or non-finite
-				// values. The entity remains
-				// footprintless; the loader can
-				// decide whether the entity is
-				// required to have one.
-				(void)e;
+				throw std::runtime_error{
+					"EntityFactory: REQUIRED Footprint parse "
+					"failed for entity=" + std::string{nyan_entity}
+					+ " ability=Collision member=Collision.hitbox"
+					+ " source=" + hitbox_fqon
+					+ " error=" + e.what()};
 			}
+			if (!std::isfinite(rx) || !std::isfinite(ry)
+			    || rx < 0.0 || ry < 0.0) {
+				throw std::runtime_error{
+					"EntityFactory: REQUIRED Footprint invalid "
+					"for entity=" + std::string{nyan_entity}
+					+ " ability=Collision member=Collision.hitbox"
+					+ " source=" + hitbox_fqon
+					+ " width=" + std::to_string(rx * 2.0)
+					+ " height=" + std::to_string(ry * 2.0)};
+			}
+			// 1 world unit = 1 tile (FixedPoint(16) with
+			// 65536 phys per tile), so the radius is
+			// already in tile units. blocks_* defaults: a
+			// Collision-having entity blocks placement
+			// and pathfinding; the loader upgrades static
+			// buildings via Mission Pack override.
+			auto fp = component::Footprint::make_rectangle(
+				rx, ry,
+				/*blocks_placement=*/true,
+				/*blocks_pathfinding=*/true,
+				/*is_static=*/false);
+			entity->set_footprint(fp);
 		}
 		else if (ability_parent == "engine.ability.type.PassiveTransformTo") {
 			// Death / unit upgrade. Phase C4 adds Live<=0 -> Despawn hook.
