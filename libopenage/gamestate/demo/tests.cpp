@@ -225,6 +225,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		simulation_demo_48(path);
 		break;
 
+	case 49:
+		// Phase P4.4F.1: real multi-unit no-overlap runtime.
+		simulation_demo_49(path);
+		break;
+
 	default:
 		log::log(MSG(err) << "Unknown renderer demo requested: " << demo_id << ".");
 		break;

@@ -9,6 +9,7 @@
 #include "gamestate/game.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
+#include "gamestate/map.h"
 #include "gamestate/simulation.h"
 #include "log/log.h"
 #include "log/message.h"
@@ -51,6 +52,26 @@ SelectionModel::SelectionModel(
 	if (this->sim_) {
 		this->sim_->add_removal_observer(
 			[this](openage::gamestate::entity_id_t removed_id) {
+				// P4.4F.1: free the entity's DynamicOccupancy
+				// slot on removal so the next mover doesn't
+				// see a stale blocker.
+				if (this->sim_) {
+					auto g = this->sim_->get_game();
+					if (g) {
+						auto st = g->get_state();
+						if (st) {
+							auto m = st->get_map();
+							if (m) {
+								auto occ =
+									m->get_dynamic_occupancy();
+								if (occ) {
+									occ->remove_entity(
+										removed_id);
+								}
+							}
+						}
+					}
+				}
 				auto it = std::find(
 					this->selected_.begin(),
 					this->selected_.end(),

@@ -31,6 +31,7 @@ add_sources(libopenage
 	formation_demo.cpp
 	movement_reservation_demo.cpp
 	group_move_demo.cpp
+	multi_unit_no_overlap_demo.cpp
 	grid_astar_demo.cpp
 	mover_clearance_demo.cpp
 	waypoint_movement_demo.cpp

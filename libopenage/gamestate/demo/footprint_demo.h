@@ -25,6 +25,7 @@ namespace openage::gamestate::tests {
  * Demo 46 - P4.4D.2 + P4.4F multi-unit formation + dynamic occupancy.
  * Demo 47 - P4.4F.1 MovementReservation + narrow passage.
  * Demo 48 - P4.4F.1 group move via GroupMoveHandler.
+ * Demo 49 - P4.4F.1 real multi-unit no-overlap runtime.
  */
 void simulation_demo_25(const util::Path &path);
 void simulation_demo_26(const util::Path &path);
@@ -42,6 +43,7 @@ void simulation_demo_42(const util::Path &path);
 void simulation_demo_46(const util::Path &path);
 void simulation_demo_47(const util::Path &path);
 void simulation_demo_48(const util::Path &path);
+void simulation_demo_49(const util::Path &path);
 
 
 } // namespace openage::gamestate::tests

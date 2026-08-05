@@ -5,13 +5,16 @@
 #include <nyan/nyan.h>
 
 #include "gamestate/api/terrain.h"
+#include "gamestate/component/api/footprint.h"
 #include "gamestate/game_state.h"
 #include "gamestate/terrain.h"
 #include "gamestate/terrain_chunk.h"
 #include "pathfinding/cost_field.h"
 #include "pathfinding/grid.h"
+#include "pathfinding/navigation_service.h"
 #include "pathfinding/pathfinder.h"
 #include "pathfinding/sector.h"
+#include "scenario/static_occupancy_grid.h"
 
 
 namespace openage::gamestate {
@@ -19,6 +22,8 @@ Map::Map(const std::shared_ptr<GameState> &state,
          const std::shared_ptr<Terrain> &terrain) :
 	terrain{terrain},
 	pathfinder{std::make_shared<path::Pathfinder>()},
+	dynamic_occupancy{std::make_shared<
+		openage::scenario::DynamicOccupancy>()},
 	grid_lookup{} {
 	// Create a grid for each path type
 	// TODO: This is non-deterministic because of the unordered set. Is this a problem?
@@ -76,6 +81,16 @@ const std::shared_ptr<path::Pathfinder> &Map::get_pathfinder() const {
 
 path::grid_id_t Map::get_grid_id(const nyan::fqon_t &path_grid) const {
 	return this->grid_lookup.at(path_grid);
+}
+
+
+void Map::set_navigation_service(
+	std::shared_ptr<openage::gamestate::scenario::NavigationGrid> grid,
+	std::vector<openage::gamestate::component::FootprintBounds> static_obstacles) {
+	this->navigation_service =
+		std::make_shared<openage::pathfinding::NavigationService>(
+			std::move(grid),
+			std::move(static_obstacles));
 }
 
 } // namespace openage::gamestate

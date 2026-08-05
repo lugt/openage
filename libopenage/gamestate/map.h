@@ -4,10 +4,15 @@
 
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include <nyan/nyan.h>
 
+#include "gamestate/component/api/footprint.h"
+#include "pathfinding/navigation_service.h"
+#include "scenario/dynamic_occupancy.h"
 #include "pathfinding/types.h"
+#include "scenario/static_occupancy_grid.h"
 #include "util/vector.h"
 
 
@@ -65,6 +70,38 @@ public:
 	 */
 	path::grid_id_t get_grid_id(const nyan::fqon_t &path_grid) const;
 
+	/**
+	 * P4.4C: attach the deterministic A* NavigationService to this
+	 * map. Built once after StaticOccupancyGrid is populated; the
+	 * service owns its own copy of the static obstacle list. May
+	 * be called multiple times to rebuild on layout changes.
+	 */
+	void set_navigation_service(
+		std::shared_ptr<openage::gamestate::scenario::NavigationGrid> grid,
+		std::vector<openage::gamestate::component::FootprintBounds> static_obstacles);
+
+	/**
+	 * P4.4C: get the NavigationService. Returns nullptr until
+	 * set_navigation_service() has been called.
+	 */
+	const std::shared_ptr<openage::pathfinding::NavigationService>
+	&get_navigation_service() const {
+		return this->navigation_service;
+	}
+
+	/**
+	 * P4.4F.1: get the shared DynamicOccupancy for the
+	 * current map. The DynamicOccupancy is constructed
+	 * when the Map is built (it has no construction-time
+	 * data -- it's a per-entity registry). The Move
+	 * runtime and the production removal handler read /
+	 * write this instance.
+	 */
+	const std::shared_ptr<openage::scenario::DynamicOccupancy>
+	&get_dynamic_occupancy() const {
+		return this->dynamic_occupancy;
+	}
+
 private:
 	/**
 	 * Terrain.
@@ -80,7 +117,24 @@ private:
 	 * Lookup table for mapping path grid objects in nyan to grid indices.
 	 */
 	std::unordered_map<nyan::fqon_t, path::grid_id_t> grid_lookup;
+
+	/**
+	 * P4.4C: deterministic A* wrapper. Built lazily by the
+	 * mission_pack_loader after StaticOccupancyGrid is populated;
+	 * the Move runtime prefers it over the legacy flow-field
+	 * pathfinder. May be null in non-scenario builds or in tests
+	 * that bypass the loader.
+	 */
+	std::shared_ptr<openage::pathfinding::NavigationService> navigation_service;
+
+	/**
+	 * P4.4F.1: shared DynamicOccupancy for the map. The
+	 * Map owns the instance; move.cpp and the production
+	 * removal handler read / write it.
+	 */
+	std::shared_ptr<openage::scenario::DynamicOccupancy> dynamic_occupancy;
 };
 
 } // namespace gamestate
 } // namespace openage
+
