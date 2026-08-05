@@ -123,6 +123,12 @@ void HudRenderStage::update() {
 }
 
 void HudRenderStage::resize(size_t width, size_t height) {
+	// Lock the whole resize: update() and set_selection_overlays() run
+	// on the render thread while the resize callback fires on the window
+	// thread. This also closes the pre-existing race on the main
+	// render_pass / output_texture / depth_texture.
+	std::unique_lock lock{this->mutex};
+
 	this->output_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::rgba8));
 	this->depth_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::depth24));
 
