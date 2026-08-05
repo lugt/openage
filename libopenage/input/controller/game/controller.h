@@ -12,6 +12,8 @@
 #include "gamestate/types.h"
 #include "input/event.h"
 
+#include <functional>
+
 
 namespace openage {
 
@@ -71,6 +73,25 @@ public:
 	void set_selected(const std::vector<gamestate::entity_id_t> ids);
 
 	/**
+	 * Install a callback fired whenever the selection changes.
+	 *
+	 * The presenter uses this to mirror the Controller's selection
+	 * into the presentation-layer SelectionModel (the single view
+	 * the HUD / overlay renderer reads). The input layer remains
+	 * the master; the model is a presentation mirror, so there is
+	 * still ONE logical selection state. The callback receives the
+	 * exact id vector passed to \p set_selected (unsorted, as the
+	 * drag-select produced it); the model sorts/dedups internally.
+	 *
+	 * The callback is invoked under the Controller's mutex; it must
+	 * not re-enter the Controller or acquire the EventLoop.
+	 */
+	void set_selection_callback(
+		std::function<void(const std::vector<gamestate::entity_id_t> &)> cb) {
+		this->selection_cb = std::move(cb);
+	}
+
+	/**
 	 * Process an input event from the input manager.
 	 *
 	 * @param ev_args Input event and arguments.
@@ -126,6 +147,13 @@ private:
 	 * Currently selected entities.
 	 */
 	std::vector<gamestate::entity_id_t> selected;
+
+	/**
+	 * Optional mirror callback into the presentation-layer
+	 * SelectionModel. Null in headless/demo paths that drive the
+	 * SelectionModel directly.
+	 */
+	std::function<void(const std::vector<gamestate::entity_id_t> &)> selection_cb;
 
 	/**
 	 * Queue for gamestate events generated from inputs.

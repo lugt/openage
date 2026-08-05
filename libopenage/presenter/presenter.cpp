@@ -40,6 +40,8 @@
 #include "renderer/stages/world/render_stage.h"
 #include "time/time_loop.h"
 #include "util/path.h"
+#include "presenter/viewmodel/selection_model.h"
+#include "presenter/viewmodel/selection_overlay.h"
 
 
 namespace openage::presenter {
@@ -107,6 +109,7 @@ void Presenter::set_simulation(const std::shared_ptr<gamestate::GameSimulation> 
 	this->simulation = simulation;
 	auto render_factory = std::make_shared<renderer::RenderFactory>(this->terrain_renderer, this->world_renderer);
 	this->simulation->attach_renderer(render_factory);
+	this->setup_selection_viewmodel();
 }
 
 void Presenter::set_time_loop(const std::shared_ptr<time::TimeLoop> &time_loop) {
@@ -292,10 +295,16 @@ void Presenter::init_input() {
 		}
 		auto game_controller = std::make_shared<input::game::Controller>(
 			controlled_factions, 0);
+		this->game_controller = game_controller;
 		auto engine_context = std::make_shared<input::game::BindingContext>();
 		input::game::setup_defaults(engine_context, this->time_loop, this->simulation, this->camera);
 		this->input_manager->set_game_controller(game_controller);
 		input_ctx->set_game_bindings(engine_context);
+
+		// Selection viewmodel: mirror the Controller's selection
+		// into SelectionModel (+SelectionOverlay) for the HUD and
+		// the overlay renderer.
+		this->setup_selection_viewmodel();
 	}
 
 	// attach GUI if it's initialized
@@ -373,6 +382,30 @@ void Presenter::init_input() {
 			}
 			log::log(MSG(info) << "DEBUG: auto-spawn done");
 		});
+	}
+}
+
+void Presenter::setup_selection_viewmodel() {
+	if (not this->simulation) {
+		return;
+	}
+	// Create the model + overlay exactly once. The model
+	// registers a removal observer on the simulation in its
+	// constructor, so it tracks entity death for as long as it
+	// lives (presenter-owned).
+	if (not this->selection_model) {
+		this->selection_model = std::make_shared<viewmodel::SelectionModel>(this->simulation);
+		this->selection_overlay = std::make_shared<viewmodel::SelectionOverlay>(this->selection_model);
+	}
+	// Attach the Controller -> SelectionModel mirror. The
+	// Controller is the master; the model is the presentation
+	// view. Safe to call repeatedly: the callback just overwrites.
+	if (this->game_controller and this->selection_model) {
+		auto model = this->selection_model;
+		this->game_controller->set_selection_callback(
+			[model](const std::vector<gamestate::entity_id_t> &ids) {
+				model->set_multi_selection(ids);
+			});
 	}
 }
 

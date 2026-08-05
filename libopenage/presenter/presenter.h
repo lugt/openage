@@ -21,6 +21,10 @@ class GameSimulation;
 
 namespace input {
 class InputManager;
+
+namespace game {
+class Controller;
+}
 }
 
 namespace time {
@@ -70,6 +74,11 @@ class AssetManager;
 } // namespace renderer
 
 namespace presenter {
+
+namespace viewmodel {
+class SelectionModel;
+class SelectionOverlay;
+}
 
 class Presenter {
 public:
@@ -157,6 +166,16 @@ protected:
 	 * render passes to the window screen.
 	 */
 	void init_final_render_pass();
+
+	/**
+	 * Create the SelectionModel + SelectionOverlay and wire the
+	 * Controller's selection callback into the model. Idempotent:
+	 * safe to call from both \p set_simulation() (early sim
+	 * attach) and \p init_input() (controller creation). The
+	 * model is the single presentation-layer view of selection;
+	 * the Controller remains the master.
+	 */
+	void setup_selection_viewmodel();
 
 	// void init_audio();
 
@@ -254,6 +273,24 @@ protected:
 	 * Input manager.
 	 */
 	std::shared_ptr<input::InputManager> input_manager;
+
+	/**
+	 * Game input controller (selection + command dispatch).
+	 */
+	std::shared_ptr<input::game::Controller> game_controller;
+
+	/**
+	 * Presentation-layer view of the current selection. Mirrored
+	 * from the Controller via a selection callback; read by the
+	 * HUD and the selection overlay renderer.
+	 */
+	std::shared_ptr<viewmodel::SelectionModel> selection_model;
+
+	/**
+	 * Renderer-facing overlay state (entity id -> colour). Subscribes
+	 * to SelectionModel and rebuilds on every change.
+	 */
+	std::shared_ptr<viewmodel::SelectionOverlay> selection_overlay;
 
 	/**
 	 * Whether `init_all()` (graphics + GUI + input) has been driven.

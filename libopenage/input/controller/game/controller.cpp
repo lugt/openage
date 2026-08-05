@@ -76,6 +76,13 @@ void Controller::set_selected(const std::vector<gamestate::entity_id_t> ids) {
 	log::log(DBG << "Selected " << ids.size() << " entities");
 
 	this->selected = ids;
+
+	// Mirror into the presentation-layer SelectionModel (single
+	// view for HUD + overlay renderer). The callback must not
+	// re-enter the Controller; it only pushes into the model.
+	if (this->selection_cb) {
+		this->selection_cb(ids);
+	}
 }
 
 bool Controller::process(const event_arguments &ev_args, const std::shared_ptr<BindingContext> &ctx) {
