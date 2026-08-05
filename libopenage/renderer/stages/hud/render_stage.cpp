@@ -45,6 +45,15 @@ std::shared_ptr<renderer::RenderPass> HudRenderStage::get_render_pass() {
 	return this->render_pass;
 }
 
+std::shared_ptr<renderer::RenderPass> HudRenderStage::get_selection_render_pass() {
+	return this->selection_render_pass;
+}
+
+void HudRenderStage::set_selection_overlays(std::vector<SelectionOverlayQuad> quads) {
+	std::unique_lock lock{this->mutex};
+	this->selection_quads = std::move(quads);
+}
+
 void HudRenderStage::add_drag_entity(const std::shared_ptr<DragRenderEntity> entity) {
 	std::unique_lock lock{this->mutex};
 
@@ -89,6 +98,28 @@ void HudRenderStage::update() {
 		this->drag_object->update_uniforms(current_time);
 		this->drag_object->update_geometry(current_time);
 	}
+
+	// Rebuild the world-space selection overlay renderables every frame.
+	// Each quad becomes one Renderable using the shared selection_geometry.
+	// Depth test is disabled and alpha blending is enabled so the overlay
+	// is visible over terrain regardless of the entity's depth.
+	if (this->selection_render_pass) [[likely]] {
+		this->selection_render_pass->clear_renderables();
+		for (const auto &quad : this->selection_quads) {
+			auto unifs = this->selection_shader->new_uniform_input(
+				"obj_world_position", quad.world_center,
+				"half_size", Eigen::Vector2f{quad.half_width, quad.half_height},
+				"in_col", quad.color);
+
+			Renderable overlay_obj{
+				unifs,
+				this->selection_geometry,
+				true,   // alpha_blending
+				false,  // depth_test
+			};
+			this->selection_render_pass->add_renderables(std::move(overlay_obj));
+		}
+	}
 }
 
 void HudRenderStage::resize(size_t width, size_t height) {
@@ -97,6 +128,15 @@ void HudRenderStage::resize(size_t width, size_t height) {
 
 	auto fbo = this->renderer->create_texture_target({this->output_texture, this->depth_texture});
 	this->render_pass->set_target(fbo);
+
+	// Resize the selection overlay FBO to match the window.
+	if (this->selection_render_pass) {
+		this->selection_output_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::rgba8));
+		this->selection_depth_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::depth24));
+
+		auto sel_fbo = this->renderer->create_texture_target({this->selection_output_texture, this->selection_depth_texture});
+		this->selection_render_pass->set_target(sel_fbo);
+	}
 }
 
 void HudRenderStage::initialize_render_pass(size_t width,
@@ -125,6 +165,36 @@ void HudRenderStage::initialize_render_pass(size_t width,
 
 	auto fbo = this->renderer->create_texture_target({this->output_texture, this->depth_texture});
 	this->render_pass = this->renderer->add_render_pass({}, fbo);
+
+	// Selection overlay shader (world-space, camera-projected quad per
+	// selected entity). Binds the camera UBO so obj_world_position is
+	// transformed by the same view/proj as the world render stage.
+	auto sel_vert_file = (shaderdir / "hud_selection_overlay.vert.glsl").open();
+	auto sel_vert_src = renderer::resources::ShaderSource(
+		resources::shader_lang_t::glsl,
+		resources::shader_stage_t::vertex,
+		sel_vert_file.read());
+	sel_vert_file.close();
+
+	auto sel_frag_file = (shaderdir / "hud_selection_overlay.frag.glsl").open();
+	auto sel_frag_src = renderer::resources::ShaderSource(
+		resources::shader_lang_t::glsl,
+		resources::shader_stage_t::fragment,
+		sel_frag_file.read());
+	sel_frag_file.close();
+
+	this->selection_shader = this->renderer->add_shader({sel_vert_src, sel_frag_src});
+	this->selection_shader->bind_uniform_buffer("camera", this->camera->get_uniform_buffer());
+
+	// Shared quad geometry: every selection overlay reuses this.
+	this->selection_geometry = this->renderer->add_mesh_geometry(resources::MeshData::make_quad());
+
+	// Own FBO for selection overlays (output + depth), sized to window.
+	this->selection_output_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::rgba8));
+	this->selection_depth_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::depth24));
+
+	auto sel_fbo = this->renderer->create_texture_target({this->selection_output_texture, this->selection_depth_texture});
+	this->selection_render_pass = this->renderer->add_render_pass({}, sel_fbo);
 }
 
 } // namespace openage::renderer::hud

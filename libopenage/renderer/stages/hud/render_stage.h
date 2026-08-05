@@ -6,6 +6,8 @@
 #include <shared_mutex>
 #include <vector>
 
+#include <eigen3/Eigen/Dense>
+
 #include "util/path.h"
 
 namespace openage {
@@ -19,6 +21,7 @@ class Renderer;
 class RenderPass;
 class ShaderProgram;
 class Texture2d;
+class Geometry;
 class Window;
 
 namespace camera {
@@ -32,6 +35,24 @@ class AssetManager;
 namespace hud {
 class HudDragObject;
 class DragRenderEntity;
+
+/**
+ * Plain-data description of a world-space selection overlay quad.
+ * The HUD stage draws these without coupling to gamestate: the
+ * Presenter converts selection entries + entity positions into these
+ * quads every frame and hands them over via
+ * \p set_selection_overlays.
+ *
+ * Coordinates: world_center is in scene3 world space (the same space
+ * the camera UBO transforms). half_width / half_height are in world
+ * (tile) units. color is rgba in 0..1.
+ */
+struct SelectionOverlayQuad {
+	Eigen::Vector3f world_center;
+	float half_width;
+	float half_height;
+	Eigen::Vector4f color;
+};
 
 /**
  * Renderer for the "Heads-Up Display" (HUD).
@@ -65,6 +86,24 @@ public:
 	 * @return Render pass for HUD drawing.
 	 */
 	std::shared_ptr<renderer::RenderPass> get_render_pass();
+
+	/**
+	 * Get the dedicated render pass for world-space selection overlays.
+	 * Added to the presenter's render_passes right after the HUD pass
+	 * so the overlay composites on top of terrain/units but under the GUI.
+	 *
+	 * @return Render pass for selection overlay drawing.
+	 */
+	std::shared_ptr<renderer::RenderPass> get_selection_render_pass();
+
+	/**
+	 * Replace the current set of world-space selection overlay quads.
+	 * Safe to call every frame; the quads are consumed in \p update().
+	 * Thread-safe (guarded by the stage mutex).
+	 *
+	 * @param quads New overlay quads (moved in).
+	 */
+	void set_selection_overlays(std::vector<SelectionOverlayQuad> quads);
 
 	/**
 	 * Add a new render entity for drag selection.
@@ -137,6 +176,42 @@ private:
 	 * Shader for rendering the drag select rectangle.
 	 */
 	std::shared_ptr<renderer::ShaderProgram> drag_select_shader;
+
+	/**
+	 * Shader for rendering world-space selection overlay quads.
+	 * Binds the camera UBO so quads follow entity positions and scale
+	 * with zoom.
+	 */
+	std::shared_ptr<renderer::ShaderProgram> selection_shader;
+
+	/**
+	 * Shared quad geometry used for every selection overlay renderable.
+	 * Created once in \p initialize_render_pass from make_quad().
+	 */
+	std::shared_ptr<renderer::Geometry> selection_geometry;
+
+	/**
+	 * Current selection overlay quads, pushed by the Presenter each
+	 * frame via \p set_selection_overlays. Guarded by \p mutex.
+	 */
+	std::vector<SelectionOverlayQuad> selection_quads;
+
+	/**
+	 * Dedicated render pass for selection overlays. Owns its own FBO
+	 * (output + depth textures) so the drag-rect pass lifecycle is
+	 * undisturbed. Cleared and rebuilt every \p update().
+	 */
+	std::shared_ptr<renderer::RenderPass> selection_render_pass;
+
+	/**
+	 * Output texture for the selection overlay FBO.
+	 */
+	std::shared_ptr<renderer::Texture2d> selection_output_texture;
+
+	/**
+	 * Depth texture for the selection overlay FBO.
+	 */
+	std::shared_ptr<renderer::Texture2d> selection_depth_texture;
 
 	/**
 	 * Simulation clock for timing animations.

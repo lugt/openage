@@ -14,6 +14,10 @@
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
 #include "gamestate/simulation.h"
+#include "gamestate/component/internal/position.h"
+#include "gamestate/component/types.h"
+#include "gamestate/game_entity.h"
+#include "coord/scene.h"
 #include "input/controller/camera/binding_context.h"
 #include "input/controller/camera/controller.h"
 #include "input/controller/game/binding_context.h"
@@ -39,6 +43,7 @@
 #include "renderer/stages/terrain/render_stage.h"
 #include "renderer/stages/world/render_stage.h"
 #include "time/time_loop.h"
+#include "time/clock.h"
 #include "util/path.h"
 #include "presenter/viewmodel/selection_model.h"
 #include "presenter/viewmodel/selection_overlay.h"
@@ -193,6 +198,11 @@ void Presenter::init_graphics() {
 		this->asset_manager,
 		this->time_loop->get_clock());
 	this->render_passes.push_back(this->hud_renderer->get_render_pass());
+
+	// World-space selection overlay pass. Composites on top of
+	// terrain/units/HUD but under the GUI. Owns its own FBO so the
+	// drag-rect pass lifecycle is undisturbed.
+	this->render_passes.push_back(this->hud_renderer->get_selection_render_pass());
 
 	this->init_gui();
 	this->init_final_render_pass();
@@ -440,6 +450,60 @@ void Presenter::render() {
 	this->camera_manager->update();
 	this->terrain_renderer->update();
 	this->world_renderer->update();
+
+	// Push world-space selection overlay quads to the HUD stage.
+	// The Presenter converts selection entries + entity positions into
+	// plain-data quads (scene3 world center + half size + color) so the
+	// HUD stage stays decoupled from gamestate.
+	std::vector<renderer::hud::SelectionOverlayQuad> quads;
+	if (this->selection_overlay and this->simulation) {
+		auto state = this->simulation->get_game()->get_state();
+		auto t = this->time_loop->get_clock()->get_real_time();
+		for (const auto &e : this->selection_overlay->entries()) {
+			if (not state->has_game_entity(e.entity)) {
+				continue;
+			}
+			auto ent = state->get_game_entity(e.entity);
+			if (not ent->has_component(gamestate::component::component_t::POSITION)) {
+				continue;
+			}
+			auto pc = std::dynamic_pointer_cast<gamestate::component::Position>(
+				ent->get_component(gamestate::component::component_t::POSITION));
+			auto p = pc->get_positions().get(t); // coord::phys3
+
+			// phys3 -> scene3 -> world-space vec3 (same conversion the
+			// world render stage uses: RenderEntity::update stores
+			// position.to_scene3(), and WorldObject sets
+			// obj_world_position from scene3::to_world_space()).
+			Eigen::Vector3f world_center = p.to_scene3().to_world_space();
+
+			// half_size from footprint radius (fallback 0.4 tiles).
+			float rx = 0.4f, ry = 0.4f;
+			if (ent->has_footprint()) {
+				rx = static_cast<float>(ent->footprint().radius_x());
+				ry = static_cast<float>(ent->footprint().radius_y());
+			}
+
+			Eigen::Vector4f col;
+			switch (e.color) {
+			case viewmodel::SelectionOverlayColor::PLAYER_FRIENDLY:
+				col = Eigen::Vector4f{0.0f, 1.0f, 0.0f, 0.4f};
+				break;
+			case viewmodel::SelectionOverlayColor::PLAYER_HOSTILE:
+				col = Eigen::Vector4f{1.0f, 0.0f, 0.0f, 0.4f};
+				break;
+			case viewmodel::SelectionOverlayColor::NEUTRAL:
+				col = Eigen::Vector4f{1.0f, 1.0f, 0.0f, 0.4f};
+				break;
+			default:
+				// NONE: skip.
+				continue;
+			}
+			quads.push_back({world_center, rx, ry, col});
+		}
+	}
+	this->hud_renderer->set_selection_overlays(std::move(quads));
+
 	this->hud_renderer->update();
 	this->gui->render();
 
