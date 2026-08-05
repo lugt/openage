@@ -11,6 +11,7 @@ add_sources(libopenage
 	placement_validator.cpp
 	static_occupancy_grid.cpp
 	dynamic_occupancy.cpp
+	swept_aabb_demo.cpp
 )
 
 add_subdirectory("trigger")

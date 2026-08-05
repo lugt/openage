@@ -204,6 +204,11 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		simulation_demo_38(path);
 		break;
 
+	case 42:
+		// Phase P4.4F.1: swept AABB + DynamicOccupancy.
+		simulation_demo_42(path);
+		break;
+
 	case 46:
 		// Phase P4.4D.2 + P4.4F: multi-unit formation +
 		// dynamic occupancy.

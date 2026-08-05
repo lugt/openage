@@ -21,6 +21,7 @@ namespace openage::gamestate::tests {
  * Demo 36 - P4.4D windowed-style move routing.
  * Demo 37 - P4.4D.1 AttackApproach service contract.
  * Demo 38 - P4.4D.1 pointer-driven Mission 1 combat lifecycle.
+ * Demo 42 - P4.4F.1 swept AABB + DynamicOccupancy runtime.
  * Demo 46 - P4.4D.2 + P4.4F multi-unit formation + dynamic occupancy.
  * Demo 47 - P4.4F.1 MovementReservation + narrow passage.
  * Demo 48 - P4.4F.1 group move via GroupMoveHandler.
@@ -37,6 +38,7 @@ void simulation_demo_35(const util::Path &path);
 void simulation_demo_36(const util::Path &path);
 void simulation_demo_37(const util::Path &path);
 void simulation_demo_38(const util::Path &path);
+void simulation_demo_42(const util::Path &path);
 void simulation_demo_46(const util::Path &path);
 void simulation_demo_47(const util::Path &path);
 void simulation_demo_48(const util::Path &path);
