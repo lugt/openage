@@ -327,6 +327,14 @@ void load_mission_pack_into_game_state(
 			// obstacle.
 			req.is_static = (ep.entity_definition_fqon.find(
 				"town_center") != std::string::npos);
+			// Propagate is_static to the footprint so
+			// downstream consumers (the DynamicOccupancy
+			// spawn-time helper, etc.) can skip buildings.
+			// The factory defaults is_static=false; the
+			// loader is the single source of truth for
+			// which placements are buildings (TC).
+			fp.set_is_static(req.is_static);
+			entity->set_footprint(fp);
 			auto pf = validator.validate(req);
 			if (not pf.ok()) {
 				throw MissionPackLoadError{
@@ -370,6 +378,18 @@ void load_mission_pack_into_game_state(
 		}
 
 		state->add_game_entity(entity);
+
+		// P4.4F Task 3: register the entity in the Map's shared
+		// DynamicOccupancy at spawn time so the Move runtime's
+		// swept-AABB check can see every unit (villager AND enemy)
+		// before any Move is issued. The center matches the
+		// footprint center set above (ep.pos_x/ep.pos_y in tile
+		// units). This is the production Mission 1 spawn path.
+		register_entity_in_dynamic_occupancy(
+			*map,
+			*entity,
+			static_cast<double>(ep.pos_x),
+			static_cast<double>(ep.pos_y));
 
 		// 5. ScenarioObjectId -> GameEntityId mapping.
 		// Register BOTH the full PlacedEntity instance FQON (what the

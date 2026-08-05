@@ -24,6 +24,7 @@ class Pathfinder;
 namespace gamestate {
 class GameState;
 class Terrain;
+class GameEntity;
 
 class Map {
 public:
@@ -134,6 +135,28 @@ private:
 	 */
 	std::shared_ptr<openage::scenario::DynamicOccupancy> dynamic_occupancy;
 };
+
+/**
+ * P4.4F Task 3: register an entity in the Map's shared
+ * DynamicOccupancy at spawn time. Builds FootprintBounds
+ * from the entity's footprint radius and the given center;
+ * if the entity has no footprint, uses a small default
+ * (radius 0.4 tiles) so units still block each other.
+ * Idempotent for the same (entity, bounds) pair (see
+ * DynamicOccupancy::register_entity).
+ *
+ * The center is in TILE units (1 tile = 65536 phys). Callers
+ * holding a coord::phys3 should pass pos.ne.to_double() /
+ * pos.se.to_double() directly -- FixedPoint::to_double already
+ * returns the tile-scaled value (raw / 65536); do NOT divide
+ * by 65536 again (that would double-scale). This matches the
+ * conversion used in move.cpp's occ_bounds_at lambda.
+ */
+void register_entity_in_dynamic_occupancy(
+	Map &map,
+	const GameEntity &entity,
+	double center_x,
+	double center_y);
 
 } // namespace gamestate
 } // namespace openage

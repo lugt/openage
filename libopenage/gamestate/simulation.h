@@ -299,6 +299,19 @@ private:
 	void register_trigger_handler();
 
 	/**
+	 * P4.4F Task 3: register an INDEPENDENT removal observer on
+	 * the production RemovalEventHandler that calls
+	 * map->get_dynamic_occupancy()->remove_entity(id) for every
+	 * removed entity. This mirrors the SelectionModel's removal
+	 * observer but lives at the simulation level so headless /
+	 * demo paths (which never construct a SelectionModel) still
+	 * clear dead entities from DynamicOccupancy. Double-remove is
+	 * safe (DynamicOccupancy::remove_entity is idempotent). A null
+	 * removal handler is a no-op.
+	 */
+	void register_dynamic_occupancy_removal_observer();
+
+	/**
 	 * P4.3: feed the Mission Pack's trigger data into the runtime.
 	 * Reads pack.triggers (data-driven; empty for the Mission 1
 	 * reconstruction until Path C unblocks) and synthesizes a

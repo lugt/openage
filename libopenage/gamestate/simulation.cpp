@@ -23,6 +23,7 @@
 // TODO
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
+#include "gamestate/map.h"
 #include "scenario/mission_pack.h"
 #include "scenario/trigger/trigger_runtime.h"
 
@@ -223,6 +224,15 @@ bool GameSimulation::initialize() {
 			this->wire_trigger_data(mission_pack_dir);
 			this->register_trigger_handler();
 		}
+
+		// P4.4F Task 3: register the simulation-level removal
+		// observer that clears DynamicOccupancy on entity death,
+		// INDEPENDENT of SelectionModel. This runs unconditionally
+		// (even in headless / non-scenario mode) so dead entities
+		// never leave stale blockers in the occupancy table. The
+		// observer closure looks up the map lazily at fire time;
+		// if there is no map (defensive), it no-ops.
+		this->register_dynamic_occupancy_removal_observer();
 	}
 	catch (...) {
 		this->lifecycle = SimulationLifecycle::Failed;
@@ -482,6 +492,46 @@ void GameSimulation::register_trigger_handler() {
 		[this](openage::gamestate::entity_id_t target_id) {
 			auto at = this->time_loop->get_clock()->get_time();
 			this->trigger_runtime->notify_entity_removed(target_id, at);
+		});
+}
+
+
+void GameSimulation::register_dynamic_occupancy_removal_observer() {
+	// P4.4F Task 3: subscribe the Map's shared DynamicOccupancy to
+	// game.removal so dead entities are cleared from the occupancy
+	// table at the simulation level, INDEPENDENT of SelectionModel.
+	// The SelectionModel also calls remove_entity (presenter-gated),
+	// but headless / demo paths never construct a SelectionModel, so
+	// without this observer dead entities would leave stale blockers
+	// and the Move runtime would never let a new unit enter that
+	// cell. Double-remove is safe (DynamicOccupancy::remove_entity
+	// is idempotent -- no-op if the entity is not registered).
+	//
+	// The closure captures `this` and looks up the map lazily at
+	// fire time (the map may be null in degenerate test paths; the
+	// observer no-ops in that case). This mirrors the SelectionModel
+	// observer's null-checked lookup chain.
+	if (not this->removal_handler) {
+		return;
+	}
+	this->removal_handler->add_observer(
+		[this](openage::gamestate::entity_id_t removed_id) {
+			if (not this->game) {
+				return;
+			}
+			auto st = this->game->get_state();
+			if (not st) {
+				return;
+			}
+			auto m = st->get_map();
+			if (not m) {
+				return;
+			}
+			auto occ = m->get_dynamic_occupancy();
+			if (not occ) {
+				return;
+			}
+			occ->remove_entity(removed_id);
 		});
 }
 

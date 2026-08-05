@@ -212,6 +212,24 @@ void SpawnEntityHandler::invoke(openage::event::EventLoop & /* loop */,
 	entity->get_manager()->run_activity_system(time);
 
 	gstate->add_game_entity(entity);
+
+	// P4.4F Task 3: register the entity in the Map's shared
+	// DynamicOccupancy at spawn time so the Move runtime's
+	// swept-AABB check can see stationary units (the previous
+	// behaviour only registered an entity when a Move command
+	// was issued, so a stationary enemy was invisible to
+	// collision and villagers walked through it). The center
+	// is the spawn position in tile units; FixedPoint::to_double
+	// already returns the tile-scaled value (raw / 65536), so we
+	// do NOT divide by 65536 again -- this matches move.cpp's
+	// occ_bounds_at conversion.
+	if (auto map = gstate->get_map()) {
+		register_entity_in_dynamic_occupancy(
+			*map,
+			*entity,
+			pos.ne.to_double(),
+			pos.se.to_double());
+	}
 }
 
 time::time_t SpawnEntityHandler::predict_invoke_time(const std::shared_ptr<openage::event::EventEntity> & /* target */,

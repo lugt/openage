@@ -41,6 +41,7 @@
 #include "time/time.h"
 #include "time/time_loop.h"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <stdexcept>
@@ -104,6 +105,73 @@ void simulation_demo_49(const util::Path &path) {
 			e->get_manager()->run_activity_system(
 				openage::time::time_t{0});
 		}
+	}
+
+	// --- Pin 0 (Task 3): stationary enemy + villager are
+	//      registered in the Map's shared DynamicOccupancy
+	//      at spawn time, BEFORE any Move is issued. This is
+	//      the precondition for the Move runtime's swept-AABB
+	//      check to see stationary units (without Task 3, an
+	//      entity was only registered when a Move command was
+	//      issued, so a stationary enemy was invisible to
+	//      collision and villagers walked through it). ----
+	{
+		auto map = state->get_map();
+		if (not map) {
+			throw std::runtime_error{
+				"demo 49 pin 0 FAILED: no map"};
+		}
+		auto occ = map->get_dynamic_occupancy();
+		if (not occ) {
+			throw std::runtime_error{
+				"demo 49 pin 0 FAILED: no DynamicOccupancy"};
+		}
+		bool enemy_registered = false;
+		bool villager_registered = false;
+		for (const auto &r : occ->records()) {
+			if (r.entity == enemy_id) enemy_registered = true;
+			if (r.entity == villager_id) villager_registered = true;
+		}
+		if (not enemy_registered) {
+			throw std::runtime_error{
+				"demo 49 pin 0 FAILED: stationary enemy not "
+				"registered in DynamicOccupancy before Move"};
+		}
+		if (not villager_registered) {
+			throw std::runtime_error{
+				"demo 49 pin 0 FAILED: villager not registered "
+				"in DynamicOccupancy before Move"};
+		}
+		// Also verify the query API returns the enemy when
+		// probing with the villager as mover and a bounds
+		// that overlaps the enemy's spawn footprint.
+		auto enemy = state->get_game_entity(enemy_id);
+		double rx = 0.4;
+		double ry = 0.4;
+		if (enemy and enemy->has_footprint()) {
+			rx = enemy->footprint().radius_x();
+			ry = enemy->footprint().radius_y();
+		}
+		auto pos_e = std::dynamic_pointer_cast<
+			openage::gamestate::component::Position>(
+			state->get_game_entity(enemy_id)->get_component(
+				openage::gamestate::component::component_t::POSITION));
+		auto pe = pos_e->get_positions().get(
+			openage::time::time_t{0});
+		openage::gamestate::component::FootprintBounds enemy_bounds;
+		enemy_bounds.min_x = pe.ne.to_double() - rx;
+		enemy_bounds.min_y = pe.se.to_double() - ry;
+		enemy_bounds.max_x = pe.ne.to_double() + rx;
+		enemy_bounds.max_y = pe.se.to_double() + ry;
+		auto blockers = occ->query(villager_id, enemy_bounds);
+		if (std::find(blockers.begin(), blockers.end(), enemy_id)
+		    == blockers.end()) {
+			throw std::runtime_error{
+				"demo 49 pin 0 FAILED: query(villager, enemy_bounds) "
+				"did not return enemy before Move"};
+		}
+		log::log(MSG(info) << "demo 49: pin 0 PASS "
+		                   << "(stationary enemy registered before Move)");
 	}
 
 	// Dispatch a group_move event. The GroupMoveHandler

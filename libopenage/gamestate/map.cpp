@@ -6,6 +6,7 @@
 
 #include "gamestate/api/terrain.h"
 #include "gamestate/component/api/footprint.h"
+#include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/terrain.h"
 #include "gamestate/terrain_chunk.h"
@@ -91,6 +92,50 @@ void Map::set_navigation_service(
 		std::make_shared<openage::pathfinding::NavigationService>(
 			std::move(grid),
 			std::move(static_obstacles));
+}
+
+
+// P4.4F Task 3: register an entity in the Map's shared
+// DynamicOccupancy at spawn time. See map.h for the full
+// contract. The default radius (0.4) applies when the entity
+// has no footprint; otherwise the footprint's radius_x/y is
+// used (matching move.cpp's occ_bounds_at lambda). Static
+// buildings (fp.is_static() == true) are SKIPPED -- they are
+// tracked in StaticOccupancyGrid + NavigationService, and
+// duplicating them in DynamicOccupancy would double-count
+// blockers and break demo pin counts. The DynamicOccupancy is
+// always non-null (constructed in the Map ctor), but we
+// null-check defensively.
+void register_entity_in_dynamic_occupancy(
+	Map &map,
+	const GameEntity &entity,
+	double center_x,
+	double center_y) {
+	auto occ = map.get_dynamic_occupancy();
+	if (not occ) {
+		return;
+	}
+	double rx = 0.4;
+	double ry = 0.4;
+	if (entity.has_footprint()) {
+		auto fp = entity.footprint();
+		// Buildings (is_static=true) are tracked in
+		// StaticOccupancyGrid + NavigationService; do NOT
+		// duplicate them in DynamicOccupancy. Only dynamic
+		// units (villagers, enemies, etc.) go in the
+		// dynamic table.
+		if (fp.is_static()) {
+			return;
+		}
+		rx = fp.radius_x();
+		ry = fp.radius_y();
+	}
+	openage::gamestate::component::FootprintBounds bounds;
+	bounds.min_x = center_x - rx;
+	bounds.min_y = center_y - ry;
+	bounds.max_x = center_x + rx;
+	bounds.max_y = center_y + ry;
+	occ->register_entity(entity.get_id(), bounds);
 }
 
 } // namespace openage::gamestate
