@@ -31,4 +31,15 @@ enum class component_t {
 	RESOURCE_STORAGE,
 };
 
+/**
+ * Human-readable name of a component type.
+ *
+ * Used in diagnostics: a missing component can then be named in an
+ * error message instead of being reported as a bare enum value.
+ *
+ * @param type Component type.
+ * @return Static string with the component's name.
+ */
+const char *to_string(component_t type);
+
 } // namespace openage::gamestate::component

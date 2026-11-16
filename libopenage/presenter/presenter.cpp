@@ -464,11 +464,14 @@ void Presenter::render() {
 				continue;
 			}
 			auto ent = state->get_game_entity(e.entity);
-			if (not ent->has_component(gamestate::component::component_t::POSITION)) {
+			// try_get_component_as<T> checks the cast result, so a
+			// Position enum pointing at a non-Position component is
+			// reported instead of dereferencing a null pointer here.
+			auto pc = ent->try_get_component_as<gamestate::component::Position>(
+				gamestate::component::component_t::POSITION);
+			if (not pc) {
 				continue;
 			}
-			auto pc = std::dynamic_pointer_cast<gamestate::component::Position>(
-				ent->get_component(gamestate::component::component_t::POSITION));
 			auto p = pc->get_positions().get(t); // coord::phys3
 
 			// phys3 -> scene3 -> world-space vec3 (same conversion the

@@ -45,6 +45,17 @@ void DragSelectHandler::invoke(openage::event::EventLoop & /* loop */,
 	float left = std::min(drag_start.x(), drag_end.x());
 	float right = std::max(drag_start.x(), drag_end.x());
 
+	// A plain click has an empty drag rectangle. Give it a small pick radius
+	// instead of feeding zero-width/height bounds to the strict comparisons
+	// below, which could never select even an exactly centered entity.
+	if (drag_start.x() == drag_end.x() and drag_start.y() == drag_end.y()) {
+		constexpr float CLICK_RADIUS_NDC = 0.05f;
+		left -= CLICK_RADIUS_NDC;
+		right += CLICK_RADIUS_NDC;
+		bottom -= CLICK_RADIUS_NDC;
+		top += CLICK_RADIUS_NDC;
+	}
+
 	log::log(SPAM << "Drag select rectangle (NDC):");
 	log::log(SPAM << "\tTop: " << top);
 	log::log(SPAM << "\tBottom: " << bottom);

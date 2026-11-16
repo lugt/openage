@@ -253,11 +253,28 @@ void SelectionModel::wire_health_callback(
 	const std::shared_ptr<openage::gamestate::GameEntity> &entity) {
 
 	// Find the Health attribute FQON via the Attack component.
+	//
+	// The Attack and Live components are OPTIONAL: a TownCenter is a
+	// building with no attack ability, so the entity factory never
+	// mounts an Attack component on it (see entity_factory.cpp: Attack
+	// is only mounted for ApplyDiscreteEffect / RangedDiscreteEffect
+	// abilities). Selecting such an entity must not abort the whole
+	// selection -- it simply has no health attribute to watch.
+	//
+	// This is why the non-throwing try_get_component_as() is used here and
+	// not get_component(): the latter throws for a missing component,
+	// which terminated the whole Mission 1 windowed launch with
+	// "std::out_of_range: unordered_map::at: key not found" as soon as
+	// the player dragged a selection box over the TownCenter.
+	//
+	// try_get_component_as<T> (rather than try_get_component() followed by
+	// a bare dynamic_pointer_cast) additionally checks the cast result, so
+	// an enum/class mismatch reports itself instead of dereferencing a
+	// null pointer.
 	nyan::fqon_t health_fqon;
-	auto attack = std::dynamic_pointer_cast<
+	auto attack = entity->try_get_component_as<
 		openage::gamestate::component::Attack>(
-		entity->get_component(
-			openage::gamestate::component::component_t::ATTACK));
+		openage::gamestate::component::component_t::ATTACK);
 	if (attack) {
 		health_fqon = attack->get_health_attribute_fqon();
 	}
@@ -265,10 +282,9 @@ void SelectionModel::wire_health_callback(
 		return;
 	}
 
-	auto live = std::dynamic_pointer_cast<
+	auto live = entity->try_get_component_as<
 		openage::gamestate::component::Live>(
-		entity->get_component(
-			openage::gamestate::component::component_t::LIVE));
+		openage::gamestate::component::component_t::LIVE);
 	if (not live) {
 		return;
 	}

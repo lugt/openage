@@ -19,6 +19,7 @@ add_sources(libopenage
 	trigger_data_driven_victory_demo.cpp
 	selected_view_demo.cpp
 	selection_events_demo.cpp
+	selection_optional_component_demo.cpp
 	hud_adapter_demo.cpp
 	footprint_demo.cpp
 	placement_validator_demo.cpp

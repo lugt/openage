@@ -27,14 +27,9 @@ openage::gamestate::player_id_t entity_owner(
 		return 0;
 	}
 	auto e = state->get_game_entity(entity);
-	if (not e->has_component(
-		    openage::gamestate::component::component_t::OWNERSHIP)) {
-		return 0;
-	}
-	auto own = std::dynamic_pointer_cast<
+	auto own = e->try_get_component_as<
 		openage::gamestate::component::Ownership>(
-		e->get_component(
-			openage::gamestate::component::component_t::OWNERSHIP));
+		openage::gamestate::component::component_t::OWNERSHIP);
 	if (not own) {
 		return 0;
 	}

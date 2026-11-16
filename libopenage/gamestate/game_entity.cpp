@@ -2,6 +2,7 @@
 
 #include "game_entity.h"
 
+#include "error/error.h"
 #include "gamestate/api/ability.h"
 #include "gamestate/api/animation.h"
 #include "gamestate/api/property.h"
@@ -9,6 +10,7 @@
 #include "gamestate/component/api/move.h"
 #include "gamestate/component/base_component.h"
 #include "gamestate/component/internal/position.h"
+#include "log/message.h"
 #include "renderer/stages/world/render_entity.h"
 
 namespace openage::gamestate {
@@ -45,7 +47,25 @@ const std::shared_ptr<GameEntityManager> &GameEntity::get_manager() const {
 }
 
 const std::shared_ptr<component::Component> &GameEntity::get_component(component::component_t type) {
-	return this->components.at(type);
+	auto it = this->components.find(type);
+	if (it == this->components.end()) {
+		// Name the entity and the component. A bare
+		// "unordered_map::at: key not found" gives no clue which
+		// entity of a scene was missing what, and the entity id alone
+		// does not say which component was being asked for.
+		throw openage::error::Error{
+			MSG(err) << "entity " << this->id << " has no "
+			         << component::to_string(type) << " component"};
+	}
+	return it->second;
+}
+
+std::shared_ptr<component::Component> GameEntity::try_get_component(component::component_t type) {
+	auto it = this->components.find(type);
+	if (it == this->components.end()) {
+		return nullptr;
+	}
+	return it->second;
 }
 
 void GameEntity::add_component(const std::shared_ptr<component::Component> &component) {

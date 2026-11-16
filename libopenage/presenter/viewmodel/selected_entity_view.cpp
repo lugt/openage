@@ -47,8 +47,11 @@ SelectedEntityView::SelectedEntityView(
 	}
 
 	// Owner.
-	auto own = std::dynamic_pointer_cast<openage::gamestate::component::Ownership>(
-		entity->get_component(openage::gamestate::component::component_t::OWNERSHIP));
+	// try_get_component_as<T> checks the cast result; a bare
+	// try_get_component() + dynamic_pointer_cast() would leave a failed
+	// cast to be dereferenced right below the `if`, which segfaults.
+	auto own = entity->try_get_component_as<openage::gamestate::component::Ownership>(
+		openage::gamestate::component::component_t::OWNERSHIP);
 	if (own) {
 		// Ownership is a curve over time; the demo runs at
 		// sim_time=0, so we read the owner at that time.
@@ -58,20 +61,19 @@ SelectedEntityView::SelectedEntityView(
 	}
 
 	// Health (Live component curve).
-	auto live = std::dynamic_pointer_cast<openage::gamestate::component::Live>(
-		entity->get_component(openage::gamestate::component::component_t::LIVE));
+	auto live = entity->try_get_component_as<openage::gamestate::component::Live>(
+		openage::gamestate::component::component_t::LIVE);
 	if (live) {
 		// Resolve the Health attribute FQON via the Attack component
 		// (if present) so the view reads the same attribute the
 		// AttackSystem damages. For non-combat entities we leave
 		// both nullopt.
 		nyan::fqon_t health_fqon;
-		auto attack = entity->get_component(
+		auto attack_comp = entity->try_get_component_as<
+			openage::gamestate::component::Attack>(
 			openage::gamestate::component::component_t::ATTACK);
-		if (attack) {
-			health_fqon = std::dynamic_pointer_cast<
-				openage::gamestate::component::Attack>(attack)
-				->get_health_attribute_fqon();
+		if (attack_comp) {
+			health_fqon = attack_comp->get_health_attribute_fqon();
 		}
 		if (not health_fqon.empty()) {
 			auto now = openage::time::time_t{0};
@@ -84,8 +86,8 @@ SelectedEntityView::SelectedEntityView(
 	}
 
 	// Attack component.
-	auto attack = std::dynamic_pointer_cast<openage::gamestate::component::Attack>(
-		entity->get_component(openage::gamestate::component::component_t::ATTACK));
+	auto attack = entity->try_get_component_as<openage::gamestate::component::Attack>(
+		openage::gamestate::component::component_t::ATTACK);
 	if (attack) {
 		this->attack_damage_ = attack->get_damage();
 		this->attack_range_ = attack->get_attack_range();
@@ -99,8 +101,8 @@ SelectedEntityView::SelectedEntityView(
 	}
 
 	// Position (current).
-	auto pos = std::dynamic_pointer_cast<openage::gamestate::component::Position>(
-		entity->get_component(openage::gamestate::component::component_t::POSITION));
+	auto pos = entity->try_get_component_as<openage::gamestate::component::Position>(
+		openage::gamestate::component::component_t::POSITION);
 	if (pos) {
 		auto now = openage::time::time_t{0};
 		auto &positions = pos->get_positions();

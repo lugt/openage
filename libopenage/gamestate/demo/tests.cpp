@@ -22,6 +22,7 @@
 #include "gamestate/demo/trigger_data_driven_victory_demo.h"
 #include "gamestate/demo/selected_view_demo.h"
 #include "gamestate/demo/selection_events_demo.h"
+#include "gamestate/demo/selection_optional_component_demo.h"
 #include "gamestate/demo/hud_adapter_demo.h"
 #include "gamestate/demo/footprint_demo.h"
 
@@ -228,6 +229,12 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	case 49:
 		// Phase P4.4F.1: real multi-unit no-overlap runtime.
 		simulation_demo_49(path);
+		break;
+
+	case 50:
+		// Regression: selecting an entity without optional components
+		// (no Attack) must not throw.
+		simulation_demo_50(path);
 		break;
 
 	default:
