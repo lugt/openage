@@ -13,7 +13,7 @@ Four concrete problems this plan solves:
 - 1 world unit = 1 tile = 65536 phys. `coord::tile{x,y}` are tile ints.
 - `coord::tile{x,y}.to_phys3()` shifts correctly (raw = tile * 65536). NEVER construct `phys_t{static_cast<int64_t>(x*65536)}` or `phys_t{double}` — that double-shifts / overflows. Always go through `coord::tile{...}.to_phys3()` or `to_phys3_center()`.
 - `to_phys3()` = cell CORNER origin; `to_phys3_center()` = cell CENTER. `move.cpp` and A* use `to_phys3_center()`. GroupMoveHandler currently uses `to_phys3()` (corner) — a bug to fix in Task 6.
-- `FootprintBounds` are in TILE units (center_x/center_y are tile coords, e.g. 5.0). `coord::phys3.ne.to_double()` returns PHYS; to compare with footprint tile units divide by 65536.0 (or convert via coord).
+- `FootprintBounds` are in TILE units (center_x/center_y are tile coords, e.g. 5.0). **`coord::phys3.ne.to_double()` ALREADY returns the TILE-scaled value (raw/65536) - it is in tile units, NOT phys. Do NOT divide by 65536 again (that would double-scale).** Footprint radius is also tile units, so `to_double()` matches directly. See `move.cpp:172-175` `occ_bounds_at`: `b.min_x = p.ne.to_double() - occ_rx;` (occ_rx = fp.radius_x()).
 - Half-open AABB `[min, max)`; a tile whose CENTER is inside the bounds is covered.
 
 **Namespace shadowing:** files in `openage::gamestate::system` / `openage::gamestate::scenario` can shadow `openage::scenario`. Use absolute paths `::openage::scenario::swept_aabb(...)`, `::openage::scenario::DynamicOccupancy`, `::openage::scenario::trigger::TriggerRuntime` when calling from those namespaces.
