@@ -23,6 +23,7 @@
 #include "gamestate/demo/selected_view_demo.h"
 #include "gamestate/demo/selection_events_demo.h"
 #include "gamestate/demo/selection_optional_component_demo.h"
+#include "gamestate/demo/production_context_input_demo.h"
 #include "gamestate/demo/hud_adapter_demo.h"
 #include "gamestate/demo/footprint_demo.h"
 
@@ -235,6 +236,12 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		// Regression: selecting an entity without optional components
 		// (no Attack) must not throw.
 		simulation_demo_50(path);
+		break;
+
+	case 51:
+		// Regression: production RMB binding must pick entities and
+		// distinguish ATTACK from MOVE.
+		simulation_demo_51(path);
 		break;
 
 	default:

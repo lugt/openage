@@ -29,6 +29,7 @@ add_sources(libopenage
 	context_action_demo.cpp
 	attack_approach_demo.cpp
 	pointer_combat_demo.cpp
+	production_context_input_demo.cpp
 	formation_demo.cpp
 	movement_reservation_demo.cpp
 	group_move_demo.cpp

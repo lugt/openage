@@ -177,7 +177,8 @@ private:
  * Setup default controller action bindings:
  *
  * - CTRL + Left Mouse click: Create game entity.
- * - Right Mouse click: Move game entity.
+ * - Right Mouse click: Move selected entities on ground, or attack a
+ *   picked hostile entity when the selection has Attack ability.
  *
  * @param ctx Binding context the actions are added to.
  * @param time_loop Time loop for getting simulation time.

@@ -107,14 +107,21 @@ run_regression() {
 	local pass=0
 	local fail=0
 	local fail_ids=""
-	for ID in 7 9 10 11 12 13 14 15 16 17 18 19 20 22 23 24 25 26 27 28 29 30 31 32 35 36; do
-		/Users/xc5/dev/openage/bin/run test -d gamestate.tests.simulation_demo "$ID" \
-			>> "$LOG" 2>&1
-		if grep -qE "DEMO.*PASS|WW MISSION 1 HEADLESS REGRESSION: PASS|MISSION 1 LIFECYCLE: PASS|NATIVE LOAD: PASS" \
-			"$LOG.tmp" 2>/dev/null; then :; fi
-		# re-run with stdout capture for the per-demo check:
+	# The full set of mission-relevant demos. 37/38/42/46/47/48/49 are the
+	# P4.4D.1/D.2/F demos (attack approach, pointer combat, swept AABB,
+	# formation + dynamic occupancy, movement reservation, group move,
+	# multi-unit no-overlap) -- they were implemented but missing from this
+	# list, so regressions in the current work phase went undetected.
+	# 50 is the regression test for selecting an entity without optional
+	# components (a TownCenter has no Attack component). 51 exercises the
+	# production RMB binding, including real entity picking.
+	for ID in 7 9 10 11 12 13 14 15 16 17 18 19 20 22 23 24 25 26 27 28 29 30 31 32 35 36 37 38 42 46 47 48 49 50 51; do
+		# Run once, capture the output for the per-demo verdict, and
+		# append the same output to the log. (Running each demo twice
+		# doubled the wall clock for no extra coverage.)
 		local out
-		out="$(/Users/xc5/dev/openage/bin/run test -d gamestate.tests.simulation_demo "$ID" 2>&1)"
+		out="$("$REPO/bin/run" test -d gamestate.tests.simulation_demo "$ID" 2>&1)"
+		printf '%s\n' "$out" >> "$LOG"
 		if echo "$out" | grep -qE "DEMO.*PASS|WW MISSION 1 HEADLESS REGRESSION: PASS|MISSION 1 LIFECYCLE: PASS|NATIVE LOAD: PASS"; then
 			echo "demo $ID: PASS"
 			pass=$((pass+1))
@@ -122,6 +129,8 @@ run_regression() {
 			echo "demo $ID: FAIL"
 			fail=$((fail+1))
 			fail_ids="$fail_ids $ID"
+			# Surface the failure reason; the demo output is long.
+			echo "$out" | grep -E "FATAL|terminate|exception|FAILED|error" | head -5
 		fi
 	done
 	echo "==== regression: PASS=$pass FAIL=$fail ===="

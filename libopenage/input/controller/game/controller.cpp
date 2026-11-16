@@ -17,6 +17,9 @@
 
 #include "controller.h"
 
+#include <cmath>
+#include <limits>
+
 #include "log/log.h"
 
 #include "event/event_loop.h"
@@ -31,6 +34,7 @@
 #include "gamestate/event/send_command.h"
 #include "gamestate/event/spawn_entity.h"
 #include "gamestate/game.h"
+#include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/simulation.h"
 #include "input/controller/game/binding_context.h"
@@ -43,6 +47,91 @@
 
 
 namespace openage::input::game {
+
+namespace {
+
+SelectionSnapshot make_selection_snapshot(
+	const std::shared_ptr<gamestate::GameState> &state,
+	const std::vector<gamestate::entity_id_t> &selected,
+	const time::time_t &now) {
+	SelectionSnapshot snapshot;
+	for (auto id : selected) {
+		SelectionSnapshot::Entry entry;
+		entry.id = id;
+		if (not state->has_game_entity(id)) {
+			snapshot.entries.push_back(std::move(entry));
+			continue;
+		}
+
+		auto entity = state->get_game_entity(id);
+		entry.has_move_ability = entity->try_get_component_as<gamestate::component::Move>(
+			                         gamestate::component::component_t::MOVE)
+		                         != nullptr;
+		entry.has_attack_ability = entity->try_get_component_as<gamestate::component::Attack>(
+			                           gamestate::component::component_t::ATTACK)
+		                           != nullptr;
+		auto ownership = entity->try_get_component_as<gamestate::component::Ownership>(
+			gamestate::component::component_t::OWNERSHIP);
+		if (ownership != nullptr) {
+			entry.owner = ownership->get_owners().get(now);
+		}
+		snapshot.entries.push_back(std::move(entry));
+	}
+	return snapshot;
+}
+
+
+PickResult pick_entity_at(
+	const std::shared_ptr<gamestate::GameState> &state,
+	const coord::phys3 &world_pos,
+	const time::time_t &now) {
+	PickResult pick;
+	pick.world_x = world_pos.ne.to_double();
+	pick.world_y = world_pos.se.to_double();
+
+	double closest_distance = std::numeric_limits<double>::infinity();
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		auto position = entity->try_get_component_as<gamestate::component::Position>(
+			gamestate::component::component_t::POSITION);
+		if (position == nullptr) {
+			continue;
+		}
+		auto center = position->get_positions().get(now);
+		double dx = pick.world_x - center.ne.to_double();
+		double dy = pick.world_y - center.se.to_double();
+
+		// Gameplay footprints provide deterministic picking for buildings.
+		// Units with a zero/small footprint still get a half-tile hit area,
+		// matching the MVP's center-based unit picking.
+		double radius_x = 0.5;
+		double radius_y = 0.5;
+		if (entity->has_footprint()) {
+			radius_x = std::max(radius_x, entity->footprint().radius_x());
+			radius_y = std::max(radius_y, entity->footprint().radius_y());
+		}
+		if (std::abs(dx) > radius_x or std::abs(dy) > radius_y) {
+			continue;
+		}
+
+		double distance = dx * dx + dy * dy;
+		if (distance < closest_distance
+		    or (distance == closest_distance and id < pick.entity)) {
+			closest_distance = distance;
+			pick.has_entity = true;
+			pick.entity = id;
+			auto ownership = entity->try_get_component_as<gamestate::component::Ownership>(
+				gamestate::component::component_t::OWNERSHIP);
+			if (ownership != nullptr) {
+				pick.entity_owner = ownership->get_owners().get(now);
+			}
+		}
+	}
+	return pick;
+}
+
+
+} // namespace
+
 
 Controller::Controller(const std::unordered_set<size_t> &controlled_factions,
                        size_t active_faction_id) :
@@ -197,25 +286,50 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 
 	ctx->bind(ev_mouse_lmb_ctrl, create_entity_action);
 
-	binding_func_t move_entity{[&](const event_arguments &args,
-	                               const std::shared_ptr<Controller> controller) {
+	binding_func_t context_action{[&](const event_arguments &args,
+	                                  const std::shared_ptr<Controller> controller) {
+		auto state = simulation->get_game()->get_state();
+		auto now = time_loop->get_clock()->get_time();
 		auto mouse_pos = args.mouse.to_phys3(camera);
-		event::EventHandler::param_map::map_t params{
-			{"type", gamestate::component::command::command_t::MOVE},
-			{"target", mouse_pos},
-			{"entity_ids", controller->get_selected()},
-		};
+		auto selection = make_selection_snapshot(
+			state, controller->get_selected(), now);
+		auto pick = pick_entity_at(state, mouse_pos, now);
+		auto action = resolve_context_action(
+			state, selection, pick, controller->get_controlled());
 
-		auto event = simulation->get_event_loop()->create_event(
+		event::EventHandler::param_map::map_t params;
+		switch (action.kind) {
+		case SemanticActionKind::MOVE:
+			params = {
+				{"type", gamestate::component::command::command_t::MOVE},
+				{"target", mouse_pos},
+				{"entity_ids", controller->get_selected()},
+			};
+			break;
+		case SemanticActionKind::ATTACK:
+			params = {
+				{"type", gamestate::component::command::command_t::ATTACK},
+				{"target_id", action.target_entity.value()},
+				{"entity_ids", controller->get_selected()},
+			};
+			break;
+		case SemanticActionKind::NO_OP:
+		case SemanticActionKind::REJECTED:
+		case SemanticActionKind::UNSUPPORTED:
+			log::log(DBG << "RMB context action " << action.kind_string()
+			             << ": " << action.reason);
+			return std::shared_ptr<event::Event>{nullptr};
+		}
+
+		return simulation->get_event_loop()->create_event(
 			"game.send_command",
 			simulation->get_commander(),
-			simulation->get_game()->get_state(),
-			time_loop->get_clock()->get_time(),
+			state,
+			now,
 			params);
-		return event;
 	}};
 
-	binding_action move_entity_action{forward_action_t::SEND, move_entity};
+	binding_action move_entity_action{forward_action_t::SEND, context_action};
 	Event ev_mouse_rmb{
 		event_class::MOUSE_BUTTON,
 		Qt::MouseButton::RightButton,
