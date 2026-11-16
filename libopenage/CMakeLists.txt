@@ -88,8 +88,24 @@ find_package(nyan CONFIG)
 
 # if this didn't work, we can download nyan like a git submodule.
 # this is the treeish to be checked out.
+#
+# NOTE: do NOT track nyan's origin/master here. nyan master requires a
+# C++26 compiler and probes for C++ module support
+# (nyan 3f9915d "buildsystem: require C++26 compilers and probe for
+# module support", merged in 9686f34). Configuring openage against it
+# fails during CMake's try_compile with:
+#
+#   The target named "cxx_module_check" has C++ sources that may use
+#   modules, but the compiler does not provide a way to discover the
+#   import graph dependencies. Use the CMAKE_CXX_SCAN_FOR_MODULES
+#   variable...
+#
+# which is CMake >= 4 refusing to probe modules for a compiler without
+# clang-scan-deps (Apple clang has none; Homebrew LLVM does). f462a1f is
+# the nyan master commit the project last built cleanly against.
+# Override with -DNYAN_CLONE_VERSION=<treeish> if you know a newer one works.
 if(NOT DEFINED NYAN_CLONE_VERSION)
-	set(NYAN_CLONE_VERSION origin/master)
+	set(NYAN_CLONE_VERSION f462a1f)
 endif()
 
 option(
