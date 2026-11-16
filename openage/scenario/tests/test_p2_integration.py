@@ -68,6 +68,19 @@ def _valid_map() -> MapDefinition:
 
 
 def _mission1_scenario() -> ScenarioDefinition:
+    # Placements mirror the committed P1 dump
+    # (docs/mvp/reports/mission1-scenario-dump/scenario.json), which is the
+    # declared source of truth for the ww_mvp reconstruction -- see
+    # assets/nyan/ww_mvp/install.sh (it regenerates the runtime pack via
+    # ScenarioDefinition.from_dump(DEFAULT_DUMP_DIR) -> write_mission_pack) and
+    # commit b97ae872 ("The dump scenario.json ... is the single source of
+    # truth"). The dump positions were intentionally moved for the P4.4 fixture
+    # (b97ae872: 8,8/8,9/1,1 -> 6,8/8,8/10,8; 59edcd69: y 8 -> 4) so the
+    # villager/enemy are 4 tiles apart with the TC between them. The nyan
+    # position members (_Pos8_8 etc.) are DEAD CODE on the production path
+    # (install.sh: the legacy nyan-only path is NOT used) and still hold the
+    # pre-b97ae872 values; do NOT "reconcile" this fixture back to the nyan.
+    # test_regenerated_dump_matches_committed_p1_dump pins this contract.
     return ScenarioDefinition(
         id="ww_mission1_reconstruction",
         source="hand-authored",
@@ -88,7 +101,7 @@ def _mission1_scenario() -> ScenarioDefinition:
                 entity_definition_fqon=(
                     "de2_base.data.game_entity.generic.villager.villager.Villager"
                 ),
-                player_id=0, position=(8, 8),
+                player_id=0, position=(6, 4),
             ),
             EntityPlacement(
                 scenario_object_id="PlayerTownCenter",
@@ -96,14 +109,14 @@ def _mission1_scenario() -> ScenarioDefinition:
                     "de2_base.data.game_entity.generic.town_center.town_center."
                     "TownCenter"
                 ),
-                player_id=0, position=(8, 9),
+                player_id=0, position=(8, 8),
             ),
             EntityPlacement(
                 scenario_object_id="EnemyVillager",
                 entity_definition_fqon=(
                     "de2_base.data.game_entity.generic.villager.villager.Villager"
                 ),
-                player_id=1, position=(1, 1),
+                player_id=1, position=(10, 4),
             ),
         ],
         areas=[],
