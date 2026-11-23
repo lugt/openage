@@ -215,6 +215,10 @@ Animation2dInfo parse_sprite_file(const util::Path &path,
 				  });
 	}
 
+	std::erase_if(angles, [&](const AngleData &a) {
+		return a.mirror_from < 0 and not frames.contains(a.degree);
+	});
+
 	// Order angles by degree
 	std::sort(angles.begin(),
 	          angles.end(),

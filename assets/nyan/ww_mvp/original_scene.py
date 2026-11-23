@@ -94,13 +94,19 @@ def _definitions(scene, original, destination, catalog):
     result = {}
     for identifier in sorted(required):
         unit = units[identifier]
-        if identifier in lookup:
+        graphic_id = unit['standing_graphic'][0]
+        has_sld = graphic_id >= 0 and (
+            original / 'resources/_common/drs/graphics' / (graphics[graphic_id]['file_name'] + '.sld')
+        ).is_file()
+        if identifier in lookup and (
+            not has_sld
+            or (destination.parents[2] / f'de2_base/data/game_entity/generic/{lookup[identifier][1]}/graphics/idle_{lookup[identifier][1]}.sprite').is_file()
+        ):
             name, folder = lookup[identifier]
             fqon = f'de2_base.data.game_entity.generic.{folder}.{folder}.{name}'
         else:
             fqon = f'{PREFIX}.Unit{identifier}'
-            graphic_id = unit['standing_graphic'][0]
-            if graphic_id < 0:
+            if not has_sld:
                 lines.extend(('', f'Unit{identifier}(entity.GameEntity):',
                               '    GameEntity.types = {}', '    GameEntity.abilities = {}',
                               '    GameEntity.modifiers = {}', '    GameEntity.variants = {}'))

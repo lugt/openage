@@ -1,219 +1,114 @@
 [![openage](/assets/logo/banner.svg)](http://openage.dev)
 =========================================================
 
-**openage**: a volunteer project to create a free engine clone of the *Genie Engine* used by *Age of Empires*, *Age of Empires II (HD)* and *Star Wars: Galactic Battlegrounds*, comparable to projects like [OpenMW](https://openmw.org/), [OpenRA](http://openra.net/),  [OpenSAGE](https://github.com/OpenSAGE/OpenSAGE/), [OpenTTD](https://openttd.org/) and [OpenRCT2](https://openrct2.org/).
+> **Fork 说明**：本仓库基于上游 [SFTtech/openage](https://github.com/SFTtech/openage) 进行扩展开发。原版 README 已归档至 **[README.upstream.md](README.upstream.md)**。
 
-openage uses the original game assets (such as sounds and graphics), but (for obvious reasons) doesn't ship them.
-To play, you require *[any of the original games (AoE1, AoE2)](/doc/media_convert.md)* or their *Definitive Edition* releases.
+---
 
-[![github stars](https://img.shields.io/github/stars/SFTtech/openage.svg)](https://github.com/SFTtech/openage/stargazers)
-[![#sfttech on matrix.org](/assets/doc/matrixroom.svg)](https://matrix.to/#/#sfttech:matrix.org)
-[![GPL licensed](/assets/doc/license.svg)](/legal/GPLv3)
+## 本版本与上游原版（SFTtech/openage）的核心区别
 
+在上游原版 `SFTtech/openage` 中，引擎正处于底层架构重写阶段，**尚不具备可玩性**（官方 README 标注 *"At the moment, 'gameplay' is basically non-functional"*）。
 
-Contact
--------
-| Contact          | Where?                                                                                             |
-| ---------------- | -------------------------------------------------------------------------------------------------- |
-| Issue Tracker    | [GitHub SFTtech/openage]                                                                           |
-| Development Blog | [blog.openage.dev]                                                                                 |
-| Subreddit        | [![reddit](/assets/doc/reddit.svg) /r/openage](https://www.reddit.com/r/openage/)                  |
-| Discussions      | [GitHub Discussions]                                                                               |
-| Matrix Chat      | [![matrix](/assets/doc/matrix.svg) `#sfttech:matrix.org`](https://matrix.to/#/#sfttech:matrix.org) |
-| Money Sink       | [![money sink](/assets/doc/liberapay.svg)](https://liberapay.com/SFTtech)                          |
+**本仓库在此基础上打通了完整的端到端 RTS 玩法闭环，支持直接加载并游玩《帝国时代 II：决定版》（AoE2: DE）原版威廉·华莱士（William Wallace）教学战役系列（Mission 1 & Mission 2），实现了初步完整可玩性：**
 
-[GitHub SFTtech/openage]: https://github.com/SFTtech/openage/issues
-[blog.openage.dev]: https://blog.openage.dev
-[GitHub Discussions]: https://github.com/SFTtech/openage/discussions
+| 模块 | 上游原版 `SFTtech/openage` | 本仓库（Playable William Wallace Fork） |
+| :--- | :--- | :--- |
+| **战役与关卡加载** | 仅支持底层测试场景，无法加载原版战役 | 支持直接解包并导入 DE2 原版 `cam1.aoe2campaign(.gpv)` 中的 **`1_Wallace_1.aoe2scenario`**（120×120 地图、5,698 个实体、31 个触发器）与 **`1_Wallace_2.aoe2scenario`**（120×120 地图、10,130 个实体、27 个触发器），同时提供轻量 16×16 教学关卡与桌面战役启动器 |
+| **触发器运行时（Trigger Runtime）** | 无完整场景触发器执行链路 | 完整实现事件驱动触发器运行时与原版 AoE2 条件/效果执行器（定时触发、区域检测、强制科技研发、动态刷兵增援、旗帜推进、大地之母村庄接管、英军反击与延时胜利链） |
+| **战斗与寻路系统** | 仅有基础移动演示，无完整战斗闭环 | 实现基于静态/动态碰撞网格（Static & Dynamic Occupancy）的 A* 寻路、多单位编队移动、近战索敌接近（Attack Approach）、按原版护甲/攻击类别结算伤害、建筑三阶段起火受损特效与死亡移除 |
+| **经济与城镇中心技能** | 无资源采集、建造、训练与科技研发 | 实现村民采集（浆果、伐木、采金、狩猎鹿/野猪、岸边捕鱼）、村民建造建筑（房屋、兵营、采矿场等，支持地基阶段与暂停/继续建造）、城镇中心训练村民与科技研发（如织布机 `Loom`、封建时代 `Feudal Age`），并遵循原版关卡禁用限制 |
+| **视野、迷雾与 HUD** | 无战争迷雾、小地图与战役 HUD | 实现三态战争迷雾（未探索 / 已探索 / 可见）、外交关系与盟友视野共享、精灵级点选与框选高亮、小地图、资源/人口顶栏、目标面板与单位命令面板 |
+| **全文明科技树导出** | 未导出完整文明科技树目录 | 支持从本机 DE2 `empires2_x2_p1.dat` 流式导出全部文明、单位、建筑与科技依赖图（`scripts/export_tech_trees.py`） |
 
-Technical foundation
---------------------
+---
 
-| Technology   | Component                                                     |
-| ------------ | ------------------------------------------------------------- |
-| **C++20**    | Engine core                                                   |
-| **Python3**  | Scripting, media conversion, in-game console, code generation |
-| [**Cython**] | Python/C++ Glue code                                          |
-| [**Qt6**]    | Graphical user interface                                      |
-| [**CMake**]  | Build system                                                  |
-| [**OpenGL**] | Rendering, shaders                                            |
-| [**Opus**]   | Audio codec                                                   |
-| [**nyan**]   | Content Configuration and Modding                             |
-| [**Humans**] | Mixing together all of the above                              |
+## 真机运行截图（Mission 1 & Mission 2）
 
-[**Cython**]: https://cython.org/
-[**Qt6**]: https://contribute.qt-project.org/
-[**CMake**]: https://cmake.org/
-[**OpenGL**]: https://www.opengl.org/
-[**Opus**]: https://opus-codec.org/
-[**nyan**]: https://github.com/SFTtech/nyan
-[**Humans**]: https://www.youtube.com/watch?v=fQGbXmkSArs&t=18s
+### Mission 1 · 行军与战斗（Marching and Fighting）
 
-Goals
------
+#### 1. 原版 120×120 完整场景加载与触发器流程（`1_Wallace_1.aoe2scenario`）
+![Mission 1 Original Scenario](doc/images/ww_mission1_original.png)
 
-* Fully authentic look and feel
-    * This can only be approximated since the behavior of the original game is mostly undocumented,
-    and guessing/experimenting can only get you this close
-    * We will not implement useless artificial limitations (max 30 selectable units...)
-* An easily-moddable content format: [**nyan** yet another notation](https://github.com/SFTtech/nyan)
-* An integrated Python console and API, comparable to [blender](https://www.blender.org/)
-* AI scripting in Python, you can use [machine learning](http://scikit-learn.org/stable/)
-    * here is some [additional literature](http://www.deeplearningbook.org/)
-* Re-creating [free game assets](https://github.com/SFTtech/openage-data)
-* Multiplayer (obviously)
-* Matchmaking and ranking with a [haskell masterserver](https://github.com/SFTtech/openage-masterserver)
-* Optionally, [improvements](/doc/ideas/) over the original game
-* Awesome infrastructure such as our own [Kevin CI service](https://github.com/SFTtech/kevin)
+#### 2. 行军路线、战争迷雾、外交控制与小地图
+![Mission 1 Fog of War and Minimap](doc/images/ww_mission1_marching.png)
 
-But beware, for sanity reasons:
+#### 3. 摧毁英军前哨（原版三阶段火焰受损特效）与施工地基
+![Mission 1 Outpost Combat and Fire](doc/images/ww_mission1_combat.png)
 
-* No network compatibility with the original game.
-  You really wanna have the same problems again?
-* No binary compatibility with the original game.
-  A one-way script to convert maps/savegames/missions to openage is planned though.
+---
 
+### Mission 2 · 供养军队（Feeding the Army）
 
-Current State of the Project
-----------------------------
+#### 1. 原版 120×120 完整场景与资源采集教学（`1_Wallace_2.aoe2scenario`）
+![Mission 2 Original Scenario](doc/images/ww_mission2_original.png)
 
-**Important notice**: At the moment, "gameplay" is basically non-functional.
-We're implementing the internal game simulation (how units even do anything) with simplicity and extensibility in mind, so we had to get rid of the temporary (but kind of working) previous version.
-With these changes, we can (finally) actually make use of our converted asset packs and our nyan API!
-We're working day and night to make gameplay return\*.
-If you're interested, we wrote detailed explanations on our blog: [Part 1](https://blog.openage.dev/new-gamestate-2020.html), [Part 2](https://blog.openage.dev/engine-core-modules.html), [Monthly Devlog](https://blog.openage.dev/tag/news.html).
+#### 2. 村民采集（食物 / 木材 / 黄金）、城镇中心生产与库存目标统计
+![Mission 2 Feeding the Army Economy](doc/images/ww_mission2_feeding.png)
 
-*\* may not actually be every day and night*
+---
 
-|  Operating System   |                                                                                                       Build status                                                                                                        |
-| :-----------------: | :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-|     Debian Sid      | [![Kevin CI status](https://cidata.sft.lol/openage/branches/master/status.svg)](/kevinfile) |
-|  Ubuntu 24.04 LTS   |           [![Ubuntu 24.04 build status](https://github.com/SFTTech/openage/actions/workflows/ubuntu-24.04.yml/badge.svg?branch=master)](https://github.com/SFTtech/openage/actions/workflows/ubuntu-24.04.yml)            |
-|        macOS        |                              [![macOS build status](https://github.com/SFTtech/openage/workflows/macOS-CI/badge.svg)](https://github.com/SFTtech/openage/actions?query=workflow%3AmacOS-CI)                               |
-| Windows Server 2019 | [![Windows Server 2019 build status](https://github.com/SFTtech/openage/actions/workflows/windows-server-2019.yml/badge.svg?branch=master)](https://github.com/SFTtech/openage/actions/workflows/windows-server-2019.yml) |
-| Windows Server 2022 | [![Windows Server 2022 build status](https://github.com/SFTtech/openage/actions/workflows/windows-server-2022.yml/badge.svg?branch=master)](https://github.com/SFTtech/openage/actions/workflows/windows-server-2022.yml) |
+## 快速开始：直接运行 William Wallace 战役系列
 
-[Todo: Kevin #11]: https://github.com/SFTtech/kevin/issues/11
+### 1. 编译项目
+安装依赖（参见 [doc/building.md](doc/building.md)），然后构建：
 
+```bash
+./configure --download-nyan
+cmake --build bin -j8
+```
 
-Installation Packages
----------------------
+### 2. 启动桌面战役选择器
+在仓库根目录下直接运行：
 
-There are many missing parts for an actually working game.
-So if you "just wanna play", [you'll be disappointed](#current-state-of-the-project), unfortunately.
+```bash
+bash scripts/run_campaign.sh
+```
 
-We strongly recommend building the program from source to get the latest, greatest, and shiniest project state :)
+也可以通过命令行直接指定关卡启动：
 
+```bash
+# 启动第 1 关：Marching and Fighting（检测到本机 AoE2:DE 时自动加载原版 120x120 场景）
+./venv/bin/python3 scripts/campaign_launcher.py --mode marching
 
-* For **Linux** check at [repology](https://repology.org/project/openage/versions) if your distribution has any packages available. Otherwise, you need to build from source.
-  We don't release `*.deb`, `*.rpm`, Flatpak, snap or AppImage packages yet.
-* For **Windows** check our [release page](https://github.com/SFTtech/openage/releases) for the latest installer.
-  Otherwise, you need to build from the source.
+# 启动第 2 关：Feeding the Army（检测到本机 AoE2:DE 时自动加载原版 120x120 场景）
+./venv/bin/python3 scripts/campaign_launcher.py --mode feeding
 
-* For **macOS** we currently don't have any packages, you need to build from source.
+# 启动第 1 关原版存档地形预览
+./venv/bin/python3 scripts/campaign_launcher.py --mode terrain
+```
 
-If you need help, maybe our [troubleshooting guide](/doc/troubleshooting.md) helps you.
+### 3. 手动提取与安装原版战役场景（可选）
+如果本机安装了 Steam 版《Age of Empires II: Definitive Edition》，可以单独运行导出脚本与安装脚本：
 
+```bash
+# 1. 导出全文明科技树与图形目录
+./venv/bin/python3 scripts/export_tech_trees.py
 
-Quickstart
-----------
+# 2. 从本机 cam1.aoe2campaign(.gpv) 解包提取原版第 1、2 关
+./venv/bin/python3 scripts/export_wallace_scenarios.py
 
-* **How do I get this to run on my box?**
-    1. [Clone](https://docs.github.com/repositories/creating-and-managing-repositories/cloning-a-repository) the repo.
-    2. Install dependencies. See [doc/building.md](/doc/building.md#dependency-installation) to get instructions for your favorite platform.
-    3. Build the project:
-   ```
-   ./configure --download-nyan
-   make
-   ```
+# 3. 安装原版第 1 关或第 2 关并启动窗口
+bash assets/nyan/ww_mvp/install.sh --original-scenario logs/wallace-original/mission-1.json "$HOME/Library/Application Support/Steam/steamapps/common/AoE2DE/AgeOfEmpires2Data"
+bash scripts/run_ww_mission1.sh
+```
 
-**Alternative approach:**
-You can build and run the project using Docker. See [Running with docker](/doc/build_instructions/docker.md) for more details.
+### 4. 运行自动化回归验证
 
-* **I compiled everything. Now how do I run it?**
-    * Execute `cd bin && ./run main`.
-    * [The convert script](/doc/media_convert.md) will transform original assets into openage formats, which are a lot saner and more moddable.
-    * Use your brain and react to the things you'll see.
+```bash
+# 原版第 1 关 / 第 2 关完整战役流程无头回归测试
+./bin/run test -d gamestate.tests.simulation_demo 53
 
-* **Waaaaaah! It...**
-    * segfaults
-    * prints error messages I don't want to read
-    * ate my dog
+# 35 项核心玩法与寻路/战斗/HUD 回归测试套件
+bash scripts/p4_4d_regression.sh --regression
 
-All of those are features, not bugs.
+# Python 场景 IR / 转换器 / 科技树单元测试
+./venv/bin/pytest openage/scenario/tests scripts/tests
+```
 
-To turn them off, use `./bin/run --dont-segfault --no-errors --dont-eat-dog`.
+---
 
+## 上游项目文档与许可证
 
-If this still does not help, try our [troubleshooting guide](/doc/troubleshooting.md), the [contact section](#contact)
-or the [bug tracker](https://github.com/SFTtech/openage/issues).
-
-Contributing
-============
-
-You might ask yourself now "Sounds cool, but how do I participate
-and ~~get famous~~ contribute useful features?".
-
-Fortunately for you, there is a lot to do and we are very grateful for your help.
-
-## Where do I start?
-
-* **Check the issues** [labelled with `good first issue`](https://github.com/SFTtech/openage/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). These are tasks that you can start right away and don't require much previous knowledge.
-* **Ask us** in the [chat](https://matrix.to/#/#sfttech:matrix.org). Someone there could need
-  help with something.
-* You can also **take the initiative** and fix a bug you found, create an issue for discussion or
-  implement a feature that we never thought of, but always wanted.
-
-
-## Ok, I found something. What now?
-
-* **[Tell us](#contact)**, if you haven't already. Chances are that we have additional information
-  and directions.
-* **[Read the docs](/doc)**. They will answer most "administrative"
-  questions like what code style is used and how the engine core parts are connected.
-* **Read the code** and get familiar with the engine component you want to work with.
-* Do not hesitate to **[ask us for help](#contact)** if you do not understand something.
-
-
-## How do I contribute my features/changes?
-
-* Read the **[contributing guide](/doc/contributing.md)**.
-* You can upload work-in-progress (WIP) versions or drafts of your contribution to get feedback or support.
-* Tell us (again) when you want us to review your work.
-
-## I want to help, but I'm not a programmer...
-
-Then openage might be a good reason to become one! We have many issues and tasks for beginners. You
-just have to ask and we'll find something. Alternatively, lurking is also allowed.
-
-----
-
-Cheers, happy hecking!
-
-
-Development Process
--------------------
-
-What does openage development look like in practice?
-
-* extensive [synchronization](#contact)!
-* [doc/development.md](/doc/development.md).
-
-How can I help?
-
-* [doc/contributing.md](/doc/contributing.md).
-
-All documentation is also in this repo:
-
-* Code documentation is embedded in the sources for Doxygen (see [doc readme](/doc/README.md)).
-* Have a look at the [doc directory](/doc/). This folder tends to get outdated when code changes.
-
-
-License
--------
-
-**GNU GPLv3** or later; see [copying.md](copying.md) and [legal/GPLv3](/legal/GPLv3).
-
-I know that probably nobody is ever gonna look at the `copying.md` file,
-but if you want to contribute code to openage, please take the time to
-skim through it and add yourself to the authors list.
+- 上游原始说明文档：**[README.upstream.md](README.upstream.md)**
+- 构建与依赖指南：**[doc/building.md](doc/building.md)**
+- 许可证：**GNU GPLv3** or later（详见 [copying.md](copying.md) 与 [legal/GPLv3](legal/GPLv3)）

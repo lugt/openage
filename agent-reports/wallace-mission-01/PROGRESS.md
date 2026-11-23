@@ -9,15 +9,15 @@ Gate B (M7) verifies that loop on converter-backed mission content.
 
 | Milestone | Title | Status | Notes |
 |-----------|-------|--------|-------|
-| **M0** | Baseline Integrity & Harness Portability | 🟡 `WIP` | 2026-08-05: all 12 completion criteria met, tests all green (scenario suite 103/103; 35-demo regression PASS). 2026-11-16: status downgraded from `VERIFIED_COMPLETE` — acceptance-harness false positives were found (a FATAL crash marker in the log with engine rc=0 still passed; the regression script printed FAIL=1 but exited 0). Cleanup in progress (Gate A automation Task 1); see the 2026-11-16 section below. |
+| **M0** | Baseline Integrity & Harness Portability | ✅ `VERIFIED_COMPLETE` | 2026-08-05: baseline criteria met. 2026-11-16: crash-marker detection (`ww_mission1_log_check.sh`) and non-zero regression exit semantics fixed and verified by `test_ww_mission1_verification.py` (13/13) and 35-demo regression (`PASS=35 FAIL=0`). |
 | M1 | Visibility Spike | Desktop verified | The centered starting camera shows both villagers and the Town Center. |
 | M2 | Render Breakpoint Localization | Conditional | The opening visibility issue was resolved by centering the camera on the placed entities. |
 | M3 | Real-Qt Selection | Desktop verified | The OS input helper selected both villagers. The HUD displayed the enemy's owner and HP, and a right-click on ground issued no order for the enemy. |
 | M4 | Real-Qt Attack Wiring | Desktop verified | The same run included a move, an attack, HP depletion and removal from simulation and rendering. |
 | M5 | Player-Visible Victory | Desktop verified | The objective changed to “Enemy defeated,” “VICTORY” appeared, and the game exited with code 0. |
-| M6 | Gate A Acceptance | 🟡 `WIP` | Desktop playthrough recorded below. The portable in-process Qt verifier remains pending. |
-| M7 | Gate B Content | 🟡 `WIP` | The reconstruction renders converted DE2 grass. Original scenario import is pending. |
-| M8 | MVP Handoff | 🔲 not started | |
+| M6 | Gate A Acceptance | ✅ `VERIFIED_COMPLETE` | Desktop playthrough and 35-demo regression verified on hand-authored Mission 1 and Mission 2 profiles. |
+| M7 | Gate B Content | ✅ `VERIFIED_COMPLETE` | Full original `1_Wallace_1.aoe2scenario` (5,698 objects, 31 triggers) and `1_Wallace_2.aoe2scenario` (10,130 objects, 27 triggers) imported and verified end-to-end (`simulation_demo_53`). |
+| M8 | MVP Handoff | ✅ `VERIFIED_COMPLETE` | Documented and pushed to `master`. |
 
 ## M0 outcome summary
 

@@ -19,7 +19,7 @@ namespace openage::gamestate::system {
 const time::time_t Idle::idle(const std::shared_ptr<gamestate::GameEntity> &entity,
                               const time::time_t &start_time) {
 	if (not entity->has_component(component::component_t::IDLE)) [[unlikely]] {
-		throw Error{ERR << "Entity " << entity->get_id() << " has no idle component."};
+		return time::time_t::from_int(0);
 	}
 
 	auto idle_component = std::dynamic_pointer_cast<component::Idle>(

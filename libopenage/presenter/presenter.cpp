@@ -293,7 +293,10 @@ void Presenter::init_gui() {
 				auto position = entity->try_get_component_as<gamestate::component::Position>(
 					gamestate::component::component_t::POSITION);
 				auto ownership = entity->try_get_component_as<gamestate::component::Ownership>(gamestate::component::component_t::OWNERSHIP);
-                if (position and (not runtime->original_scenario() or (ownership and ownership->get_owners().get(time::time_t{0}) == 0))) {
+                if (position and (not runtime->original_scenario()
+                                  or (ownership and ownership->get_owners().get(time::time_t{0}) == 0
+                                      and (entity->has_component(gamestate::component::component_t::MOVE)
+                                           or entity->has_component(gamestate::component::component_t::BUILD))))) {
 					center = center + (position->get_positions().get(time::time_t{0}).to_scene3() - origin);
 					++positioned;
 				}
