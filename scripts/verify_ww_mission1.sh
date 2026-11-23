@@ -16,7 +16,10 @@
 #      they exist on disk.
 #   4. real game startup    -- scripts/run_ww_mission1.sh under a timeout.
 #      timeout-kill (124/137) = process was still alive = PASS; a crash
-#      (134=SIGABRT, 139=SIGSEGV, ...) = FAIL. 0 = clean exit = PASS.
+#      (134=SIGABRT, 139=SIGSEGV, ...) = FAIL. 0 = clean exit = PASS --
+#      but ONLY if the log contains no crash marker (FATAL: terminate has
+#      been called / uncaught exception / SIGSEGV): a marker is ENGINE_FAIL
+#      even when the process exited 0.
 #
 # Per-stage CLASSIFICATION (so engine/content/harness/environment problems
 # are distinguishable, never lumped into a single "FAIL"):
@@ -44,6 +47,20 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 cd "$REPO"
+
+# Shared crash-marker check (FATAL: terminate has been called / uncaught
+# exception / SIGSEGV, excluding the launch scripts' own exit-code help
+# lines, which end up in the stage-4 log because it captures
+# run_ww_mission1.sh stdout). Fail fast if the checker cannot be sourced:
+# under `set -uo pipefail` (no -e) a failed source would otherwise continue
+# silently, ww_mission1_log_has_fatal would be command-not-found (falsy in
+# the stage-4 elif), and a crash-marker log would pass -- the exact
+# false-positive this checker exists to prevent. A broken harness must not
+# verify anything: exit 1 (this script's HARD_FAIL semantics).
+source "$REPO/scripts/lib/ww_mission1_log_check.sh" || {
+	echo "HARNESS_FAIL: cannot source $REPO/scripts/lib/ww_mission1_log_check.sh (missing or unreadable); aborting -- refusing to verify without crash-marker detection" >&2
+	exit 1
+}
 
 CONV="$REPO/assets/converted"
 HARD_FAIL=0
@@ -254,6 +271,17 @@ deferred_log="$(mktemp -t ww_deferred_media.XXXXXX)"
 : > "$missing_log"; : > "$excluded_log"; : > "$deferred_log"
 
 checked=0; missing=0; excluded=0; deferred=0
+pack="$CONV/ww_mvp/campaign/william_wallace/scenario.json"
+if grep -Fq '"de2_base.data.terrain.grass.grass.Grass"' "$pack" 2>/dev/null; then
+	for ext in terrain texture png; do
+		grass_media="$CONV/de2_base/data/terrain/grass/graphics/texture_grass.$ext"
+		checked=$((checked+1))
+		if [ ! -s "$grass_media" ]; then
+			echo "  MISSING   $grass_media  <-  Mission 1 Grass" >> "$missing_log"
+			missing=$((missing+1))
+		fi
+	done
+fi
 for nyan in "${ACTIVE_NYAN[@]}"; do
 	if [ ! -f "$nyan" ]; then
 		echo "  WARN active nyan missing: $nyan"
@@ -380,6 +408,15 @@ if [ "$rc4" -eq 127 ]; then
 	classify 4 HARNESS_FAIL "run_ww_mission1.sh or bin/run not found / not executable (rc=127); log: $LOG4"
 elif [ "$loader_err4" -gt 0 ]; then
 	classify 4 ENV_BLOCKED "shared-library loader/ABI failure at startup (see $LOG4); rebuild libopenage"
+elif ww_mission1_log_has_fatal "$LOG4"; then
+	# Crash-marker audit BEFORE the rc-based branches: the engine's
+	# terminate/SIGSEGV handlers (libopenage/error/handlers.cpp) can leave
+	# "FATAL: terminate has been called" / "uncaught exception" / an ANSI
+	# "SIGSEGV" in the log while the process still exits 0, so rc=0 alone is
+	# NOT proof of success. (The matched evidence lines were printed above;
+	# the scripts' own "139=SIGSEGV" exit-code help lines in this same log
+	# are excluded by the shared checker.)
+	classify 4 ENGINE_FAIL "crash marker in startup log (FATAL: terminate has been called / uncaught exception / SIGSEGV) even though rc=$rc4; log: $LOG4"
 elif [ "$rc4" -eq 134 ] || [ "$rc4" -eq 139 ]; then
 	# Crash. Do NOT paper this over as "race". Save the log + capture
 	# core + run gdb for backtrace and prove whether the crash is

@@ -2,6 +2,10 @@
 
 #pragma once
 
+#include "time/time.h"
+#include "coord/phys.h"
+#include "gamestate/types.h"
+
 #include <memory>
 #include <vector>
 
@@ -74,6 +78,8 @@ class AssetManager;
 } // namespace renderer
 
 namespace presenter {
+
+class HudQmlAdapter;
 
 namespace viewmodel {
 class SelectionModel;
@@ -215,6 +221,19 @@ protected:
 	std::shared_ptr<renderer::camera::Camera> camera;
 
 	/**
+	 * State exposed to the mission QML. The adapter outlives the QML engine.
+	 */
+	std::shared_ptr<HudQmlAdapter> mission_hud;
+	void send_economy_action(gamestate::entity_id_t actor, const nyan::fqon_t &option,
+	                         std::optional<coord::phys3> position = std::nullopt);
+	std::optional<std::pair<gamestate::entity_id_t, nyan::fqon_t>> pending_build;
+	bool placement_pressed = false;
+	bool mission_ui_pressed = false;
+	bool attack_pointer = false;
+	time::time_t next_minimap_update{0};
+	void update_campaign_map();
+
+	/**
 	 * Qt-based GUI for interface.
 	 */
 	std::shared_ptr<renderer::gui::GUI> gui;
@@ -290,7 +309,6 @@ protected:
 	 * Renderer-facing overlay state (entity id -> colour). Subscribes
 	 * to SelectionModel and rebuilds on every change.
 	 */
-	std::shared_ptr<viewmodel::SelectionOverlay> selection_overlay;
 
 	/**
 	 * Whether `init_all()` (graphics + GUI + input) has been driven.

@@ -27,6 +27,8 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include "gamestate/types.h"
 #include <memory>
 #include <string>
 
@@ -48,7 +50,8 @@ namespace gamestate::event {
 
 class WaypointReachedHandler : public openage::event::OnceEventHandler {
 public:
-	WaypointReachedHandler();
+	using Notify = std::function<void(entity_id_t, time::time_t)>;
+	explicit WaypointReachedHandler(Notify notify = {});
 	~WaypointReachedHandler() = default;
 
 	void setup_event(const std::shared_ptr<openage::event::Event> &event,
@@ -63,12 +66,15 @@ public:
 	time::time_t predict_invoke_time(const std::shared_ptr<openage::event::EventEntity> &target,
 	                                 const std::shared_ptr<openage::event::State> &state,
 	                                 const time::time_t &at) override;
+private:
+	Notify notify;
 };
 
 
 class MovementArrivedHandler : public openage::event::OnceEventHandler {
 public:
-	MovementArrivedHandler();
+	using Notify = std::function<void(entity_id_t, time::time_t)>;
+	explicit MovementArrivedHandler(Notify notify = {});
 	~MovementArrivedHandler() = default;
 
 	void setup_event(const std::shared_ptr<openage::event::Event> &event,
@@ -83,6 +89,8 @@ public:
 	time::time_t predict_invoke_time(const std::shared_ptr<openage::event::EventEntity> &target,
 	                                 const std::shared_ptr<openage::event::State> &state,
 	                                 const time::time_t &at) override;
+private:
+	Notify notify;
 };
 
 

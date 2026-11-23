@@ -106,7 +106,7 @@ class DE2MediaSubprocessor:
                 if sequence_type == 0x00:
                     layer_mode = LayerMode.OFF
 
-                elif sequence_type & 0x08:
+                elif sequence_type & 0x08 or sprite.get_filename().startswith("attack_"):
                     layer_mode = LayerMode.ONCE
 
                 else:

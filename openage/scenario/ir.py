@@ -51,6 +51,7 @@ required by the spec are enforced at construction time via
 from __future__ import annotations
 
 import dataclasses
+import math
 import json
 import pathlib
 import typing as T
@@ -118,6 +119,9 @@ class MapDefinition:
         _ensure_positive_int("height", self.height)
         _ensure_dense("terrain_ids", self.terrain_ids, self.width, self.height)
         _ensure_dense("elevation", self.elevation, self.width, self.height)
+        if any(type(height) is not int or not 0 <= height <= 255
+               for height in self.elevation):
+            raise InvalidIR("elevation values must be integers from 0 to 255")
 
     def to_dict(self) -> dict[str, T.Any]:
         return {
@@ -135,6 +139,45 @@ class MapDefinition:
             terrain_ids=list(d["terrain_ids"]),
             elevation=list(d["elevation"]),
         )
+
+
+    @classmethod
+    def from_dump(cls, data: dict[str, T.Any]) -> "MapDefinition":
+        """Reassemble dense row-major tile data from a mission-pack map."""
+        width, height = data["width"], data["height"]
+        _ensure_positive_int("width", width)
+        _ensure_positive_int("height", height)
+        tiles = [None] * (width * height)
+        elevations = [None] * (width * height)
+        terrain_ids, heights = data["terrain_ids_unique"], data["elevation_unique"]
+        if not data.get("chunks"):
+            if len(terrain_ids) != 1 or len(heights) != 1:
+                raise InvalidIR("a legacy map without chunks must have uniform terrain and elevation")
+            return cls(width, height, terrain_ids * data["terrain_ids_count"],
+                       heights * data["elevation_count"])
+
+        for chunk in data["chunks"]:
+            x, y = chunk["offset"]["x"], chunk["offset"]["y"]
+            w, h = chunk["size"]["x"], chunk["size"]["y"]
+            if not (w > 0 and h > 0 and 0 <= x <= width - w and 0 <= y <= height - h):
+                raise InvalidIR(f"terrain chunk at ({x}, {y}) is out of bounds")
+            chunk_terrain = chunk["tile_fqons"]
+            chunk_heights = chunk.get("tile_elevations")
+            if chunk_heights is None:
+                if len(heights) != 1:
+                    raise InvalidIR("a mixed-elevation map needs tile_elevations in every chunk")
+                chunk_heights = heights * (w * h)
+            _ensure_dense("tile_fqons", chunk_terrain, w, h)
+            _ensure_dense("tile_elevations", chunk_heights, w, h)
+            for row in range(h):
+                start = (y + row) * width + x
+                if any(tile is not None for tile in tiles[start:start + w]):
+                    raise InvalidIR(f"overlapping terrain chunk at ({x}, {y})")
+                tiles[start:start + w] = chunk_terrain[row * w:(row + 1) * w]
+                elevations[start:start + w] = chunk_heights[row * w:(row + 1) * w]
+        if None in tiles:
+            raise InvalidIR("terrain chunks do not cover the map")
+        return cls(width, height, tiles, elevations)
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +231,7 @@ class EntityPlacement:
     scenario_object_id: str
     entity_definition_fqon: str
     player_id: int
-    position: tuple[int, int]
+    position: tuple[int | float, int | float]
     rotation: float = 0.0
     overrides: dict[str, T.Any] = dataclasses.field(default_factory=dict)
 
@@ -200,7 +243,10 @@ class EntityPlacement:
             raise InvalidIR(
                 f"player_id must be a non-negative int, got {self.player_id!r}"
             )
-        _ensure_non_negative_pair("position", self.position)
+        if len(self.position) != 2 or any(
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value < 0 for value in self.position):
+            raise InvalidIR(f"position must contain two finite non-negative coordinates, got {self.position!r}")
         if not isinstance(self.rotation, (int, float)) or isinstance(self.rotation, bool):
             raise InvalidIR(f"rotation must be a number, got {self.rotation!r}")
 
@@ -221,9 +267,9 @@ class EntityPlacement:
         # so the same parser consumes both the round-trip format produced by
         # :meth:`to_dict` and the P1 hand-written dump format.
         if isinstance(pos, dict):
-            x, y = int(pos["x"]), int(pos["y"])
+            x, y = pos["x"], pos["y"]
         else:
-            x, y = int(pos[0]), int(pos[1])
+            x, y = pos[0], pos[1]
         return cls(
             scenario_object_id=str(d["ScenarioObjectId"]),
             entity_definition_fqon=str(d["entity_definition_fqon"]),
@@ -406,6 +452,10 @@ class ScenarioDefinition:
     victory: VictoryDefinition
     schema_version: str = dataclasses.field(default=SCHEMA_VERSION)
     produced_at_commit: str = ""
+    diplomacy: tuple[tuple[int, int, str], ...] = ()
+    fog_of_war: bool = False
+    share_allied_vision: bool = False
+    original_scenario: dict[str, T.Any] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _ensure_nonempty_str("id", self.id)
@@ -438,6 +488,12 @@ class ScenarioDefinition:
             raise InvalidIR(f"duplicate scenario_object_id(s): {dupes}")
 
         valid_player_ids = set(player_ids)
+        pairs = set()
+        for source, target, relation in self.diplomacy:
+            if (source == target or source not in valid_player_ids or target not in valid_player_ids
+                    or (source, target) in pairs or relation not in {"ally", "neutral", "enemy"}):
+                raise InvalidIR(f"Invalid diplomacy relation: {(source, target, relation)!r}")
+            pairs.add((source, target))
         for p in self.placements:
             if p.player_id not in valid_player_ids:
                 raise InvalidIR(
@@ -464,6 +520,10 @@ class ScenarioDefinition:
             "areas": [a.to_dict() for a in self.areas],
             "triggers": [t.to_dict() for t in self.triggers],
             "victory": self.victory.to_dict(),
+            "diplomacy": [list(relation) for relation in self.diplomacy],
+            "fog_of_war": self.fog_of_war,
+            "share_allied_vision": self.share_allied_vision,
+            "original_scenario": self.original_scenario,
         }
 
     @classmethod
@@ -482,6 +542,10 @@ class ScenarioDefinition:
             victory=VictoryDefinition.from_dict(d["victory"]),
             schema_version=str(d.get("schema_version", cls.SCHEMA_VERSION)),
             produced_at_commit=str(d.get("produced_at_commit", "")),
+            diplomacy=tuple(tuple(relation) for relation in d.get("diplomacy", [])),
+            fog_of_war=d.get("fog_of_war", False),
+            share_allied_vision=d.get("share_allied_vision", False),
+            original_scenario=dict(d.get("original_scenario", {})),
         )
 
     @classmethod
@@ -508,13 +572,7 @@ class ScenarioDefinition:
         ]
         victory = VictoryDefinition.from_dict(sd["VictoryDefinition"])
 
-        m = sd["MapDefinition"]
-        map_def = MapDefinition(
-            width=int(m["width"]),
-            height=int(m["height"]),
-            terrain_ids=[m["terrain_ids_unique"][0]] * int(m["terrain_ids_count"]),
-            elevation=[int(m["elevation_unique"][0])] * int(m["elevation_count"]),
-        )
+        map_def = MapDefinition.from_dump(sd["MapDefinition"])
 
         return cls(
             id=str(sd.get("id", "ww_mission1_reconstruction")),
@@ -526,6 +584,10 @@ class ScenarioDefinition:
             areas=areas,
             triggers=triggers,
             victory=victory,
+            diplomacy=tuple(tuple(relation) for relation in sd.get("Diplomacy", [])),
+            fog_of_war=sd.get("fog_of_war", False),
+            share_allied_vision=sd.get("share_allied_vision", False),
+            original_scenario=dict(sd.get("original_scenario", {})),
             produced_at_commit=str(
                 dump["scenario"].get("produced_at_commit", "")
             ),

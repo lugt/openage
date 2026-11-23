@@ -19,7 +19,9 @@ class GuiRenderer;
  */
 class GuiQmlEngine {
 public:
-	explicit GuiQmlEngine(std::shared_ptr<GuiRenderer> renderer);
+	explicit GuiQmlEngine(std::shared_ptr<GuiRenderer> renderer,
+	                      const char *context_property_name,
+	                      QObject *context_property);
 	~GuiQmlEngine();
 
 private:

@@ -2,6 +2,8 @@
 
 #include "render_pass.h"
 
+#include <algorithm>
+
 #include "log/log.h"
 
 
@@ -51,26 +53,11 @@ void RenderPass::add_renderables(std::vector<Renderable> &&renderables, int64_t 
 		return;
 	}
 
-	// Index of the layer where the renderables will be inserted
 	size_t layer_index = 0;
-
-	// Priority of the last observed layer
-	int64_t current_priority = LAYER_PRIORITY_MAX;
-
-	// Find the index in renderables to insert the renderables
-	for (size_t i = 0; i < this->layers.size(); i++) {
-		auto &layer = this->layers.at(i);
-		if (layer.priority > priority) {
-			// Priority of the next layer is lower than the desired priority
-			// Insert the renderables directly before this layer
-			break;
-		}
-		current_priority = layer.priority;
-		layer_index = i;
+	while (this->layers.at(layer_index).priority < priority) {
+		++layer_index;
 	}
-
-	if (current_priority != priority) {
-		// Lazily add a new layer with the desired priority
+	if (this->layers.at(layer_index).priority != priority) {
 		this->add_layer(layer_index, priority);
 	}
 
@@ -104,6 +91,17 @@ void RenderPass::clear_renderables() {
 	// Keep layer definitions, but reset the length of each layer to 0
 	for (size_t i = 0; i < this->layers.size(); i++) {
 		this->renderables[i].clear();
+	}
+}
+
+void RenderPass::remove_renderables(const std::vector<std::shared_ptr<UniformInput>> &uniforms) {
+	if (uniforms.empty()) {
+		return;
+	}
+	for (auto &layer : this->renderables) {
+		std::erase_if(layer, [&uniforms](const Renderable &renderable) {
+			return std::find(uniforms.begin(), uniforms.end(), renderable.uniform) != uniforms.end();
+		});
 	}
 }
 

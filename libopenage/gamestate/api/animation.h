@@ -34,6 +34,7 @@ public:
 	 * @return Relative path to the animation sprite file.
 	 */
 	static const std::string get_animation_path(const nyan::Object &animation);
+	static std::string get_ability_animation_path(const nyan::Object &ability);
 
 	/**
 	 * Get the sprite paths for a collection of animations.

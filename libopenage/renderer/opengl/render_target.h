@@ -63,6 +63,7 @@ public:
 	 * @return Texture data with the image contents of the buffer.
 	 */
 	resources::Texture2dData into_data() override;
+	uint32_t read_uint_pixel(unsigned int attachment, size_t x, size_t y) const;
 
 	/**
 	 * Get the type of this render target.

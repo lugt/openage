@@ -8,11 +8,8 @@
 #include "log/log.h"
 #include "log/message.h"
 
-#include "gamestate/api/ability.h"
-#include "gamestate/api/animation.h"
-#include "gamestate/api/property.h"
-#include "gamestate/api/types.h"
 #include "gamestate/component/api/idle.h"
+#include "gamestate/component/api/build.h"
 #include "gamestate/component/types.h"
 #include "gamestate/game_entity.h"
 
@@ -27,15 +24,13 @@ const time::time_t Idle::idle(const std::shared_ptr<gamestate::GameEntity> &enti
 
 	auto idle_component = std::dynamic_pointer_cast<component::Idle>(
 		entity->get_component(component::component_t::IDLE));
-	auto ability = idle_component->get_ability();
-	if (api::APIAbility::check_property(ability, api::ability_property_t::ANIMATED)) {
-		auto property = api::APIAbility::get_property(ability, api::ability_property_t::ANIMATED);
-		auto animations = api::APIAbilityProperty::get_animations(property);
-		auto animation_paths = api::APIAnimation::get_animation_paths(animations);
-
-		if (animation_paths.size() > 0) [[likely]] {
-			entity->render_update(start_time, animation_paths[0]);
-		}
+	auto build = entity->try_get_component_as<component::Build>(component::component_t::BUILD);
+	auto construction = build ? build->get_construction_animation() : std::string{};
+	if (construction.empty()) {
+		entity->play_animation(idle_component->get_ability(), start_time);
+	}
+	else {
+		entity->render_update(start_time, construction);
 	}
 
 	// TODO: play sound

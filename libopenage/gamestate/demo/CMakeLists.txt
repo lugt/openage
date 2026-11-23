@@ -1,4 +1,6 @@
 add_sources(libopenage
+    original_wallace.cpp
+    tech_tree_export.cpp
     attack_demo.cpp
     demo_0.cpp
 	move_demo.cpp

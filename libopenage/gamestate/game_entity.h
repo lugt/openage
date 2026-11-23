@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -11,6 +13,7 @@
 #include "gamestate/component/types.h"
 #include "gamestate/component/api/footprint.h"
 #include "gamestate/types.h"
+#include "gamestate/action_option.h"
 #include "log/message.h"
 #include "time/time.h"
 #include "util/compiler.h"
@@ -71,6 +74,34 @@ public:
 	 * @param entity New render entity.
 	 */
 	void set_render_entity(const std::shared_ptr<renderer::world::RenderEntity> &entity);
+	void remove_from_renderer();
+
+	void set_death_animation(std::string path, time::time_t duration);
+	void set_corpse_animation(std::string path, time::time_t duration);
+	void render_death(const time::time_t &time);
+	struct ResourceSpot {
+		nyan::fqon_t definition;
+		nyan::fqon_t resource;
+		int64_t remaining;
+		bool requires_hunting;
+	};
+	std::optional<ResourceSpot> resource_spot;
+	std::vector<nyan::fqon_t> drop_containers;
+	bool is_harvestable_carcass() const {
+		return this->is_dead() and resource_spot and resource_spot->requires_hunting and resource_spot->remaining > 0;
+	}
+	int64_t genie_id = -1;
+	double line_of_sight = 0;
+	int64_t population_used = 0;
+	int64_t population_provided = 0;
+	nyan::fqon_t definition;
+	std::vector<ActionOption> action_options;
+	std::optional<nyan::Object> construct_ability;
+	uint64_t construction_order = 0;
+
+	void add_damage_animation(double max_health_percent, std::string path);
+	void render_damage(const time::time_t &time, int64_t previous_hp, int64_t current_hp, int64_t max_hp);
+	bool play_animation(const nyan::Object &ability, const time::time_t &time);
 
 	/**
 	 * Set the event manager of this entity.
@@ -220,7 +251,7 @@ public:
 	 *
 	 * @param type Component type.
 	 */
-	bool has_component(component::component_t type);
+	bool has_component(component::component_t type) const;
 
 	// --- P4.4B: gameplay footprint ---
 	// Footprint is plain data (NOT an openage Component), stored
@@ -313,6 +344,12 @@ private:
 	 * Render entity for pushing updates to the renderer. Can be \p nullptr.
 	 */
 	std::shared_ptr<renderer::world::RenderEntity> render_entity;
+	std::optional<time::time_t> animation_removal_time;
+	std::map<double, std::string> damage_animations;
+	std::string death_animation;
+	std::string corpse_animation;
+	time::time_t death_duration = 0;
+	time::time_t corpse_duration = 0;
 
 	/**
 	 * Event manager.

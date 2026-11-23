@@ -242,6 +242,7 @@ void setup_defaults(const std::shared_ptr<InputContext> &ctx) {
 
 	// also forward all other mouse button events
 	ctx->bind(event_class::MOUSE_BUTTON, {game_action, hud_action});
+	ctx->bind(event_class::MOUSE_BUTTON_DBL, {game_action});
 }
 
 

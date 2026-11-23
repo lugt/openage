@@ -2,6 +2,7 @@
 
 #include "entity_factory.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <deque>
@@ -10,6 +11,7 @@
 #include <unordered_set>
 
 #include "error/error.h"
+#include "assets/mod_manager.h"
 
 #include "curve/container/queue.h"
 #include "curve/discrete.h"
@@ -24,6 +26,7 @@
 #include "gamestate/activity/xor_event_gate.h"
 #include "gamestate/activity/xor_gate.h"
 #include "gamestate/api/activity.h"
+#include "gamestate/api/animation.h"
 #include "gamestate/api/patch.h"
 #include "gamestate/api/player_setup.h"
 #include "gamestate/component/api/attack.h"
@@ -125,28 +128,81 @@ EntityFactory::EntityFactory() :
 std::shared_ptr<GameEntity> EntityFactory::add_game_entity(const std::shared_ptr<openage::event::EventLoop> &loop,
                                                            const std::shared_ptr<GameState> &state,
                                                            player_id_t owner_id,
-                                                           const nyan::fqon_t &nyan_entity) {
+                                                           const nyan::fqon_t &nyan_entity,
+                                                           bool attach_renderer) {
 	auto entity = std::make_shared<GameEntity>(this->get_next_entity_id());
 	entity->set_manager(std::make_shared<GameEntityManager>(loop, state, entity));
 
 	// use the owner's data to initialize the entity
 	// this ensures that only the owner's tech upgrades apply
 	auto db_view = state->get_player(owner_id)->get_db_view();
+	entity->definition = nyan_entity;
 	init_components(loop, db_view, entity, nyan_entity);
 
-	if (this->render_factory) {
-		entity->set_render_entity(this->render_factory->add_world_render_entity());
+	// Converted damage overlays can be empty when the game uses particles.
+	// Register only animations that have frames in the installed assets.
+	if (entity->has_component(component::component_t::BUILD) and state->get_mod_manager()) {
+		const auto definition = db_view->get_object(nyan_entity);
+		auto objects = [&](const nyan::Object &obj, const char *member) {
+			std::vector<nyan::Object> result;
+			for (const auto &value : obj.get_set(member)) {
+				auto ref = std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr());
+				result.push_back(db_view->get_object(ref->get_name()));
+			}
+			return result;
+		};
+		for (const auto &tracker : objects(definition, "GameEntity.abilities")) {
+			if (not tracker.extends("engine.ability.type.AttributeChangeTracker")
+			    or tracker.get_object("AttributeChangeTracker.attribute").get_name()
+			           != "de2_base.data.util.attribute.types.Health") {
+				continue;
+			}
+			for (const auto &stage : objects(tracker, "AttributeChangeTracker.change_progress")) {
+				for (const auto &[type, value] : stage.get_dict("Progress.properties")) {
+					auto ref = std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr());
+					auto property = stage.get_view()->get_object(ref->get_name());
+					if (not property.extends("engine.util.progress.property.type.AnimationOverlay")) {
+						continue;
+					}
+					for (const auto &animation : objects(property, "AnimationOverlay.overlays")) {
+						auto path = api::APIAnimation::get_animation_path(animation);
+						const auto slash = path.find('/');
+						if (slash == std::string::npos) {
+							continue;
+						}
+						const auto mod = state->get_mod_manager()->get_modpack(path.substr(0, slash));
+						const auto file = mod->get_info().path / path.substr(slash + 1);
+						if (file.is_file() and file.open().read().find("\nframe ") != std::string::npos) {
+							entity->add_damage_animation(stage.get_float("Progress.right_boundary"), path);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (attach_renderer) {
+		this->attach_entity_renderer(entity);
 	}
 
 	return entity;
 }
 
+void EntityFactory::attach_entity_renderer(const std::shared_ptr<GameEntity> &entity) {
+	if (this->render_factory) {
+		entity->set_render_entity(this->render_factory->add_world_render_entity());
+	}
+}
+
 std::shared_ptr<Player> EntityFactory::add_player(const std::shared_ptr<openage::event::EventLoop> &loop,
                                                   const std::shared_ptr<GameState> &state,
-                                                  const nyan::fqon_t &player_setup) {
+                                                  const nyan::fqon_t &player_setup,
+                                                  std::optional<player_id_t> id) {
 	(void)loop;
 
-	auto player = std::make_shared<Player>(this->get_next_player_id(),
+	const auto player_id = id.value_or(this->next_player_id);
+	this->next_player_id = std::max(this->next_player_id, player_id + 1);
+	auto player = std::make_shared<Player>(player_id,
 	                                       state->get_db_view()->new_child());
 
 	// Empty PlayerSetup FQON -> debug/observer player with neither civ
@@ -244,6 +300,8 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 	nyan::set_t abilities = nyan_obj.get_set("GameEntity.abilities");
 
 	std::optional<nyan::Object> activity_ability;
+	std::optional<nyan::Object> resistance_ability;
+	std::optional<nyan::Object> foundation_ability;
 	for (const auto &ability_val : abilities) {
 		auto ability_fqon = std::dynamic_pointer_cast<nyan::ObjectValue>(ability_val.get_ptr())->get_name();
 		auto ability_obj = owner_db_view->get_object(ability_fqon);
@@ -260,6 +318,9 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 		else if (ability_parent == "engine.ability.type.Idle") {
 			auto idle = std::make_shared<component::Idle>(loop, ability_obj);
 			entity->add_component(idle);
+		}
+		else if (ability_parent == "engine.ability.type.LineOfSight") {
+			entity->line_of_sight = std::max(0.0, ability_obj.get_float("LineOfSight.range"));
 		}
 		else if (ability_parent == "engine.ability.type.Live") {
 			auto live = std::make_shared<component::Live>(loop, ability_obj);
@@ -295,40 +356,100 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 		// Each branch mounts a corresponding API component; behaviour is
 		// a stub for now - Phase C wires activity graphs / systems on top.
 		else if (ability_parent == "engine.ability.type.Gather") {
-			auto gather = std::make_shared<component::Gather>(loop, ability_obj);
-			entity->add_component(gather);
+			auto gather = entity->try_get_component_as<component::Gather>(component::component_t::GATHER);
+			if (not gather) {
+				gather = std::make_shared<component::Gather>(loop, ability_obj);
+				entity->add_component(gather);
+			}
+			gather->add_ability(ability_obj);
 		}
 		else if (ability_parent == "engine.ability.type.DropResources") {
 			auto storage = std::make_shared<component::ResourceStorage>(loop, ability_obj);
 			entity->add_component(storage);
 		}
 		else if (ability_parent == "engine.ability.type.Harvestable") {
-			// The "tree" or "gold mine" side of resource extraction. No
-			// entity-side component needed in the tutorial: harvestable
-			// spots live in the terrain handler. The branch is here so
-			// that the no-op is loud (we see we matched it) instead of
-			// falling through and being miscounted.
+			auto spot = ability_obj.get_object("Harvestable.resources");
+			const auto types = nyan_obj.get_set("GameEntity.types");
+			const bool animal = std::ranges::any_of(types, [](const auto &value) {
+				const auto name = std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr())->get_name();
+				return name.ends_with(".Herdable") or name.ends_with(".AnimalPrey") or name.ends_with(".AnimalPredator");
+			});
+			entity->resource_spot = GameEntity::ResourceSpot{
+				spot.get_name(), spot.get_object("ResourceSpot.resource").get_name(),
+				spot.get_int("ResourceSpot.starting_amount"), animal,
+			};
+		}
+		else if (ability_parent == "engine.ability.type.DropSite") {
+			for (const auto &entry : ability_obj.get_set("DropSite.accepts_from")) {
+				entity->drop_containers.push_back(std::dynamic_pointer_cast<nyan::ObjectValue>(entry.get_ptr())->get_name());
+			}
 		}
 		else if (ability_parent == "engine.ability.type.RegenerateResourceSpot") {
 			// Same: regeneration is owned by the terrain / spot handler.
 		}
-		else if (ability_parent == "engine.ability.type.Constructable"
-		      || ability_parent == "engine.ability.type.Foundation") {
-			// Both share the Build component - the Foundation phase is
-			// the placement shadow, Constructable kicks in once the
-			// foundation transforms into the real building.
+		else if (ability_parent == "engine.ability.type.Constructable") {
 			auto build = std::make_shared<component::Build>(loop, ability_obj);
 			entity->add_component(build);
 		}
+		else if (ability_parent == "engine.ability.type.Foundation") {
+			foundation_ability = ability_obj;
+		}
 		else if (ability_parent == "engine.ability.type.Create"
-		      || ability_parent == "engine.ability.type.ProductionQueue") {
+		         or ability_parent == "engine.ability.type.Research") {
+			const bool research = ability_parent == "engine.ability.type.Research";
+			const auto member = research ? "Research.researchables" : "Create.creatables";
+			for (const auto &entry : ability_obj.get_set(member)) {
+				const auto option = owner_db_view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(entry.get_ptr())->get_name());
+				const auto subject = option.get_object(research ? "ResearchableTech.tech" : "CreatableGameEntity.game_entity");
+				const auto cost = option.get_object(research ? "ResearchableTech.cost" : "CreatableGameEntity.cost");
+				if (not cost.extends("engine.util.cost.type.ResourceCost")) {
+					continue;
+				}
+				auto kind = research ? ActionKind::Research : ActionKind::Train;
+				if (not research) {
+					const auto subject_abilities = subject.get_set("GameEntity.abilities");
+					const bool water_only = std::ranges::any_of(subject_abilities, [&](const auto &entry) {
+						const auto ref = std::dynamic_pointer_cast<nyan::ObjectValue>(entry.get_ptr());
+						const auto requirement = owner_db_view->get_object(ref->get_name());
+						if (not requirement.extends("engine.ability.type.TerrainRequirement")) {
+							return false;
+						}
+						const auto types = requirement.get_set("TerrainRequirement.allowed_types");
+						return types.size() == 1 and std::ranges::all_of(types, [](const auto &value) {
+							return std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr())->get_name().ends_with(".Water");
+						});
+					});
+					if (water_only) {
+						continue; // Placement and ejection currently route on land.
+					}
+					bool eject = false;
+					for (const auto &mode : option.get_set("CreatableGameEntity.placement_modes")) {
+						const auto placement = owner_db_view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(mode.get_ptr())->get_name());
+						eject = eject or placement.extends("engine.util.placement_mode.type.Eject");
+						if (placement.extends("engine.util.placement_mode.type.Place")) {
+							kind = ActionKind::Build;
+							break;
+						}
+					}
+					if (kind == ActionKind::Train and not eject) {
+						continue;
+					}
+				}
+				ActionOption decoded{kind, option.get_name(), subject.get_name(), {},
+				                     option.get_float(research ? "ResearchableTech.research_time" : "CreatableGameEntity.creation_time")};
+				for (const auto &value : cost.get_set("ResourceCost.amount")) {
+					const auto amount = owner_db_view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr())->get_name());
+					decoded.cost[amount.get_object("ResourceAmount.type").get_name()] += amount.get_int("ResourceAmount.amount");
+				}
+				entity->action_options.push_back(std::move(decoded));
+			}
+		}
+		else if (ability_parent == "engine.ability.type.ProductionQueue") {
 			auto production = std::make_shared<component::Production>(loop, ability_obj);
 			entity->add_component(production);
 		}
-		else if (ability_parent == "engine.ability.type.Research") {
-			// Research is not in Phase C scope (tutorial skips it).
-			// Branch kept explicit so the ResearchableTech metadata is
-			// at least parsed into the entity rather than dropped.
+		else if (ability_parent == "engine.ability.type.ApplyContinuousEffect" and ability_fqon.ends_with(".Construct")) {
+			entity->construct_ability = ability_obj;
 		}
 		else if (ability_parent == "engine.ability.type.ApplyDiscreteEffect"
 		      || ability_parent == "engine.ability.type.RangedDiscreteEffect") {
@@ -342,10 +463,7 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 			entity->add_component(attack);
 		}
 		else if (ability_parent == "engine.ability.type.Resistance") {
-			// Resistance is consumed by Phase C4's damage system
-			// (lookup by attribute type). It can stay data-only on the
-			// nyan ability and still be reachable from the damage
-			// calculator.
+			resistance_ability = ability_obj;
 		}
 		else if (ability_parent == "engine.ability.type.Collision") {
 			// P4.4B.1 §1: REQUIRED Footprint. The entity
@@ -404,16 +522,25 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 			entity->set_footprint(fp);
 		}
 		else if (ability_parent == "engine.ability.type.PassiveTransformTo") {
-			// Death / unit upgrade. Phase C4 adds Live<=0 -> Despawn hook.
+			if (ability_fqon.ends_with(".Death")) {
+				entity->set_death_animation(api::APIAnimation::get_ability_animation_path(ability_obj),
+				                            ability_obj.get_float("PassiveTransformTo.transform_time"));
+			}
 		}
 		else if (ability_parent == "engine.ability.type.Despawn") {
-			// Despawn timer is configured by the engine from
-			// Despawn.despawn_time; no entity-side component needed yet.
+			entity->set_corpse_animation(api::APIAnimation::get_ability_animation_path(ability_obj),
+			                             ability_obj.get_float("Despawn.despawn_time"));
 		}
-		else if (ability_parent == "engine.ability.type.ProvideContingent") {
-			// Population headroom provider (e.g. houses). Phase B/C
-			// will sum ProvideContingent.amount per-player into a
-			// PopulationSpace counter; nothing to mount today.
+		else if (ability_parent == "engine.ability.type.ProvideContingent"
+		         or ability_parent == "engine.ability.type.UseContingent") {
+			const bool provides = ability_parent == "engine.ability.type.ProvideContingent";
+			auto &population = provides ? entity->population_provided : entity->population_used;
+			for (const auto &entry : ability_obj.get_set(provides ? "ProvideContingent.amount" : "UseContingent.amount")) {
+				const auto amount = owner_db_view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(entry.get_ptr())->get_name());
+				if (amount.get_object("ResourceAmount.type").get_name() == "de2_base.data.util.resource.types.PopulationSpace") {
+					population += amount.get_int("ResourceAmount.amount");
+				}
+			}
 		}
 		else {
 			// Unrecognised abilities are not silent: log them so that
@@ -422,6 +549,18 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 			log::log(MSG(warn) << "EntityFactory: unhandled ability parent "
 			                   << ability_parent << " on entity "
 			                   << nyan_entity);
+		}
+	}
+
+	std::ranges::sort(entity->action_options, {}, &ActionOption::subject);
+
+	if (foundation_ability and not entity->has_component(component::component_t::BUILD)) {
+		entity->add_component(std::make_shared<component::Build>(loop, *foundation_ability));
+	}
+	if (resistance_ability) {
+		auto live = entity->try_get_component_as<component::Live>(component::component_t::LIVE);
+		if (live) {
+			live->set_resistance(*resistance_ability);
 		}
 	}
 
@@ -576,13 +715,6 @@ void EntityFactory::init_activity(const std::shared_ptr<openage::event::EventLoo
 entity_id_t EntityFactory::get_next_entity_id() {
 	auto new_id = this->next_entity_id;
 	this->next_entity_id++;
-
-	return new_id;
-}
-
-player_id_t EntityFactory::get_next_player_id() {
-	auto new_id = this->next_player_id;
-	this->next_player_id++;
 
 	return new_id;
 }

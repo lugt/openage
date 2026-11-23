@@ -4,6 +4,10 @@
 
 #include <stdexcept>
 
+#include "coord/tile.h"
+#include "gamestate/game_entity.h"
+#include "gamestate/component/internal/position.h"
+
 #include "log/log.h"
 #include "log/message.h"
 
@@ -168,10 +172,55 @@ std::vector<DependencyKey> TriggerStateCondition::dependencies() const {
 // ---------------------------------------------------------------------------
 
 
+namespace {
+
+class EntityVisitedArea final : public TriggerCondition {
+public:
+	EntityVisitedArea(const gamestate::GameState &state,
+	                  const gamestate::MissionTriggerCondition &ir,
+	                  const gamestate::MissionAreaDefinition &area) :
+		id{state.get_entity_id_by_instance(ir.target_scenario_object_id).value()},
+		left{std::stoi(area.geometry.at("left"))},
+		top{std::stoi(area.geometry.at("top"))},
+		right{std::stoi(area.geometry.at("right"))},
+		bottom{std::stoi(area.geometry.at("bottom"))} {}
+
+	bool evaluate(const gamestate::GameState &state, time::time_t at) const override {
+		if (not this->visited and state.has_game_entity(this->id)) {
+			auto position = state.get_game_entity(this->id)->try_get_component_as<gamestate::component::Position>(
+				gamestate::component::component_t::POSITION);
+			if (position) {
+				const auto tile = position->get_positions().get(at).to_tile();
+				this->visited = tile.ne >= left and tile.ne <= right and tile.se >= top and tile.se <= bottom;
+			}
+		}
+		return this->visited;
+	}
+
+	std::vector<DependencyKey> dependencies() const override {
+		return {{DependencyKind::ENTITY, this->id}};
+	}
+
+private:
+	gamestate::entity_id_t id;
+	int left, top, right, bottom;
+	mutable bool visited = false;
+};
+
+} // namespace
+
 std::shared_ptr<TriggerCondition> make_trigger_condition(
 	const openage::gamestate::GameState &state,
 	openage::time::time_t trigger_delay,
-	const gamestate::MissionTriggerCondition &ir) {
+	const gamestate::MissionTriggerCondition &ir,
+	const gamestate::MissionAreaDefinition *area) {
+
+	if (ir.kind == "EntityVisitedArea") {
+		if (not area or not state.get_entity_id_by_instance(ir.target_scenario_object_id)) {
+			throw std::invalid_argument{"EntityVisitedArea requires a known area and entity"};
+		}
+		return std::make_shared<EntityVisitedArea>(state, ir, *area);
+	}
 
 	// The kind string in the IR is the stable CamelCase token
 	// emitted by the scenario writer and validated by

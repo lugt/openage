@@ -69,12 +69,14 @@ public:
 	 * Resolve a path between two cells for a mover with the given
 	 * half-extents. The NavigationGrid (terrain + static
 	 * occupancy) gates walkability; the inflated obstacle set
-	 * gates mover clearance.
+	 * gates mover clearance. A caller can also reject individual
+	 * steps, for example when another unit blocks the swept path.
 	 */
 	Path request_path(
 		openage::gamestate::scenario::CellPosition start,
 		openage::gamestate::scenario::CellPosition target,
-		MoverFootprint mover) const;
+		MoverFootprint mover,
+		const GridAStarPathfinder::StepAllowed &step_allowed = {}) const;
 
 	/**
 	 * Read-only access to the underlying grid (for diagnostics /

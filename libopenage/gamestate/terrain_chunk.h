@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <span>
+
 #include <vector>
 
 #include "coord/tile.h"
@@ -78,7 +80,7 @@ public:
 	 *
 	 * @param time Simulation time of the update.
 	 */
-	void render_update(const time::time_t &time);
+	void render_update(const time::time_t &time, std::span<const float> corner_heights = {});
 
 private:
 	/**

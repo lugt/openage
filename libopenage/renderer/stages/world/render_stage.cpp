@@ -2,6 +2,8 @@
 
 #include "render_stage.h"
 
+#include "renderer/opengl/render_target.h"
+
 #include "renderer/camera/camera.h"
 #include "renderer/camera/frustum_3d.h"
 #include "renderer/opengl/context.h"
@@ -10,6 +12,7 @@
 #include "renderer/resources/assets/asset_manager.h"
 #include "renderer/resources/shader_source.h"
 #include "renderer/resources/texture_info.h"
+#include "renderer/resources/texture_data.h"
 #include "renderer/shader_program.h"
 #include "renderer/stages/world/object.h"
 #include "renderer/texture.h"
@@ -60,7 +63,16 @@ void WorldRenderStage::add_render_entity(const std::shared_ptr<RenderEntity> ent
 
 void WorldRenderStage::update() {
 	std::unique_lock lock{this->mutex};
+	// Death is signaled by the simulation thread. Drop draw calls on the
+	// render thread, before the next frame is submitted.
 	auto current_time = this->clock->get_real_time();
+	std::erase_if(this->render_objects, [this, current_time](const auto &object) {
+		if (not object->is_removed(current_time)) {
+			return false;
+		}
+		this->render_pass->remove_renderables(object->get_uniforms());
+		return true;
+	});
 	auto &camera_frustum = this->camera->get_frustum_2d();
 	for (auto &obj : this->render_objects) {
 		obj->fetch_updates(current_time);
@@ -72,6 +84,7 @@ void WorldRenderStage::update() {
 
 		if (obj->is_changed()) {
 			if (obj->requires_renderable()) {
+				this->render_pass->remove_renderables(obj->get_uniforms());
 				auto layer_positions = obj->get_layer_positions(current_time);
 				static const Eigen::Matrix4f model_matrix = obj->get_model_matrix();
 
@@ -104,8 +117,26 @@ void WorldRenderStage::update() {
 				obj->set_uniforms(std::move(transform_unifs));
 			}
 		}
-		obj->update_uniforms(current_time);
+		obj->update_uniforms(current_time, this->visibility.get());
 	}
+}
+
+std::optional<uint32_t> WorldRenderStage::pick(size_t x, size_t y) const {
+	const auto [width, height] = this->id_texture->get_info().get_size();
+	if (x >= width or y >= height) {
+		return std::nullopt;
+	}
+	const auto target = std::dynamic_pointer_cast<opengl::GlRenderTarget>(this->render_pass->get_target());
+	const auto pixel = target ? target->read_uint_pixel(1, x, y)
+	                          : this->id_texture->into_data().read_pixel<uint32_t>(x, y);
+	return pixel == 0 ? std::nullopt : std::optional<uint32_t>{pixel - 1};
+}
+
+float WorldRenderStage::get_sprite_top(uint32_t id) const {
+	const auto object = std::ranges::find_if(this->render_objects, [id](const auto &obj) {
+		return obj->get_id() == id;
+	});
+	return object == this->render_objects.end() ? 0.0f : (*object)->get_sprite_top();
 }
 
 void WorldRenderStage::resize(size_t width, size_t height) {
@@ -146,6 +177,9 @@ void WorldRenderStage::initialize_render_pass(size_t width,
 }
 
 void WorldRenderStage::init_uniform_ids() {
+	WorldObject::fog_hidden = this->display_shader->get_uniform_id("fog_hidden");
+	WorldObject::picking_id = this->display_shader->get_uniform_id("u_id");
+	WorldObject::player_color = this->display_shader->get_uniform_id("player_color");
 	WorldObject::obj_world_position = this->display_shader->get_uniform_id("obj_world_position");
 	WorldObject::flip_x = this->display_shader->get_uniform_id("flip_x");
 	WorldObject::flip_y = this->display_shader->get_uniform_id("flip_y");

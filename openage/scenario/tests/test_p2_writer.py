@@ -31,6 +31,7 @@ import csv
 import hashlib
 import json
 import pathlib
+from dataclasses import replace
 
 import pytest
 
@@ -135,7 +136,7 @@ def test_writer_produces_all_four_files(tmp_path: pathlib.Path) -> None:
 def test_writer_scenario_json_round_trips_through_dump_loader(
     tmp_path: pathlib.Path,
 ) -> None:
-    s = _scenario_with_triggers()
+    s = replace(_scenario_with_triggers(), fog_of_war=True, share_allied_vision=True)
     write_mission_pack(s, tmp_path)
 
     # Use the shared loader (P1) to consume the fresh dump.
@@ -149,6 +150,8 @@ def test_writer_scenario_json_round_trips_through_dump_loader(
 
     # The P2 IR can consume the dump as well.
     ir = ScenarioDefinition.from_dump(tmp_path)
+    assert ir.fog_of_war and ir.share_allied_vision
+    assert ScenarioDefinition.from_dict(ir.to_dict()).share_allied_vision
     assert ir.map.width == 16
     assert ir.map.height == 16
     assert {p.scenario_object_id for p in ir.placements} == {
@@ -209,6 +212,22 @@ def test_writer_records_compact_dense_storage(tmp_path: pathlib.Path) -> None:
     assert len(md["terrain_ids_unique"]) == 1
     assert md["terrain_ids_unique"][0] == "grass"
     assert md["elevation_unique"] == [0]
+
+
+def test_mixed_map_round_trips_with_rectangular_chunks(tmp_path: pathlib.Path) -> None:
+    from dataclasses import replace
+
+    width, height = 13, 11
+    tiles = ["grass"] * (width * height)
+    elevations = [0] * (width * height)
+    tiles[2 * width + 12] = "water"
+    tiles[10 * width + 7] = "forest"
+    elevations[10 * width + 12] = 4
+    elevations[7 * width + 8] = 2
+    original = MapDefinition(width, height, tiles, elevations)
+    write_mission_pack(replace(_scenario_with_triggers(), map=original), tmp_path)
+
+    assert ScenarioDefinition.from_dump(tmp_path).map == original
 
 
 # ---------------------------------------------------------------------------

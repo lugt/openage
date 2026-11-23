@@ -237,14 +237,8 @@ def _load_players(players: list[PlayerDefinition]) -> dict[int, LoadedPlayer]:
     return out
 
 
-def _load_diplomacy(_scenario: ScenarioDefinition) -> dict[tuple[int, int], str]:
-    """Return an empty diplomacy matrix for the MVP reconstruction.
-
-    A future spec-compliant loader will populate
-    ``{(attacker_pid, defender_pid): stance}`` from
-    ``PlayerDefinition.diplomacy`` once that field lands in the IR.
-    """
-    return {}
+def _load_diplomacy(scenario: ScenarioDefinition) -> dict[tuple[int, int], str]:
+    return {(source, target): relation for source, target, relation in scenario.diplomacy}
 
 
 def _load_placements(

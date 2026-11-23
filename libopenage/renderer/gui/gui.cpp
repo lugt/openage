@@ -23,11 +23,14 @@ GUI::GUI(std::shared_ptr<qtgui::GuiApplication> app,
          const util::Path &source,
          const util::Path &rootdir,
          const util::Path &assetdir,
-         const std::shared_ptr<Renderer> &renderer) :
+         const std::shared_ptr<Renderer> &renderer,
+         const char *context_property_name,
+         QObject *context_property) :
 	application{app},
 	gui_renderer{std::make_shared<qtgui::GuiRenderer>(window)},
 	gui_input{std::make_shared<qtgui::GuiInput>(gui_renderer)},
-	engine{std::make_shared<qtgui::GuiQmlEngine>(gui_renderer)},
+	engine{std::make_shared<qtgui::GuiQmlEngine>(
+		gui_renderer, context_property_name, context_property)},
 	subtree{
 		gui_renderer,
 		engine,

@@ -2,191 +2,68 @@
 
 #include "pathfinding/attack_approach.h"
 
+#include <algorithm>
+#include <cmath>
+#include <optional>
+#include <tuple>
+#include <utility>
+
+#include "coord/tile.h"
 #include "gamestate/component/api/attack.h"
-#include "gamestate/component/api/footprint.h"
-#include "gamestate/component/api/move.h"
 #include "gamestate/component/internal/position.h"
-#include "gamestate/component/types.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
-#include "log/log.h"
-#include "log/message.h"
-#include "pathfinding/grid_astar.h"
-#include "scenario/static_occupancy_grid.h"
-
-#include <cmath>
-#include <cstdint>
-#include <set>
-#include <utility>
+#include "gamestate/map.h"
+#include "scenario/swept_aabb.h"
 
 
 namespace openage::pathfinding {
 
-
 namespace {
 
+using gamestate::component::Footprint;
+using gamestate::component::Position;
+using gamestate::component::component_t;
+using gamestate::scenario::CellPosition;
 
-using openage::gamestate::component::Footprint;
-using openage::gamestate::component::FootprintBounds;
-using openage::gamestate::component::Position;
-using openage::gamestate::scenario::CellPosition;
-
-
-// Footprint of an entity at its current Position.
-// Returns std::nullopt if the entity has no Footprint or no
-// Position component.
-struct CenteredFootprint {
-	int center_x{0};
-	int center_y{0};
-	double radius_x{0.0};
-	double radius_y{0.0};
-};
-
-std::optional<CenteredFootprint> centered_footprint_of(
-	const std::shared_ptr<openage::gamestate::GameState> &state,
-	openage::gamestate::entity_id_t id) {
-	if (not state->has_game_entity(id)) {
-		return std::nullopt;
-	}
-	auto e = state->get_game_entity(id);
-	if (not e->has_footprint()
-	    or not e->has_component(
-		    openage::gamestate::component::component_t::POSITION)) {
-		return std::nullopt;
-	}
-	auto fp = e->footprint();
-	auto pc = std::dynamic_pointer_cast<Position>(
-		e->get_component(
-			openage::gamestate::component::component_t::POSITION));
-	if (not pc) {
-		return std::nullopt;
-	}
-	auto sp = pc->get_positions().get(openage::time::time_t{0});
-	CenteredFootprint cf;
-	cf.center_x = static_cast<int>(std::floor(sp.ne.to_double()));
-	cf.center_y = static_cast<int>(std::floor(sp.se.to_double()));
-	cf.radius_x = fp.radius_x();
-	cf.radius_y = fp.radius_y();
-	return cf;
+Footprint footprint_at(const gamestate::GameEntity &entity, const coord::phys3 &position) {
+	auto footprint = entity.has_footprint() ? entity.footprint() : Footprint{};
+	footprint.set_center(position.ne.to_double(), position.se.to_double());
+	return footprint;
 }
 
-
-// AABB shortest distance between two rectangles (axis-aligned,
-// closed-open [min, max)). The metric is Chebyshev on the
-// dx/dy gaps: we want the attacker to be able to attack by
-// reaching the target's footprint edge within the attack range,
-// which is the same notion AttackHandler already uses (the
-// runtime computes dist from the attacker's CENTER to the
-// target's CENTER; we instead compute the AABB gap so a
-// large-footprint attacker can stand at the edge). The
-// Chebyshev distance is the correct metric for grid-aligned
-// 8-direction movement.
-double aabb_shortest_distance(
-	const CenteredFootprint &a,
-	const CenteredFootprint &b) {
-	double ax_min = a.center_x - a.radius_x;
-	double ax_max = a.center_x + a.radius_x;
-	double ay_min = a.center_y - a.radius_y;
-	double ay_max = a.center_y + a.radius_y;
-	double bx_min = b.center_x - b.radius_x;
-	double bx_max = b.center_x + b.radius_x;
-	double by_min = b.center_y - b.radius_y;
-	double by_max = b.center_y + b.radius_y;
-	double dx = std::max({bx_min - ax_max, ax_min - bx_max, 0.0});
-	double dy = std::max({by_min - ay_max, ay_min - by_max, 0.0});
-	// Chebyshev: max(|dx|, |dy|) for grid-aligned 8-direction
-	// movement (matches the Move runtime's tile-step metric).
-	return std::max(dx, dy);
+coord::phys3 cell_center(CellPosition cell) {
+	return coord::tile{cell.x, cell.y}.to_phys3_center();
 }
 
-
-// Does the inflated attacker footprint (radius += mover half-
-// extents) overlap `b`? Used to reject candidates whose
-// attacker footprint would touch the target's footprint.
-bool attacker_overlaps_target(
-	const CenteredFootprint &attacker_at_candidate,
-	const CenteredFootprint &target) {
-	double ax_min = attacker_at_candidate.center_x - attacker_at_candidate.radius_x;
-	double ax_max = attacker_at_candidate.center_x + attacker_at_candidate.radius_x;
-	double ay_min = attacker_at_candidate.center_y - attacker_at_candidate.radius_y;
-	double ay_max = attacker_at_candidate.center_y + attacker_at_candidate.radius_y;
-	double bx_min = target.center_x - target.radius_x;
-	double bx_max = target.center_x + target.radius_x;
-	double by_min = target.center_y - target.radius_y;
-	double by_max = target.center_y + target.radius_y;
-	return ax_min < bx_max && bx_min < ax_max
-	    && ay_min < by_max && by_min < ay_max;
-}
+} // namespace
 
 
-// Enumerate candidate cells around the target's footprint.
-// For a target covering tile range [tx_min, tx_max) x [ty_min,
-// ty_max), the candidate ring is the cells at
-// (x, ty_min-1) for x in [tx_min-1, tx_max] (south edge),
-// (x, ty_max) for x in [tx_min-1, tx_max] (north edge),
-// (tx_min-1, y) for y in [ty_min, ty_max] (west edge),
-// (tx_max, y) for y in [ty_min-1, ty_max] (east edge).
-// The corner cells are included by both adjacent edge sweeps
-// but deduplicated by the std::set below.
-std::vector<CellPosition> enumerate_candidates(
-	const CenteredFootprint &target) {
-	int tx_min = target.center_x - static_cast<int>(std::ceil(target.radius_x));
-	int tx_max = target.center_x + static_cast<int>(std::ceil(target.radius_x));
-	int ty_min = target.center_y - static_cast<int>(std::ceil(target.radius_y));
-	int ty_max = target.center_y + static_cast<int>(std::ceil(target.radius_y));
-	std::set<std::pair<int, int>> uniq;
-	for (int x = tx_min - 1; x <= tx_max; ++x) {
-		uniq.insert({x, ty_min - 1});
-		uniq.insert({x, ty_max});
+double attack_distance(const gamestate::GameEntity &attacker,
+                       const coord::phys3 &attacker_pos,
+                       const gamestate::GameEntity &target,
+                       const coord::phys3 &target_pos) {
+	// Keep unit combat unchanged. For buildings, measure from the edge
+	// of the attacker's footprint to the edge of the building.
+	if (not target.has_footprint() or target.has_component(component_t::MOVE)) {
+		return std::hypot((attacker_pos.ne - target_pos.ne).to_double(),
+		                  (attacker_pos.se - target_pos.se).to_double());
 	}
-	for (int y = ty_min - 1; y <= ty_max; ++y) {
-		uniq.insert({tx_min - 1, y});
-		uniq.insert({tx_max, y});
-	}
-	std::vector<CellPosition> out;
-	out.reserve(uniq.size());
-	for (const auto &p : uniq) {
-		out.push_back({p.first, p.second});
-	}
-	// Sort by (cell_y, cell_x) for deterministic iteration.
-	std::sort(out.begin(), out.end(),
-		[](const CellPosition &a, const CellPosition &b) {
-			if (a.y != b.y) return a.y < b.y;
-			return a.x < b.x;
-		});
-	return out;
+	const auto a = footprint_at(attacker, attacker_pos).bounds();
+	const auto b = footprint_at(target, target_pos).bounds();
+	const auto dx = std::max({b.min_x - a.max_x, a.min_x - b.max_x, 0.0});
+	const auto dy = std::max({b.min_y - a.max_y, a.min_y - b.max_y, 0.0});
+	return std::hypot(dx, dy);
 }
-
-
-// Best survivor: lowest path_cost, then lowest distance, then
-// lowest (y, x). Comparison is strict so the std::sort uses a
-// strict weak ordering.
-struct Survivor {
-	CellPosition cell;
-	std::vector<CellPosition> path;
-	int path_cost{0};
-	double distance{0.0};
-};
-
-bool survivor_less(const Survivor &a, const Survivor &b) {
-	if (a.path_cost != b.path_cost) return a.path_cost < b.path_cost;
-	if (a.distance != b.distance) return a.distance < b.distance;
-	if (a.cell.y != b.cell.y) return a.cell.y < b.cell.y;
-	return a.cell.x < b.cell.x;
-}
-
-
-}  // namespace
 
 
 AttackApproachResult find_attack_approach(
-	const std::shared_ptr<openage::gamestate::GameState> &state,
-	openage::gamestate::entity_id_t attacker_id,
-	openage::gamestate::entity_id_t target_id,
-	const NavigationService &navigation) {
+	const std::shared_ptr<gamestate::GameState> &state,
+	gamestate::entity_id_t attacker_id,
+	gamestate::entity_id_t target_id,
+	const NavigationService &navigation,
+	const time::time_t &time) {
 	AttackApproachResult out;
-	out.status = AttackApproachStatus::APPROACH_FAILED;
-
 	if (not state->has_game_entity(attacker_id)) {
 		out.reason = "attacker_removed";
 		return out;
@@ -196,122 +73,91 @@ AttackApproachResult find_attack_approach(
 		return out;
 	}
 
-	auto attacker_entity = state->get_game_entity(attacker_id);
-	auto target_entity = state->get_game_entity(target_id);
-
-	// Attacker must have a Move ability + a Footprint + a Position.
-	if (not attacker_entity->has_component(
-		    openage::gamestate::component::component_t::MOVE)) {
+	const auto attacker = state->get_game_entity(attacker_id);
+	const auto target = state->get_game_entity(target_id);
+	if (not attacker->has_component(component_t::MOVE)) {
 		out.reason = "attacker_no_move_ability";
 		return out;
 	}
-	auto attacker_fp = centered_footprint_of(state, attacker_id);
-	if (not attacker_fp.has_value()) {
-		out.reason = "attacker_no_footprint";
-		return out;
-	}
-	auto target_fp = centered_footprint_of(state, target_id);
-	if (not target_fp.has_value()) {
-		out.reason = "target_no_footprint";
+	const auto attack = attacker->try_get_component_as<gamestate::component::Attack>(component_t::ATTACK);
+	const auto attacker_position = attacker->try_get_component_as<Position>(component_t::POSITION);
+	const auto target_position = target->try_get_component_as<Position>(component_t::POSITION);
+	if (not attack or not attacker_position or not target_position) {
+		out.reason = "missing_attack_or_position";
 		return out;
 	}
 
-	// Attack range from the Attack component (single source of
-	// truth; the runtime uses the same value via
-	// get_attack_range()).
-	double range = 0.0;
-	if (attacker_entity->has_component(
-		    openage::gamestate::component::component_t::ATTACK)) {
-		auto atk = std::dynamic_pointer_cast<
-			openage::gamestate::component::Attack>(
-			attacker_entity->get_component(
-				openage::gamestate::component::component_t::ATTACK));
-		if (atk) {
-			range = atk->get_attack_range();
+	const auto attacker_pos = attacker_position->get_positions().get(time);
+	const auto target_pos = target_position->get_positions().get(time);
+	const auto attacker_fp = footprint_at(*attacker, attacker_pos);
+	const auto target_fp = footprint_at(*target, target_pos);
+	const auto target_bounds = target_fp.bounds();
+	const auto rx = attacker_fp.radius_x();
+	const auto ry = attacker_fp.radius_y();
+	const auto range = attack->get_attack_range();
+	const auto size = state->get_map()->get_size();
+	const auto start_tile = attacker_pos.to_tile();
+	const CellPosition start{static_cast<int>(start_tile.ne), static_cast<int>(start_tile.se)};
+	const auto occupancy = state->get_map()->get_dynamic_occupancy();
+	auto can_traverse = [&](const coord::phys3 &from, const coord::phys3 &to) {
+		const auto swept = ::openage::scenario::swept_aabb(
+			footprint_at(*attacker, from).bounds(), footprint_at(*attacker, to).bounds());
+		return not swept.overlaps(target_bounds)
+		    and (not occupancy or occupancy->can_occupy(attacker_id, swept));
+	};
+	auto can_step = [&](CellPosition from, CellPosition to) {
+		return can_traverse(from == start ? attacker_pos : cell_center(from), cell_center(to));
+	};
+
+	struct Candidate {
+		CellPosition cell;
+		int min_steps;
+		double distance;
+	};
+	std::vector<Candidate> candidates;
+	const int min_x = std::max(0, static_cast<int>(std::floor(target_bounds.min_x - rx - range)));
+	const int min_y = std::max(0, static_cast<int>(std::floor(target_bounds.min_y - ry - range)));
+	const int max_x = std::min(static_cast<int>(size[0]) - 1,
+	                           static_cast<int>(std::floor(target_bounds.max_x + rx + range)));
+	const int max_y = std::min(static_cast<int>(size[1]) - 1,
+	                           static_cast<int>(std::floor(target_bounds.max_y + ry + range)));
+	for (int y = min_y; y <= max_y; ++y) {
+		for (int x = min_x; x <= max_x; ++x) {
+			const CellPosition cell{x, y};
+			const auto destination = cell_center(cell);
+			const auto distance = attack_distance(*attacker, destination, *target, target_pos);
+			if (distance <= range and navigation.grid()->is_walkable(cell)
+			    and can_traverse(cell == start ? attacker_pos : destination, destination)) {
+				candidates.push_back({cell, std::max(std::abs(x - start.x), std::abs(y - start.y)), distance});
+			}
 		}
 	}
-	else {
-		out.reason = "attacker_no_attack_ability";
-		return out;
+	std::sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) {
+		return std::tie(a.min_steps, a.distance, a.cell.y, a.cell.x)
+		     < std::tie(b.min_steps, b.distance, b.cell.y, b.cell.x);
+	});
+	std::optional<std::tuple<size_t, double, int, int>> best;
+	for (const auto &candidate : candidates) {
+		if (best and static_cast<size_t>(candidate.min_steps) >= std::get<0>(*best)) {
+			break; // An A* path includes the start cell as well.
+		}
+		auto path = navigation.request_path(start, candidate.cell, {rx, ry}, can_step);
+		if (path.result != GridAStarPathfinder::Result::PATH_FOUND) {
+			continue;
+		}
+		const auto score = std::tuple{path.waypoints.size(), candidate.distance, candidate.cell.y, candidate.cell.x};
+		if (not best or score < *best) {
+			best = score;
+			out.status = AttackApproachStatus::APPROACH_FOUND;
+			out.approach_cell = candidate.cell;
+			out.waypoints = std::move(path.waypoints);
+			out.reason = "ok";
+		}
 	}
-
-	// Mover half-extents for the NavigationService inflation.
-	double mover_rx = attacker_fp->radius_x;
-	double mover_ry = attacker_fp->radius_y;
-	MoverFootprint mover{mover_rx, mover_ry};
-
-	// Map extent (from the NavigationGrid's underlying terrain
-	// chunks). For Mission 1 this is (0, 0, 16, 16); the
-	// terrain-extent API would be a longer refactor; for the
-	// MVP we extract from the candidate set itself by
-	// clamping into [0, 16) x [0, 16) and letting the
-	// NavigationService filter.
-	constexpr int MAP_MIN_X = 0;
-	constexpr int MAP_MIN_Y = 0;
-	constexpr int MAP_MAX_X = 16;
-	constexpr int MAP_MAX_Y = 16;
-
-	auto candidates = enumerate_candidates(*target_fp);
-
-	std::vector<Survivor> survivors;
-	survivors.reserve(candidates.size());
-
-	for (const auto &cand : candidates) {
-		// Reject cells outside the map.
-		if (cand.x < MAP_MIN_X or cand.x >= MAP_MAX_X
-		    or cand.y < MAP_MIN_Y or cand.y >= MAP_MAX_Y) {
-			continue;
-		}
-		// Build the attacker's footprint at the candidate.
-		CenteredFootprint at_cand{
-			cand.x, cand.y,
-			attacker_fp->radius_x,
-			attacker_fp->radius_y};
-		// Reject if the attacker's footprint overlaps the
-		// target's footprint (the attacker would be standing
-		// inside the enemy).
-		if (attacker_overlaps_target(at_cand, *target_fp)) {
-			continue;
-		}
-		// Reject if the candidate is more than `range` away
-		// from the target (AABB-shortest Chebyshev distance).
-		double d = aabb_shortest_distance(at_cand, *target_fp);
-		if (d > range) {
-			continue;
-		}
-		// Verify the A* can reach the candidate. The mover
-		// inflation has to be considered; the NavigationService
-		// already inflates static obstacles by the mover's
-		// half-extents.
-		CellPosition start{
-			attacker_fp->center_x, attacker_fp->center_y};
-		auto path_result = navigation.request_path(
-			start, cand, mover);
-		if (path_result.result
-		    != GridAStarPathfinder::Result::PATH_FOUND) {
-			continue;
-		}
-		Survivor s;
-		s.cell = cand;
-		s.path = path_result.waypoints;
-		s.path_cost = static_cast<int>(path_result.waypoints.size());
-		s.distance = d;
-		survivors.push_back(std::move(s));
-	}
-
-	if (survivors.empty()) {
+	if (out.status == AttackApproachStatus::APPROACH_FAILED) {
 		out.reason = "no_candidate";
-		return out;
 	}
-
-	std::sort(survivors.begin(), survivors.end(), survivor_less);
-	const auto &best = survivors.front();
-	out.status = AttackApproachStatus::APPROACH_FOUND;
-	out.approach_cell = best.cell;
-	out.waypoints = best.path;
-	out.reason = "ok";
 	return out;
 }
-
 
 } // namespace openage::pathfinding

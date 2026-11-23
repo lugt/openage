@@ -128,6 +128,7 @@ def _scenario_dict(scenario: ScenarioDefinition) -> dict[str, T.Any]:
     chunk_size = 8
     chunks_x = math.ceil(scenario.map.width / chunk_size)
     chunks_y = math.ceil(scenario.map.height / chunk_size)
+    elevations = sorted(set(scenario.map.elevation))
     chunk_records: list[dict[str, T.Any]] = []
     for cy in range(chunks_y):
         for cx in range(chunks_x):
@@ -135,38 +136,39 @@ def _scenario_dict(scenario: ScenarioDefinition) -> dict[str, T.Any]:
             oy = cy * chunk_size
             max_x = min(ox + chunk_size, scenario.map.width)
             max_y = min(oy + chunk_size, scenario.map.height)
-            tile_fqons: list[str] = []
-            for y in range(oy, max_y):
-                for x in range(ox, max_x):
-                    tile_fqons.append(
-                        scenario.map.terrain_ids[
-                            y * scenario.map.width + x
-                        ]
-                    )
-            chunk_records.append({
+            indices = [y * scenario.map.width + x
+                       for y in range(oy, max_y) for x in range(ox, max_x)]
+            chunk = {
                 "offset": {"x": ox, "y": oy},
                 "size": {"x": max_x - ox, "y": max_y - oy},
-                "tile_fqons": tile_fqons,
-            })
+                "tile_fqons": [scenario.map.terrain_ids[i] for i in indices],
+            }
+            if len(elevations) > 1:
+                chunk["tile_elevations"] = [scenario.map.elevation[i] for i in indices]
+            chunk_records.append(chunk)
 
     return {
         "schema_version": scenario.schema_version,
         "produced_at_commit": scenario.produced_at_commit,
-        "scenario_kind": "William Wallace Mission 1 MVP reconstruction",
+        "scenario_kind": "Original William Wallace scenario" if scenario.original_scenario else "William Wallace Mission 1 MVP reconstruction",
         "scenario_fqon": (
             "ww_mvp.campaign.william_wallace.mission_01.Mission"
         ),
         "player_setup_fqon": (
             "ww_mvp.campaign.william_wallace.mission_01.PlayerSetup"
         ),
-        "source_status": "BLOCKED",
+        "source_status": "IMPORTED" if scenario.original_scenario else "BLOCKED",
         "source_blocker": (
             "see docs/mvp/reports/mission1-scenario-feasibility.md"
         ),
-        "is_imported_original": False,
+        "is_imported_original": bool(scenario.original_scenario),
         "chunk_size": chunk_size,
         "ScenarioDefinition": {
             "id": scenario.id,
+            "original_scenario": scenario.original_scenario,
+            "Diplomacy": [list(relation) for relation in scenario.diplomacy],
+            "fog_of_war": scenario.fog_of_war,
+            "share_allied_vision": scenario.share_allied_vision,
             "source": scenario.source,
             "source_file": scenario.source_file,
             "MapDefinition": {
@@ -177,9 +179,7 @@ def _scenario_dict(scenario: ScenarioDefinition) -> dict[str, T.Any]:
                     list(scenario.map.terrain_ids)
                 )["unique"],
                 "elevation_count": len(scenario.map.elevation),
-                "elevation_unique": _compact_dense(
-                    list(scenario.map.elevation)
-                )["unique"],
+                "elevation_unique": elevations,
                 "chunks": chunk_records,
             },
             "players": [
@@ -255,7 +255,7 @@ def _trigger_graph_dict(scenario: ScenarioDefinition) -> dict[str, T.Any]:
     return {
         "schema_version": scenario.schema_version,
         "produced_at_commit": scenario.produced_at_commit,
-        "scenario_kind": "William Wallace Mission 1 MVP reconstruction",
+        "scenario_kind": "Original William Wallace scenario" if scenario.original_scenario else "William Wallace Mission 1 MVP reconstruction",
         "trigger_count": len(scenario.triggers),
         "node_count": len(scenario.triggers),
         "edge_count": sum(len(t.effects) for t in scenario.triggers),
@@ -269,18 +269,18 @@ def _coverage_dict(scenario: ScenarioDefinition) -> dict[str, T.Any]:
     used_condition_kinds = {c.kind for t in scenario.triggers for c in t.conditions}
     used_effect_kinds = {e.kind for t in scenario.triggers for e in t.effects}
     return {
-        "scenario_kind": "William Wallace Mission 1 MVP reconstruction",
+        "scenario_kind": "Original William Wallace scenario" if scenario.original_scenario else "William Wallace Mission 1 MVP reconstruction",
         "scenario_fqon": (
             "ww_mvp.campaign.william_wallace.mission_01.Mission"
         ),
         "player_setup_fqon": (
             "ww_mvp.campaign.william_wallace.mission_01.PlayerSetup"
         ),
-        "source_status": "BLOCKED",
+        "source_status": "IMPORTED" if scenario.original_scenario else "BLOCKED",
         "source_blocker": (
             "see docs/mvp/reports/mission1-scenario-feasibility.md"
         ),
-        "is_imported_original": False,
+        "is_imported_original": bool(scenario.original_scenario),
         "produced_at_commit": scenario.produced_at_commit,
         "schema_version": scenario.schema_version,
         "trigger_count": len(scenario.triggers),

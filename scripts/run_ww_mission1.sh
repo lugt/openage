@@ -23,13 +23,28 @@
 #
 # Exit codes are the engine's own: 0 = clean exit, 124 = killed by an outer
 # timeout (process was still alive -- smoke success), 134 = SIGABRT,
-# 139 = SIGSEGV, etc.
+# 139 = SIGSEGV, etc. EXCEPTION: if the log contains a crash marker
+# (FATAL: terminate has been called / uncaught exception / SIGSEGV) the
+# script exits 134 EVEN IF the engine itself exited 0 -- rc=0 alone is not
+# proof of success (see the crash-marker audit near the end of this script).
 # =============================================================================
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 cd "$REPO"
+
+# Shared crash-marker check (FATAL: terminate has been called / uncaught
+# exception / SIGSEGV, excluding this script's own exit-code help lines).
+# Fail fast if the checker cannot be sourced: under `set -uo pipefail`
+# (no -e) a failed source would otherwise continue silently,
+# ww_mission1_log_has_fatal would be command-not-found (falsy in the if
+# below), and a crash-marker log would pass -- the exact false-positive
+# this checker exists to prevent.
+source "$REPO/scripts/lib/ww_mission1_log_check.sh" || {
+	echo "CHECK FAIL: cannot source $REPO/scripts/lib/ww_mission1_log_check.sh (missing or unreadable); aborting -- refusing to launch without crash-marker detection" >&2
+	exit 2
+}
 
 TS="$(date +%Y%m%d_%H%M%S)"
 LOGDIR="$REPO/logs"
@@ -100,13 +115,32 @@ print_line
 # ---- Real game-window launch. No --headless, no offscreen override.
 # --no-convert is the hard kill switch (default is already no-convert; this
 # makes it explicit so the launch never silently regenerates assets).
-echo "Launching: bin/run --scenario --no-convert --no-prompts"
+#
+# NOTE: we do NOT set -e here; we want the engine's real exit code.
+# OPENAGE_RUN_BIN is a TEST hook only (scripts/tests/ use it to substitute a
+# fake engine); the default and the normal user command remain $REPO/bin/run.
+RUN_BIN="${OPENAGE_RUN_BIN:-$REPO/bin/run}"
+echo "Launching: $RUN_BIN --scenario --no-convert --no-prompts"
 echo "(FULL mode: Qt window + renderer + presenter. stdout/stderr -> $LOG)"
 print_line
 
-# NOTE: we do NOT set -e here; we want the engine's real exit code.
-"$REPO/bin/run" --scenario --no-convert --no-prompts 2>&1 | tee "$LOG"
+"$RUN_BIN" --scenario --no-convert --no-prompts 2>&1 | tee "$LOG"
 rc=${PIPESTATUS[0]}
+
+# Crash-marker audit BEFORE passing: the engine's terminate/SIGSEGV handlers
+# (libopenage/error/handlers.cpp) can leave "FATAL: terminate has been
+# called" / "uncaught exception" / an ANSI "SIGSEGV" in the log while the
+# process still exits 0. rc=0 alone is therefore NOT proof of success -- a
+# crash marker must fail the launch even when rc=0. (This script's own
+# "139=SIGSEGV" exit-code help line is excluded by the shared checker.)
+if ww_mission1_log_has_fatal "$LOG"; then
+	print_line
+	echo "engine exit code: $rc"
+	echo "(0=clean exit, 124=killed by timeout=still alive, 134=SIGABRT, 139=SIGSEGV)"
+	echo "log saved: $LOG"
+	echo "ENGINE_FAIL: crash marker in $LOG (FATAL: terminate has been called / uncaught exception / SIGSEGV); failing the launch regardless of engine exit code $rc"
+	exit 134
+fi
 
 print_line
 echo "engine exit code: $rc"

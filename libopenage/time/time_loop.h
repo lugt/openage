@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <shared_mutex>
 
@@ -53,7 +54,7 @@ private:
 	/**
 	 * State of the time loop.
 	 */
-	bool running;
+	std::atomic<bool> running;
 
 	/**
 	 * Manage time and speed inside the simulation.

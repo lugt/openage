@@ -11,6 +11,7 @@
 #include "gamestate/terrain.h"
 #include "gamestate/terrain_chunk.h"
 #include "pathfinding/cost_field.h"
+#include "pathfinding/definitions.h"
 #include "pathfinding/grid.h"
 #include "pathfinding/navigation_service.h"
 #include "pathfinding/pathfinder.h"
@@ -45,6 +46,15 @@ Map::Map(const std::shared_ptr<GameState> &state,
 	// Set path costs
 	for (size_t chunk_idx = 0; chunk_idx < this->terrain->get_chunks().size(); ++chunk_idx) {
 		auto chunk_terrain = this->terrain->get_chunk(chunk_idx);
+		const auto extent = chunk_terrain->get_size();
+		if (extent[0] != side_length or extent[1] != side_length) {
+			for (const auto &[path_type, grid_id] : this->grid_lookup) {
+				auto sector = this->pathfinder->get_grid(grid_id)->get_sector(chunk_idx);
+				sector->get_cost_field()->set_costs(
+					std::vector<path::cost_t>(side_length * side_length, path::COST_IMPASSABLE),
+					time::TIME_ZERO);
+			}
+		}
 		for (size_t tile_idx = 0; tile_idx < chunk_terrain->get_tiles().size(); ++tile_idx) {
 			auto tile = chunk_terrain->get_tile(tile_idx);
 			auto path_costs = api::APITerrain::get_path_costs(tile.terrain);
@@ -55,7 +65,8 @@ Map::Map(const std::shared_ptr<GameState> &state,
 
 				auto sector = grid->get_sector(chunk_idx);
 				auto cost_field = sector->get_cost_field();
-				cost_field->set_cost(tile_idx, path_cost.second, time::TIME_ZERO);
+				cost_field->set_cost(tile_idx % extent[0], tile_idx / extent[0],
+				                     path_cost.second, time::TIME_ZERO);
 			}
 		}
 	}
@@ -117,6 +128,9 @@ void register_entity_in_dynamic_occupancy(
 	}
 	double rx = 0.4;
 	double ry = 0.4;
+	if (not entity.has_footprint()) {
+		return;
+	}
 	if (entity.has_footprint()) {
 		auto fp = entity.footprint();
 		// Buildings (is_static=true) are tracked in

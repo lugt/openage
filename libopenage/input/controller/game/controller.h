@@ -19,6 +19,7 @@ namespace openage {
 
 namespace gamestate {
 class GameSimulation;
+class GameState;
 }
 
 namespace time {
@@ -63,7 +64,7 @@ public:
 	 *
 	 * @return Selected entities.
 	 */
-	const std::vector<gamestate::entity_id_t> &get_selected() const;
+	std::vector<gamestate::entity_id_t> get_selected() const;
 
 	/**
 	 * Set the currently selected entities.
@@ -176,7 +177,7 @@ private:
 /**
  * Setup default controller action bindings:
  *
- * - CTRL + Left Mouse click: Create game entity.
+ * - Left click or drag: select entities, with Ctrl and Shift modifiers.
  * - Right Mouse click: Move selected entities on ground, or attack a
  *   picked hostile entity when the selection has Attack ability.
  *
@@ -188,7 +189,12 @@ private:
 void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
                     const std::shared_ptr<time::TimeLoop> &time_loop,
                     const std::shared_ptr<openage::gamestate::GameSimulation> &simulation,
-                    const std::shared_ptr<renderer::camera::Camera> &camera);
+                    const std::shared_ptr<renderer::camera::Camera> &camera,
+                    std::function<std::optional<uint32_t>(coord::input)> sprite_picker = {},
+                    int bottom_hud_height = 0);
+
+bool is_attack_target(const std::shared_ptr<gamestate::GameState> &state, const coord::phys3 &world,
+                      std::optional<uint32_t> sprite, gamestate::player_id_t viewer, time::time_t now);
 
 } // namespace input::game
 } // namespace openage

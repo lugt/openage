@@ -1,6 +1,8 @@
 // Copyright 2023-2023 the openage authors. See copying.md for legal info.
 
 #include "tests.h"
+#include "original_wallace.h"
+#include "gamestate/demo/tech_tree_export.h"
 
 #include "log/log.h"
 #include "log/message.h"
@@ -242,6 +244,14 @@ void simulation_demo(int demo_id, const util::Path &path) {
 		// Regression: production RMB binding must pick entities and
 		// distinguish ATTACK from MOVE.
 		simulation_demo_51(path);
+		break;
+
+	case 53:
+        simulation_demo_53(path);
+        break;
+
+	case 52:
+		simulation_demo_52(path);
 		break;
 
 	default:

@@ -1,0 +1,2 @@
+# Source scene reader, separate from the game's runtime dependencies.
+AoE2ScenarioParser==0.9.9

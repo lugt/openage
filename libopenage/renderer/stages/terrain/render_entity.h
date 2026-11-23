@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <span>
+
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -56,7 +58,8 @@ public:
 	 */
 	void update(const util::Vector2s size,
 	            const tiles_t tiles,
-	            const time::time_t time = 0.0);
+	            const time::time_t time = 0.0,
+	            std::span<const float> corner_heights = {});
 
 	/**
 	 * Get the vertices of the terrain.

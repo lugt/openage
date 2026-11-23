@@ -22,19 +22,19 @@ void RenderEntity::update(const uint32_t ref_id,
                           const curve::Continuous<coord::phys3> &position,
                           const curve::Segmented<coord::phys_angle_t> &angle,
                           const std::string animation_path,
-                          const time::time_t time) {
+                          const time::time_t time,
+                          uint32_t owner) {
 	std::unique_lock lock{this->mutex};
 
 	this->ref_id = ref_id;
-	std::function<coord::scene3(const coord::phys3 &)> to_scene3 = [](const coord::phys3 &pos) {
-		return pos.to_scene3();
-	};
+	this->owner = owner;
+	const auto sync_from = std::min(time, this->last_update);
 	this->position.sync(position,
 	                    std::function<coord::scene3(const coord::phys3 &)>([](const coord::phys3 &pos) {
 							return pos.to_scene3();
 						}),
-	                    this->last_update);
-	this->angle.sync(angle, this->last_update);
+	                    sync_from);
+	this->angle.sync(angle, sync_from);
 	this->animation_path.set_last(time, animation_path);
 	this->changed = true;
 	this->last_update = time;
@@ -53,6 +53,15 @@ void RenderEntity::update(const uint32_t ref_id,
 	this->last_update = time;
 }
 
+void RenderEntity::mark_removed(const time::time_t &at) {
+	this->removal_time = at;
+	this->removed.store(true);
+}
+
+bool RenderEntity::is_removed(const time::time_t &at) const {
+	return this->removed.load() and at >= this->removal_time;
+}
+
 uint32_t RenderEntity::get_id() {
 	std::shared_lock lock{this->mutex};
 
@@ -60,20 +69,14 @@ uint32_t RenderEntity::get_id() {
 }
 
 const curve::Continuous<coord::scene3> &RenderEntity::get_position() {
-	std::shared_lock lock{this->mutex};
-
 	return this->position;
 }
 
 const curve::Segmented<coord::phys_angle_t> &RenderEntity::get_angle() {
-	std::shared_lock lock{this->mutex};
-
 	return this->angle;
 }
 
 const curve::Discrete<std::string> &RenderEntity::get_animation_path() {
-	std::shared_lock lock{this->mutex};
-
 	return this->animation_path;
 }
 

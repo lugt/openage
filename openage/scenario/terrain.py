@@ -68,23 +68,26 @@ class TerrainChunk:
     tuples. This is the spec §6.4 'batch/snapshot API' requirement:
     one allocation, many views.
 
-    ``size`` is the *actual* tile count of the chunk (smaller than
-    ``configured_size`` for edge chunks that do not fit a full grid).
-    ``configured_size`` records the chunk dimension the snapshot was
-    built with so chunk boundaries stay consistent.
+    Width and height are clipped independently at the map borders.
     """
 
     offset_x: int
     offset_y: int
-    size: int
+    width: int
+    height: int
     configured_size: int
     terrain_fqon: str
     parent_snapshot: "TerrainSnapshot"
 
     @property
+    def size(self) -> int:
+        """Shorter side, retained for callers that use square chunks."""
+        return min(self.width, self.height)
+
+    @property
     def bbox(self) -> tuple[int, int, int, int]:
-        """(offset_x, offset_y, size, size) using the *actual* size."""
-        return (self.offset_x, self.offset_y, self.size, self.size)
+        """(offset_x, offset_y, width, height) in tiles."""
+        return (self.offset_x, self.offset_y, self.width, self.height)
 
 
 # ---------------------------------------------------------------------------
@@ -122,17 +125,13 @@ class TerrainSnapshot:
             for cx in range(chunks_x):
                 ox = cx * self.chunk_size
                 oy = cy * self.chunk_size
-                # Edge chunks (rightmost / bottommost) may have fewer
-                # tiles than the configured chunk_size; ``size`` is
-                # the actual tile count, ``configured_size`` is the
-                # chunk dimension the snapshot was built with.
                 max_x = min(ox + self.chunk_size, self.width)
                 max_y = min(oy + self.chunk_size, self.height)
-                size = min(max_x - ox, max_y - oy)
                 out.append(TerrainChunk(
                     offset_x=ox,
                     offset_y=oy,
-                    size=size,
+                    width=max_x - ox,
+                    height=max_y - oy,
                     configured_size=self.chunk_size,
                     terrain_fqon=self._dominant_terrain_fqon(ox, oy),
                     parent_snapshot=self,
@@ -166,12 +165,7 @@ class TerrainSnapshot:
     # ---- chunk helpers -------------------------------------------------
 
     def _dominant_terrain_fqon(self, ox: int, oy: int) -> str:
-        """Pick the most common terrain FQON in the chunk.
-
-        The renderer reads one .terrain per chunk in the MVP; mixed
-        chunks would force a renderer-side split, which is out of
-        scope for P2.5. The reconstruction is uniform anyway.
-        """
+        """Pick a representative terrain FQON without altering per-tile data."""
         # Count terrain ids in [ox, ox+chunk_size) x [oy, oy+chunk_size).
         # Iterate only over the in-bounds rectangle (edge chunks are
         # smaller; they are NOT padded with bogus terrain ids).

@@ -2,6 +2,9 @@ add_sources(libopenage
     attack.cpp
     apply_discrete_effect.cpp
     death.cpp
+    gather.cpp
+    construction.cpp
+    economy_action.cpp
     movement.cpp
     removal.cpp
     drag_select.cpp

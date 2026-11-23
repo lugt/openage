@@ -51,7 +51,9 @@ struct SelectionOverlayQuad {
 	Eigen::Vector3f world_center;
 	float half_width;
 	float half_height;
-	Eigen::Vector4f color;
+	Eigen::Vector4f health_color;
+	float health_fraction;
+	float sprite_top;
 };
 
 /**

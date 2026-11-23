@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <shared_mutex>
 
 #include "util/path.h"
@@ -277,10 +278,10 @@ public:
 	 * to be set to false to stop the simulation loop.
 	 *
 	 * @deprecated Replaced by the `lifecycle` enum above. Kept as a
-	 * plain bool for the `while(this->running)` loop predicate; flips
+	 * flag for the `while(this->running)` loop predicate; flips
 	 * to false once `stop()` is observed.
 	 */
-	bool running;
+	std::atomic<bool> running;
 
 private:
 	/**
@@ -325,7 +326,7 @@ private:
 	 * Lifecycle state machine. Only modified under `this->mutex`; read
 	 * from the controller / diagnostic code paths.
 	 */
-	SimulationLifecycle lifecycle = SimulationLifecycle::Uninitialized;
+	std::atomic<SimulationLifecycle> lifecycle{SimulationLifecycle::Uninitialized};
 
 	/**
 	 * The simulation root directory.

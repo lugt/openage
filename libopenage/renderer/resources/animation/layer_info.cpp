@@ -32,7 +32,7 @@ LayerInfo::LayerInfo(std::vector<std::shared_ptr<AngleInfo>> &angles,
 			keyframes.push_back(t);
 			t += this->time_per_frame;
 		}
-		auto total_time = (frame_count - 1) * this->time_per_frame + this->replay_delay;
+		auto total_time = frame_count * this->time_per_frame + this->replay_delay;
 		this->frame_timing = std::make_shared<FrameTiming>(total_time, std::move(keyframes));
 	}
 }
@@ -72,7 +72,7 @@ const std::shared_ptr<AngleInfo> &LayerInfo::get_direction_angle(float direction
 
 	// special case for front facing angle because values wrap
 	// around at 360 degrees, e.g. 337,5 to 22,5
-	if (direction > this->angles.at(0)->get_angle_start()
+	if (direction >= this->angles.at(0)->get_angle_start()
 	    or direction < this->angles.at(1)->get_angle_start()) {
 		return this->get_angle(0);
 	}

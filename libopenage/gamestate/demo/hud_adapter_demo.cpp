@@ -91,6 +91,11 @@ void simulation_demo_24(const util::Path &path) {
 	presenter::viewmodel::SelectionModel model{simulation};
 	presenter::HudQmlAdapter adapter;
 	adapter.attach(model, *simulation);
+	adapter.refresh_economy(0);
+	if (adapter.population() != 1 or adapter.population_capacity() != 5
+	    or not adapter.is_interactive(25, 25, 1280, 720)) {
+		throw std::runtime_error{"demo 24: economy bar did not expose the starting population or block map input"};
+	}
 
 	// ---- Pin 1: initial snapshot -- nothing selected ----
 	if (adapter.selected_entity_id() != -1) {
@@ -156,6 +161,11 @@ void simulation_demo_24(const util::Path &path) {
 	// ---- Pin 4: remove villager -> selection cleared ----
 	remove_via_event(loop, state, commander, pv_id, openage::time::time_t{10});
 	loop->reach_time(openage::time::time_t{10}, state);
+	state->update_player_economies(openage::time::time_t{10});
+	adapter.refresh_economy(0);
+	if (adapter.population() != 0 or adapter.population_capacity() != 5) {
+		throw std::runtime_error{"demo 24: population did not decrease after unit removal"};
+	}
 	if (adapter.selected_entity_id() != -1) {
 		throw std::runtime_error{
 			"demo 24 pin 4 FAILED: selectedEntityId not cleared after death"
@@ -182,6 +192,9 @@ void simulation_demo_24(const util::Path &path) {
 			"demo 24 pin 5 FAILED: missionLifecycle="
 			+ adapter.mission_lifecycle().toStdString()
 		};
+	}
+	if (adapter.mission_defeat_enemy_state() != "COMPLETED") {
+		throw std::runtime_error{"demo 24 pin 5 FAILED: objective not complete after enemy removal"};
 	}
 	if (adapter.mission_victory_reason() != "enemy_removed") {
 		throw std::runtime_error{

@@ -6,7 +6,10 @@
 #include "gamestate/component/api/attack.h"
 #include "gamestate/component/types.h"
 #include "gamestate/game_entity.h"
+#include "gamestate/system/idle.h"
+#include "gamestate/system/move.h"
 #include "gamestate/game_state.h"
+#include "gamestate/map.h"
 #include "gamestate/types.h"
 #include "log/log.h"
 #include "log/message.h"
@@ -61,6 +64,7 @@ void DeathEventHandler::invoke(
 		return;
 	}
 
+	entity->render_death(time);
 	log::log(MSG(info) << "DeathEventHandler: target " << target_id
 	                   << " HP transition fired at t=" << time
 	                   << " -- entity marked dead (idempotent gate)");
@@ -74,7 +78,14 @@ void DeathEventHandler::invoke(
 		{"target_id", target_id},
 		{"time", time},
 	};
-	loop.create_event("game.removal", target, state, time, removal_params);
+	if (entity->is_harvestable_carcass()) {
+		if (const auto map = gstate->get_map()) {
+			map->get_dynamic_occupancy()->remove_entity(target_id);
+		}
+	}
+	else {
+		loop.create_event("game.removal", target, state, time, removal_params);
+	}
 
 	// Stop any attacker that currently has this target set. Iterate
 	// over all alive entities and check their Attack component; this
@@ -94,7 +105,14 @@ void DeathEventHandler::invoke(
 				openage::gamestate::component::component_t::ATTACK));
 		if (attack and attack->is_active()
 		    and attack->get_target_id() == target_id) {
+			const auto idle_at = std::max(time, attack->get_next_attack_time());
+			if (attack->is_approaching()) {
+				system::Move::halt(other, gstate, time);
+			}
 			attack->stop_attack();
+			if (other->has_component(component::component_t::IDLE)) {
+				system::Idle::idle(other, idle_at);
+			}
 			log::log(MSG(info) << "DeathEventHandler: attacker " << other->get_id()
 			                   << " stopped (target " << target_id << " dead)");
 		}

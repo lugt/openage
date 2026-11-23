@@ -41,6 +41,23 @@ resources::Texture2dData GlRenderTarget::into_data() {
 	return resources::Texture2dData{info, std::move(pxdata)};
 }
 
+uint32_t GlRenderTarget::read_uint_pixel(unsigned int attachment, size_t x, size_t y) const {
+	if (x >= this->size.first or y >= this->size.second) {
+		return 0;
+	}
+	GLint previous_framebuffer;
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previous_framebuffer);
+	this->bind_read();
+	GLint previous_buffer;
+	glGetIntegerv(GL_READ_BUFFER, &previous_buffer);
+	glReadBuffer(GL_COLOR_ATTACHMENT0 + attachment);
+	uint32_t pixel = 0;
+	glReadPixels(x, this->size.second - y - 1, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &pixel);
+	glReadBuffer(previous_buffer);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, previous_framebuffer);
+	return pixel;
+}
+
 gl_render_target_t GlRenderTarget::get_type() const {
 	return this->type;
 }

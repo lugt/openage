@@ -21,6 +21,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include <nyan/nyan.h>
@@ -35,20 +36,18 @@
 #include "coord/tile.h"
 #include "curve/continuous.h"
 #include "curve/segmented.h"
-#include "gamestate/api/ability.h"
-#include "gamestate/api/animation.h"
-#include "gamestate/api/property.h"
-#include "gamestate/api/types.h"
 #include "gamestate/component/api/move.h"
-#include "gamestate/component/api/turn.h"
+#include "gamestate/component/api/attack.h"
+#include "gamestate/system/idle.h"
 #include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/internal/commands/move.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
-#include "gamestate/event/movement_entity.h"
+#include "gamestate/manager.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
+#include "gamestate/terrain.h"
 #include "pathfinding/navigation_service.h"
 #include "pathfinding/path.h"
 #include "pathfinding/pathfinder.h"
@@ -121,6 +120,13 @@ const time::time_t Move::move_command(const std::shared_ptr<gamestate::GameEntit
 		return time::time_t::from_int(0);
 	}
 
+	auto attack = entity->try_get_component_as<component::Attack>(component::component_t::ATTACK);
+	if (attack and attack->is_active()) {
+		if (attack->is_approaching()) {
+			Move::halt(entity, state, start_time);
+		}
+		attack->stop_attack();
+	}
 	return Move::move_default(entity, state, command->get_target(), start_time);
 }
 
@@ -134,51 +140,12 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 		return time::time_t::from_int(0);
 	}
 
-	auto turn_component = std::dynamic_pointer_cast<component::Turn>(
-		entity->get_component(component::component_t::TURN));
-	auto turn_ability = turn_component->get_ability();
-	auto turn_speed = turn_ability.get<nyan::Float>("Turn.turn_speed");
-
 	auto move_component = std::dynamic_pointer_cast<component::Move>(
 		entity->get_component(component::component_t::MOVE));
 	auto move_ability = move_component->get_ability();
-	auto move_speed = move_ability.get<nyan::Float>("Move.speed");
 	auto move_path_grid = move_ability.get<nyan::ObjectValue>("Move.path_type");
-
-	auto pos_component = std::dynamic_pointer_cast<component::Position>(
-		entity->get_component(component::component_t::POSITION));
-
-	auto &positions = pos_component->get_positions();
-	auto &angles = pos_component->get_angles();
-	auto current_pos = positions.get(start_time);
-	auto current_angle = angles.get(start_time);
-
-	// P4.4F.1: DynamicOccupancy + swept AABB runtime hookup.
-	// Map owns a shared DynamicOccupancy; register the
-	// moving entity at its current footprint before the
-	// segment loop, then update on every keyframe.
-	auto map_for_occ = state->get_map();
-	auto dyn_occ = map_for_occ ? map_for_occ->get_dynamic_occupancy()
-	                          : nullptr;
-	double occ_rx = 0.0;
-	double occ_ry = 0.0;
-	if (entity->has_footprint()) {
-		auto fp = entity->footprint();
-		occ_rx = fp.radius_x();
-		occ_ry = fp.radius_y();
-	}
-	auto occ_bounds_at = [&](const coord::phys3 &p) {
-		openage::gamestate::component::FootprintBounds b;
-		b.min_x = p.ne.to_double() - occ_rx;
-		b.min_y = p.se.to_double() - occ_ry;
-		b.max_x = p.ne.to_double() + occ_rx;
-		b.max_y = p.se.to_double() + occ_ry;
-		return b;
-	};
-	if (dyn_occ) {
-		dyn_occ->register_entity(
-			entity->get_id(), occ_bounds_at(current_pos));
-	}
+	auto pos_component = entity->try_get_component_as<component::Position>(component::component_t::POSITION);
+	const auto current_pos = pos_component->get_positions().get(start_time);
 
 	// Find path. P4.4C: prefer the deterministic NavigationService
 	// (A*) over the legacy flow-field pathfinder when the loader has
@@ -232,16 +199,14 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 			                   << " start=(" << start_cell.x << "," << start_cell.y << ")"
 			                   << " target=(" << target_cell.x << "," << target_cell.y << ")");
 			auto loop = state->get_event_loop();
-			if (loop) {
+			if (loop and entity->get_manager()) {
 				openage::event::EventHandler::param_map::map_t arrived_params{
 					{"entity_id", entity->get_id()},
 					{"status", std::string{status}},
 					{"waypoint_x", static_cast<int64_t>(target_cell.x)},
 					{"waypoint_y", static_cast<int64_t>(target_cell.y)},
 				};
-				auto target = std::make_shared<
-					openage::gamestate::event::MovementEventTarget>(
-					loop, static_cast<size_t>(entity->get_id()));
+				auto target = entity->get_manager();
 				loop->create_event("game.movement_arrived", target,
 					state, start_time, arrived_params);
 			}
@@ -272,31 +237,71 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 		             << " waypoints=" << waypoints.size() << " total_time_so_far=0");
 	}
 
-	// use waypoints for movement
+	return Move::move_along_path(entity, state, std::move(waypoints), start_time);
+}
+
+
+const time::time_t Move::move_along_path(const std::shared_ptr<GameEntity> &entity,
+                                         const std::shared_ptr<GameState> &state,
+                                         std::vector<coord::phys3> waypoints,
+                                         const time::time_t &start_time) {
+	auto move = entity->try_get_component_as<component::Move>(component::component_t::MOVE);
+	auto pos_component = entity->try_get_component_as<component::Position>(component::component_t::POSITION);
+	if (not move or not pos_component or waypoints.empty()) {
+		return time::time_t::zero();
+	}
+	auto move_ability = move->get_ability();
+	auto move_speed = move_ability.get<nyan::Float>("Move.speed");
+	auto &positions = pos_component->get_positions();
+	auto current_pos = positions.get(start_time);
+	auto map = state->get_map();
+    if (map) for (auto &point : waypoints) point.up = coord::phys_t::from_double(map->get_terrain()->height_at(point.ne.to_double(), point.se.to_double()));
+	auto dyn_occ = map ? map->get_dynamic_occupancy() : nullptr;
+	const auto footprint = entity->has_footprint() ? entity->footprint() : component::Footprint{};
+	auto occ_bounds_at = [&](const coord::phys3 &p) {
+		const double x = p.ne.to_double();
+		const double y = p.se.to_double();
+		return component::FootprintBounds{x - footprint.radius_x(), y - footprint.radius_y(),
+		                                  x + footprint.radius_x(), y + footprint.radius_y()};
+	};
+	if (dyn_occ) {
+		dyn_occ->register_entity(entity->get_id(), occ_bounds_at(current_pos));
+	}
+
+	// The path starts in the current cell, which may differ from its center.
+	if (not waypoints.empty()) {
+		waypoints.front() = current_pos;
+	}
 	double total_time = 0;
 	pos_component->set_position(start_time, current_pos);
 	log::log(MSG(info) << "Move::move_default: move_speed.get()=" << move_speed.get()
 	                   << " move_speed->is_infinite_positive()=" << move_speed->is_infinite_positive());
 	auto event_loop = state->get_event_loop();
 	const size_t segment_count = waypoints.size() > 0 ? waypoints.size() - 1 : 0;
+	// P4.4F: `blocked` is set when a segment is clamped by a
+	// dynamic blocker; the loop then breaks and a BLOCKED
+	// MovementArrivedEvent is dispatched after it. `blocked_at`
+	// remembers the clamped waypoint for that event.
+	bool blocked = false;
+	coord::phys3 blocked_at{0, 0, 0};
 	for (size_t i = 1; i < waypoints.size(); ++i) {
 		auto prev_waypoint = waypoints[i - 1];
 		auto cur_waypoint = waypoints[i];
 
 		auto path_vector = cur_waypoint - prev_waypoint;
+		if (cur_waypoint == prev_waypoint) {
+			continue;
+		}
 		auto path_angle = path_vector.to_angle();
 
-		// P4.4F.1: pre-check the swept AABB against
+		// P4.4F: pre-check the swept AABB against
 		// DynamicOccupancy. If a NON-self entity's bounds
-		// overlap the swept volume, the segment is blocked
-		// (the spec requires us not to fall back to
-		// passing through; the production behaviour is
-		// to log and continue past the block on the
-		// existing keyframe so the unit doesn't move
-		// through the blocker, but the move still
-		// completes along the remaining segments). For
-		// the headless demo path we surface the block
-		// as a warning.
+		// overlap the swept volume, the segment is blocked.
+		// Clamp the committed waypoint to a collision-free
+		// sub-target via bisection on can_occupy, then break
+		// the segment loop after emitting events so the unit
+		// moves to the safe point and halts.
+		coord::phys3 committed_waypoint = cur_waypoint;
 		if (dyn_occ) {
 			openage::gamestate::component::FootprintBounds swept
 				= ::openage::scenario::swept_aabb(
@@ -305,82 +310,87 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 			auto blockers = dyn_occ->query(
 				entity->get_id(), swept);
 			if (not blockers.empty()) {
-				log::log(MSG(warn) << "Move::move_default: segment "
-					<< "blocked by " << blockers.size()
-					<< " dynamic entities entity="
-					<< entity->get_id());
+				blocked = true;
+				// Bisect along prev->cur for the largest t in
+				// [0,1] whose footprint does not overlap any
+				// other registered entity. can_occupy excludes
+				// self. normalize(length*t) is unit-safe (no
+				// manual 65536 math) -- see coord/phys.h:57-58.
+				double t_safe = 0.0;
+				double seg_len = path_vector.length();
+				if (seg_len > 0.0) {
+					double lo = 0.0, hi = 1.0;
+					for (int step = 0; step < 8; ++step) {
+						double mid = (lo + hi) * 0.5;
+						auto test_point = prev_waypoint
+							+ path_vector.normalize(seg_len * mid);
+						if (dyn_occ->can_occupy(
+								entity->get_id(),
+								occ_bounds_at(test_point))) {
+							t_safe = mid;
+							lo = mid;
+						}
+						else {
+							hi = mid;
+						}
+					}
+				}
+				if (t_safe <= 0.0) {
+					// Already touching the blocker: unit stays
+					// put (zero-length committed segment).
+					committed_waypoint = prev_waypoint;
+				}
+				else {
+					committed_waypoint = prev_waypoint
+						+ path_vector.normalize(seg_len * t_safe);
+				}
+				log::log(MSG(warn) << "Move::move_default: segment blocked by "
+				             << blockers.size()
+				             << " dynamic entities, clamped to t_safe=" << t_safe
+				             << " entity=" << entity->get_id());
 			}
 		}
 
-		// rotation
-		if (not turn_speed->is_infinite_positive()) {
-			auto angle_diff = path_angle - current_angle;
-			if (angle_diff < 0) {
-				// get the positive difference
-				angle_diff = angle_diff * -1;
-			}
-			if (angle_diff > 180) {
-				// always use the smaller angle
-				angle_diff = angle_diff - 360;
-				angle_diff = angle_diff * -1;
-			}
-
-			double turn_time = angle_diff.to_double() / turn_speed->get();
-			// Phase 0.5C fix #13 follow-up: cap turn_time so a large angle diff
-			// does not pause the unit for many seconds. With a 90 deg difference
-			// and the default turn_speed=6 deg/s the pause would be 15 s; during
-			// that interval every new right-click wiped the in-flight destination
-			// (Continuous::set_last erases all later keyframes), so the villager
-			// stayed parked in place for the entire turn. Capping turn_time bounds
-			// the pause and lets move_time dominate total_time, after which the
-			// unit steps its angle to the path direction at dest time.
-			//
-			// This is intentionally simple -- proper rotate-while-move would need a
-			// Continuous angle curve (current Segmented step is discontinuous); the
-			// cap is a Phase 0.5C scope choice.
-			constexpr double MAX_TURN_TIME = 0.5;
-			if (turn_time > MAX_TURN_TIME) {
-				turn_time = MAX_TURN_TIME;
-			}
-			total_time += turn_time;
-			// Intermediate keyframe at start_time + total_time keeps the unit
-			// at prev (=cur) for the cap duration; removed by future move
-			// commands via set_last's documented erase-future semantics.
-			pos_component->set_position(start_time + total_time, prev_waypoint);
-
-			// update current angle for next waypoint
-			current_angle = path_angle;
+		if (committed_waypoint != prev_waypoint) {
+			pos_component->set_angle(start_time + total_time, path_angle);
 		}
-		pos_component->set_angle(start_time + total_time, path_angle);
 
-		// movement
+		// movement -- use the (possibly clamped) committed waypoint.
 		double move_time = 0;
 		if (not move_speed->is_infinite_positive()) {
-			auto distance = path_vector.length();
+			auto distance = (committed_waypoint - prev_waypoint).length();
 			move_time = distance / move_speed->get();
 		}
 		total_time += move_time;
 
-		pos_component->set_position(start_time + total_time, cur_waypoint);
+		pos_component->set_position(start_time + total_time, committed_waypoint);
 
-		// P4.4F.1: update DynamicOccupancy after each segment
-		// commit. The swept AABB of (prev, cur) is the
-		// shape the unit's footprint sweeps over the
-		// segment; the occupancy update covers the full
-		// swept volume so subsequent movers querying
-		// the same area see the right bounds.
+		// P4.4F: update DynamicOccupancy after each segment
+		// commit so subsequent movers see the latest footprint
+		// position. On a BLOCKED segment the committed waypoint
+		// is the clamped sub-target, so occupancy tracks where
+		// the unit actually stops (not the through-blocker
+		// endpoint).
+		//
+		// MVP limitation (occupancy/curve sync): for UNBLOCKED
+		// multi-segment moves, occupancy advances through every
+		// segment endpoint AT SETUP TIME, while the visible
+		// position curve interpolates over real time. So
+		// occupancy LEADS the interpolated position for all but
+		// the last segment. True curve-tracking would require a
+		// time-based game.waypoint_reached observer that advances
+		// occupancy per-segment as the curve reaches each keyframe
+		// -- that is deferred (new event handler wiring is out of
+		// MVP scope). The clamp logic here only fixes the blocked
+		// case; unblocked moves keep the existing setup-time
+		// advancement.
 		if (dyn_occ) {
 			openage::gamestate::component::FootprintBounds prev_b
 				= occ_bounds_at(prev_waypoint);
 			openage::gamestate::component::FootprintBounds cur_b
-				= occ_bounds_at(cur_waypoint);
-			// Use the swept AABB at the new position --
-			// DynamicOccupancy::update_entity does an
-			// old->new bucket diff; we pass the
-			// destination bounds as `new` (the swept
-			// volume is approximated by the
-			// destination's rectangle for the
-			// per-cell bucket map).
+				= occ_bounds_at(committed_waypoint);
+			// DynamicOccupancy::update_entity does an old->new
+			// bucket diff; we pass the committed bounds as `new`.
 			dyn_occ->update_entity(entity->get_id(),
 				prev_b, cur_b);
 		}
@@ -389,8 +399,11 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 		// every segment. The event is created at the segment's
 		// end time so the diagnostic stream records the arrival
 		// in the same order as the Position Curve's keyframes.
-		if (event_loop) {
-			auto wp_tile = cur_waypoint.to_tile();
+		// On a blocked segment this reports the committed
+		// (clamped) waypoint, matching the keyframe the curve
+		// actually reaches.
+		if (event_loop and entity->get_manager()) {
+			auto wp_tile = committed_waypoint.to_tile();
 			openage::event::EventHandler::param_map::map_t wp_params{
 				{"entity_id", entity->get_id()},
 				{"segment_index", static_cast<int64_t>(i)},
@@ -398,25 +411,40 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 				{"waypoint_x", static_cast<int64_t>(wp_tile.ne)},
 				{"waypoint_y", static_cast<int64_t>(wp_tile.se)},
 			};
-			// EventLoop requires a non-null EventEntity target
-			// (its constructor hashes target->id()). MovementEventTarget
-			// is the dedicated stub: it carries the moved entity's
-			// id for traceability and lets observers query it
-			// from target if they want, but the canonical
-			// entity_id lives in params.
-			auto target = std::make_shared<
-				openage::gamestate::event::MovementEventTarget>(
-				event_loop, static_cast<size_t>(entity->get_id()));
+			auto target = entity->get_manager();
 			event_loop->create_event("game.waypoint_reached", target,
 				state, start_time + total_time, wp_params);
 		}
+
+		// P4.4F: a blocked segment is the last committed
+		// segment -- stop after the safe point so the unit
+		// halts at the blocker edge instead of pathing
+		// through it. The BLOCKED arrived event is dispatched
+		// after the loop.
+		if (blocked) {
+			blocked_at = committed_waypoint;
+			break;
+		}
 	}
 
-	// P4.4C: dispatch MovementArrivedEvent(OK) at the end of the
-	// last segment. status=OK only when waypoints were non-empty
-	// (i.e., A* returned a path); zero-waypoint paths were
-	// already filtered above as failures.
-	if (event_loop && not waypoints.empty()) {
+	// P4.4C/F: dispatch MovementArrivedEvent at the end of the
+	// move. status=BLOCKED when a segment was clamped by a
+	// dynamic blocker and the loop broke early; status=OK when
+	// the unit reached its final waypoint. Zero-waypoint paths
+	// were already filtered above as failures.
+	if (event_loop and entity->get_manager() and blocked) {
+		auto blocked_tile = blocked_at.to_tile();
+		openage::event::EventHandler::param_map::map_t arrived_params{
+			{"entity_id", entity->get_id()},
+			{"status", std::string{"BLOCKED"}},
+			{"waypoint_x", static_cast<int64_t>(blocked_tile.ne)},
+			{"waypoint_y", static_cast<int64_t>(blocked_tile.se)},
+		};
+		auto target = entity->get_manager();
+		event_loop->create_event("game.movement_arrived", target,
+			state, start_time + total_time, arrived_params);
+	}
+	else if (event_loop and entity->get_manager() and not waypoints.empty()) {
 		auto final_tile = waypoints.back().to_tile();
 		openage::event::EventHandler::param_map::map_t arrived_params{
 			{"entity_id", entity->get_id()},
@@ -424,9 +452,7 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 			{"waypoint_x", static_cast<int64_t>(final_tile.ne)},
 			{"waypoint_y", static_cast<int64_t>(final_tile.se)},
 		};
-		auto target = std::make_shared<
-			openage::gamestate::event::MovementEventTarget>(
-			event_loop, static_cast<size_t>(entity->get_id()));
+		auto target = entity->get_manager();
 		event_loop->create_event("game.movement_arrived", target,
 			state, start_time + total_time, arrived_params);
 	}
@@ -445,19 +471,27 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 		                   << ") (expect ~partway between current and dest)");
 	}
 
-	// properties
-	auto ability = move_component->get_ability();
-	if (api::APIAbility::check_property(ability, api::ability_property_t::ANIMATED)) {
-		auto property = api::APIAbility::get_property(ability, api::ability_property_t::ANIMATED);
-		auto animations = api::APIAbilityProperty::get_animations(property);
-		auto animation_paths = api::APIAnimation::get_animation_paths(animations);
-
-		if (animation_paths.size() > 0) [[likely]] {
-			entity->render_update(start_time, animation_paths[0]);
-		}
+	if (total_time > 0) {
+		entity->play_animation(move_ability, start_time);
+	}
+	if (entity->has_component(component::component_t::IDLE)) {
+		Idle::idle(entity, start_time + total_time);
 	}
 
 	return total_time;
+}
+
+void Move::halt(const std::shared_ptr<GameEntity> &entity,
+                const std::shared_ptr<GameState> &state,
+                const time::time_t &time) {
+	if (auto position = entity->try_get_component_as<component::Position>(component::component_t::POSITION)) {
+		const auto point = position->get_positions().get(time);
+		position->set_position(time, point);
+		position->set_angle(time, position->get_angles().get(time));
+		if (auto map = state->get_map(); map and entity->has_component(component::component_t::MOVE)) {
+			register_entity_in_dynamic_occupancy(*map, *entity, point.ne.to_double(), point.se.to_double());
+		}
+	}
 }
 
 } // namespace openage::gamestate::system

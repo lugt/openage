@@ -30,21 +30,7 @@ MissionView::MissionView(
 	}
 	this->victory_reason_ = state.victory_reason();
 
-	// Objectives. The MissionState exposes per-objective state via
-	// objective_state(id); we iterate the known objective ids by
-	// reading the internal map through a const accessor. The
-	// MissionState's internals are encapsulated; the canonical way
-	// to enumerate objectives is to query each id. For the MVP
-	// fixture (Mission 1) the runtime auto-registers the
-	// "mission_01.defeat_enemy" objective when the synthesized
-	// defeat_enemy trigger fires its SetObjective/CompleteObjective
-	// effects, so a single probe suffices. The P4.4A step 4
-	// (events) will replace this with a proper enumeration API
-	// driven by the runtime's objective registry.
-	const char *known[] = {
-		"mission_01.defeat_enemy",
-	};
-	for (const char *id : known) {
+	for (const auto &id : state.registered_objectives()) {
 		auto s = state.objective_state(id);
 		std::string state_str;
 		switch (static_cast<int>(s)) {

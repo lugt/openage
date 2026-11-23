@@ -50,22 +50,17 @@ void WorldObject::set_render_entity(const std::shared_ptr<RenderEntity> &entity)
 
 void WorldObject::fetch_updates(const time::time_t &time) {
 	// TODO: Calling this once per frame is very expensive
-	auto layer_count = this->get_required_layer_count(time);
-	if (this->layer_uniforms.size() != layer_count) {
-		// The number of layers changed, so we need to update the renderables
-		this->require_renderable = true;
-	}
-
 	if (not this->render_entity->is_changed()) {
-		// exit early because there is nothing to update
+		if (this->layer_uniforms.size() != this->get_required_layer_count(time)) {
+			this->require_renderable = true;
+			this->changed = true;
+		}
 		return;
 	}
 
-	// Get data from render entity
-	this->ref_id = this->render_entity->get_id();
-
-	// Thread-safe access to curves needs a lock on the render entity's mutex
-	auto read_lock = this->render_entity->get_read_lock();
+	auto lock = this->render_entity->lock_update();
+	this->ref_id = this->render_entity->get_locked_id();
+	this->owner = this->render_entity->get_owner();
 	this->position.sync(this->render_entity->get_position());
 	this->animation_info.sync(this->render_entity->get_animation_path(),
 	                          std::function<std::shared_ptr<renderer::resources::Animation2dInfo>(const std::string &)>(
@@ -82,16 +77,17 @@ void WorldObject::fetch_updates(const time::time_t &time) {
 	                          this->last_update);
 	this->angle.sync(this->render_entity->get_angle(), this->last_update);
 
-	// Unlock mutex of the render entity
-	read_lock.unlock();
-
-	// Set self to changed so that world renderer can update the renderable
+	this->render_entity->acknowledge_update();
 	this->changed = true;
-	this->render_entity->clear_changed_flag();
 	this->last_update = time;
+	if (this->layer_uniforms.size() != this->get_required_layer_count(time)) {
+		this->require_renderable = true;
+	}
 }
 
-void WorldObject::update_uniforms(const time::time_t &time) {
+void WorldObject::update_uniforms(const time::time_t &time,
+                                  const gamestate::VisibilitySnapshot *visibility) {
+	this->sprite_top = 0.0f;
 	// TODO: Only update uniforms that changed since last update
 	if (this->layer_uniforms.empty()) [[unlikely]] {
 		return;
@@ -99,6 +95,14 @@ void WorldObject::update_uniforms(const time::time_t &time) {
 
 	// Object world position
 	auto current_pos = this->position.get(time);
+	const bool selectable = this->render_entity->is_selectable();
+	// Live objects use the same visibility as selection and the minimap.
+	// Remains have no simulation entity, so show them only on visible ground.
+	const bool hidden_by_fog = visibility
+	                        and (selectable
+	                               ? not visibility->contains(this->ref_id)
+	                               : visibility->at(current_pos.ne.to_int(), current_pos.se.to_int())
+	                                   != gamestate::TileVisibility::Visible);
 
 	// Direction angle the object is facing towards currently
 	auto angle_degrees = this->angle.get(time).to_float();
@@ -108,6 +112,9 @@ void WorldObject::update_uniforms(const time::time_t &time) {
 
 	for (size_t layer_idx = 0; layer_idx < this->layer_uniforms.size(); ++layer_idx) {
 		auto &layer_unifs = this->layer_uniforms.at(layer_idx);
+		layer_unifs->update(this->picking_id, selectable ? this->ref_id + 1u : 0u);
+		layer_unifs->update(this->fog_hidden, hidden_by_fog);
+		layer_unifs->update(this->player_color, this->owner);
 		layer_unifs->update(this->obj_world_position, current_pos.to_world_space());
 
 		// Frame subtexture
@@ -126,6 +133,9 @@ void WorldObject::update_uniforms(const time::time_t &time) {
 		size_t frame_idx;
 		switch (layer.get_display_mode()) {
 		case renderer::resources::display_mode::ONCE:
+			frame_idx = std::min(angle->get_frame_count() - 1,
+			                     layer.get_frame_timing()->get_frame(std::max(time - last_update, time::time_t::zero())));
+			break;
 		case renderer::resources::display_mode::LOOP: {
 			// ONCE and LOOP are animated based on time
 			auto &timing = layer.get_frame_timing();
@@ -171,11 +181,16 @@ void WorldObject::update_uniforms(const time::time_t &time) {
 			static_cast<float>(anchor[0]),
 			static_cast<float>(anchor[1])};
 		layer_unifs->update(this->anchor_offset, anchor_offset);
+		this->sprite_top = std::max(this->sprite_top, (subtex_size_vec.y() + anchor_offset.y()) * scale * 0.5f);
 	}
 }
 
 uint32_t WorldObject::get_id() {
 	return this->ref_id;
+}
+
+bool WorldObject::is_removed(const time::time_t &at) const {
+	return this->render_entity->is_removed(at);
 }
 
 const renderer::resources::MeshData WorldObject::get_mesh() {

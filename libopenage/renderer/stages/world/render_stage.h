@@ -2,6 +2,10 @@
 
 #pragma once
 
+#include "gamestate/visibility.h"
+
+#include <optional>
+
 #include <memory>
 #include <shared_mutex>
 #include <vector>
@@ -80,6 +84,11 @@ public:
 	 * Update the render entities and render positions.
 	 */
 	void update();
+	std::optional<uint32_t> pick(size_t x, size_t y) const;
+	void set_visibility(std::shared_ptr<const gamestate::VisibilitySnapshot> view) {
+		this->visibility = std::move(view);
+	}
+	float get_sprite_top(uint32_t id) const;
 
 	/**
 	 * Resize the FBO for the world rendering. This basically updates the output
@@ -135,6 +144,7 @@ private:
 	 * Render entities requested by the game world.
 	 */
 	std::vector<std::shared_ptr<WorldObject>> render_objects;
+	std::shared_ptr<const gamestate::VisibilitySnapshot> visibility;
 
 	/**
 	 * Shader for rendering the world objects.

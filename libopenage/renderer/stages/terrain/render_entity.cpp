@@ -29,16 +29,17 @@ void RenderEntity::update_tile(const util::Vector2s size,
 	}
 
 	// find the postion of the tile in the vertex array
-	auto left_corner = pos.ne * size[0] + pos.se;
+	auto v_width = size[0] + 1;
+	auto left_corner = pos.ne + pos.se * v_width;
 
 	// update the 4 vertices of the tile
 	this->vertices[left_corner].up = elevation.to_float();                 // left corner
 	this->vertices[left_corner + 1].up = elevation.to_float();             // bottom corner
-	this->vertices[left_corner + (size[0] + 1)].up = elevation.to_float(); // top corner
-	this->vertices[left_corner + (size[0] + 2)].up = elevation.to_float(); // right corner
+	this->vertices[left_corner + v_width].up = elevation.to_float();     // top corner
+	this->vertices[left_corner + v_width + 1].up = elevation.to_float(); // right corner
 
 	// update tile
-	this->tiles[left_corner] = {elevation, terrain_path};
+	this->tiles.at(pos.ne + pos.se * size[0]) = {elevation, terrain_path};
 
 	// update the last update time
 	this->last_update = time;
@@ -51,42 +52,32 @@ void RenderEntity::update_tile(const util::Vector2s size,
 
 void RenderEntity::update(const util::Vector2s size,
                           const tiles_t tiles,
-                          const time::time_t time) {
+                          const time::time_t time,
+                          std::span<const float> corner_heights) {
 	std::unique_lock lock{this->mutex};
 
-	// increase by 1 in every dimension because tiles
-	// size is number of tiles, but we want number of vertices
-	util::Vector2i tile_size{size[0], size[1]};
+	if (size[0] == 0 or size[1] == 0 or tiles.size() != size[0] * size[1]
+	    or (not corner_heights.empty()
+	        and corner_heights.size() != (size[0] + 1) * (size[1] + 1))) {
+		throw Error{ERR << "Terrain data does not match chunk size " << size};
+	}
 	this->size = util::Vector2s{size[0] + 1, size[1] + 1};
-
-	// transfer mesh
-	auto vert_count = this->size[0] * this->size[1];
 	this->vertices.clear();
-	this->vertices.reserve(vert_count);
-	for (int j = 0; j < (int)this->size[1]; ++j) {
-		for (int i = 0; i < (int)this->size[0]; ++i) {
-			// for each vertex, compare the surrounding tiles
-			std::vector<float> surround{};
-			if (j - 1 >= 0 and i - 1 >= 0) {
-				surround.push_back(tiles[(i - 1) * size[1] + j - 1].first.to_float());
+	this->vertices.reserve(this->size[0] * this->size[1]);
+	for (size_t j = 0; j < this->size[1]; ++j) {
+		for (size_t i = 0; i < this->size[0]; ++i) {
+			float height = 0;
+			if (corner_heights.empty()) {
+				for (size_t y = j == 0 ? 0 : j - 1; y <= j and y < size[1]; ++y) {
+					for (size_t x = i == 0 ? 0 : i - 1; x <= i and x < size[0]; ++x) {
+						height = std::max(height, tiles[y * size[0] + x].first.to_float());
+					}
+				}
 			}
-			if (j < tile_size[1] and i - 1 >= 0) {
-				surround.push_back(tiles[(i - 1) * size[1] + j].first.to_float());
+			else {
+				height = corner_heights[j * this->size[0] + i];
 			}
-			if (j < tile_size[1] and i < tile_size[0]) {
-				surround.push_back(tiles[i * size[1] + j].first.to_float());
-			}
-			if (j - 1 >= 0 and i < tile_size[0]) {
-				surround.push_back(tiles[i * size[1] + j - 1].first.to_float());
-			}
-			// select the height of the highest surrounding tile
-			auto max_height = *std::max_element(surround.begin(), surround.end());
-			coord::scene3 v{
-				static_cast<float>(i),
-				static_cast<float>(j),
-				max_height,
-			};
-			this->vertices.push_back(v);
+			this->vertices.emplace_back(static_cast<float>(i), static_cast<float>(j), height);
 		}
 	}
 

@@ -3,7 +3,10 @@
 #include "pathfinding/group_move_handler.h"
 
 #include "coord/phys.h"
-#include "coord/tile.h"
+#include "coord/scene.h"
+#include <unordered_set>
+#include "gamestate/map.h"
+#include "pathfinding/navigation_service.h"
 #include "event/evententity.h"
 #include "gamestate/component/api/move.h"
 #include "gamestate/component/internal/commands/types.h"
@@ -74,8 +77,9 @@ void GroupMoveHandler::invoke(
 		std::vector<openage::gamestate::entity_id_t>{});
 	double cx = params.get("center_x", 0.0);
 	double cy = params.get("center_y", 0.0);
-	uint64_t generation = params.get("generation",
-		static_cast<uint64_t>(0));
+	const auto generation = params.get("generation", int64_t{0});
+	const auto issuer = params.get("issuer", player_id_t{});
+	const bool validate_owner = params.check_type<player_id_t>("issuer");
 
 	// Filter to movable entities. The unit must have the
 	// Move ability and an owner that matches the local
@@ -87,8 +91,9 @@ void GroupMoveHandler::invoke(
 			continue;
 		}
 		auto e = gstate->get_game_entity(id);
-		if (not e->has_component(
-			    openage::gamestate::component::component_t::MOVE)) {
+		auto owner = e->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
+		if (e->is_dead() or not e->has_component(component::component_t::MOVE)
+		    or (validate_owner and (not owner or owner->get_owners().get(time) != issuer))) {
 			continue;
 		}
 		movable.push_back(id);
@@ -118,54 +123,32 @@ void GroupMoveHandler::invoke(
 	if (max_w <= 0.0) max_w = 0.8;
 	if (max_h <= 0.0) max_h = 0.8;
 
-	// Build DynamicOccupancy from the live state. Each
-	// movable + each non-movable entity gets registered.
-	openage::scenario::DynamicOccupancy occ;
-	for (auto id : movable) {
-		auto e = gstate->get_game_entity(id);
-		if (not e->has_footprint()
-		    or not e->has_component(
-			    openage::gamestate::component::component_t::POSITION)) {
+	// The group's current positions are traversable by its members. Reserve
+	// the live footprints of other entities while assigning destinations.
+	openage::scenario::DynamicOccupancy occupancy;
+	const std::unordered_set<entity_id_t> group(movable.begin(), movable.end());
+	for (const auto &[id, entity] : gstate->get_game_entities()) {
+		if (group.contains(id) or entity->is_dead() or not entity->has_footprint()
+		    or not entity->footprint().blocks_pathfinding()) {
 			continue;
 		}
-		auto fp = e->footprint();
-		auto pc = std::dynamic_pointer_cast<
-			openage::gamestate::component::Position>(
-			e->get_component(
-				openage::gamestate::component::component_t::POSITION));
-		if (not pc) {
-			continue;
+		if (auto position = entity->try_get_component_as<component::Position>(component::component_t::POSITION)) {
+			auto point = position->get_positions().get(time);
+			auto footprint = entity->footprint();
+			footprint.set_center(point.ne.to_double(), point.se.to_double());
+			occupancy.register_entity(id, footprint.bounds());
 		}
-		auto sp = pc->get_positions().get(
-			openage::time::time_t{0});
-		openage::gamestate::component::FootprintBounds b;
-		double rx = fp.radius_x();
-		double ry = fp.radius_y();
-		b.min_x = sp.ne.to_double() - rx;
-		b.min_y = sp.se.to_double() - ry;
-		b.max_x = sp.ne.to_double() + rx;
-		b.max_y = sp.se.to_double() + ry;
-		occ.register_entity(id, b);
 	}
 
-	// Static grid from the map.
-	auto map = gstate->get_map();
-	openage::gamestate::scenario::StaticOccupancyGrid
-		static_occ(0, 0, 16, 16);
-	// The full Mission 1 map is 16x16. If the
-	// StaticOccupancyGrid is empty we use that as the
-	// base. The DynamicOccupancy check is what matters
-	// for the multi-unit case; for the MVP we leave the
-	// static grid as a no-op (Map's grid is held
-	// separately; the production runtime consults
-	// Map::get_static_occupancy_grid which is the
-	// authoritative source -- but for the headless demo
-	// path a fresh grid is fine).
-
-	// Plan the formation.
+	const auto map = gstate->get_map();
+	const auto size = map->get_size();
+	const auto navigation = map->get_navigation_service();
+	const auto width = static_cast<int>(size[0]);
+	const auto height = static_cast<int>(size[1]);
+	scenario::StaticOccupancyGrid bounds(0, 0, width, height);
 	auto plan = openage::pathfinding::plan_formation(
-		movable, cx, cy, max_w, max_h, occ, static_occ,
-		0, 0, 16, 16);
+		movable, cx, cy, max_w, max_h, occupancy, bounds, 0, 0, width, height, {},
+		navigation ? navigation->grid().get() : nullptr);
 	if (plan.result
 	    != openage::pathfinding::FormationResult::OK) {
 		log::log(MSG(warn) << "GroupMoveHandler: formation FAILED ("
@@ -180,17 +163,7 @@ void GroupMoveHandler::invoke(
 	// so the Move runtime treats it as a normal move.
 	for (size_t i = 0; i < plan.assignments.size(); ++i) {
 		const auto &a = plan.assignments[i];
-		// Use coord::tile::to_phys3 so the FixedPoint
-		// uses the correct shift (raw = tile * 65536).
-		// Constructing phys_t{double} directly would
-		// double-shift (raw = double * 65536) which
-		// overflows.
-		openage::coord::phys3 move_target{
-			openage::coord::tile{
-				static_cast<openage::coord::tile_t>(
-					a.slot_center_x),
-				static_cast<openage::coord::tile_t>(
-					a.slot_center_y)}.to_phys3()};
+		const auto move_target = coord::scene3{a.slot_center_x, a.slot_center_y, 0}.to_phys3();
 		openage::event::EventHandler::param_map::map_t move_raw{
 			{"type", openage::gamestate::component::command::command_t::MOVE},
 			{"target", move_target},

@@ -100,6 +100,7 @@ cdef class SLD:
     cdef public list outline_frames
     cdef public list dmg_mask_frames
     cdef public list playercolor_mask_frames
+    cdef public dict playercolor_by_main_frame
 
     cdef const uint8_t[::1] data
 
@@ -125,6 +126,7 @@ cdef class SLD:
         self.outline_frames = list()
         self.dmg_mask_frames = list()
         self.playercolor_mask_frames = list()
+        self.playercolor_by_main_frame = {}
 
         # File bytes
         self.data = data
@@ -318,6 +320,8 @@ cdef class SLD:
                 elif layer_type is SLDLayerType.PLAYERCOLOR:
                     layer_def = SLDLayerBC4(frame_header, layer_header)
                     self.playercolor_mask_frames.append(layer_def)
+                    if SLDLayerType.MAIN in layer_types:
+                        self.playercolor_by_main_frame[len(self.main_frames) - 1] = layer_def
 
                     if flag0 & 0x80 and frame_index > 0:
                         previous = previous_playercolor

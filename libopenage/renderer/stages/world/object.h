@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "gamestate/visibility.h"
+
 #include <cstdint>
 #include <list>
 #include <memory>
@@ -63,7 +65,8 @@ public:
 	 *
 	 * @param time Current simulation time.
 	 */
-	void update_uniforms(const time::time_t &time = 0.0);
+	void update_uniforms(const time::time_t &time = 0.0,
+	                     const gamestate::VisibilitySnapshot *visibility = nullptr);
 
 	/**
 	 * Get the ID of the corresponding game entity.
@@ -71,6 +74,12 @@ public:
 	 * @return Game entity ID.
 	 */
 	uint32_t get_id();
+	float get_sprite_top() const { return this->sprite_top; }
+
+	bool is_removed(const time::time_t &at) const;
+	const std::vector<std::shared_ptr<renderer::UniformInput>> &get_uniforms() const {
+		return this->layer_uniforms;
+	}
 
 	/**
 	 * Get the quad for creating the geometry.
@@ -151,6 +160,9 @@ public:
 	inline static uniform_id_t flip_x;
 	inline static uniform_id_t flip_y;
 	inline static uniform_id_t tex;
+	inline static uniform_id_t player_color;
+	inline static uniform_id_t picking_id;
+	inline static uniform_id_t fog_hidden;
 	inline static uniform_id_t tile_params;
 	inline static uniform_id_t scale;
 	inline static uniform_id_t subtex_size;
@@ -184,6 +196,7 @@ private:
 	 * the engine.
 	 */
 	uint32_t ref_id;
+	uint32_t owner{0};
 
 	/**
 	 * Position of the object.
@@ -205,6 +218,7 @@ private:
 	 * renderable in the render pass.
 	 */
 	std::vector<std::shared_ptr<renderer::UniformInput>> layer_uniforms;
+	float sprite_top = 0.0f;
 
 	/**
 	 * Time of the last update call.

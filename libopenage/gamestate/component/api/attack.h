@@ -74,6 +74,7 @@ public:
 	 * (defensive fallback so a malformed ability cannot crash the loop).
 	 */
 	int64_t get_damage() const;
+	int64_t get_damage_against(const nyan::Object &resistance) const;
 
 	/**
 	 * FQON of the attribute damaged by this attack (e.g. the Health
@@ -95,6 +96,7 @@ public:
 	entity_id_t get_target_id() const;
 	time::time_t get_next_attack_time() const;
 	bool is_approaching() const;
+	uint64_t get_order_id() const { return this->order_id; }
 
 	/**
 	 * Begin attacking \p target at \p now. Sets active, target, and the
@@ -118,6 +120,7 @@ private:
 
 	/** Whether this entity is currently in an attack state. */
 	bool active{false};
+	uint64_t order_id{0};
 
 	/** Entity being attacked. */
 	entity_id_t target_id{0};

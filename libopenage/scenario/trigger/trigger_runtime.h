@@ -49,6 +49,8 @@
 #include "time/time.h"
 
 
+namespace openage::gamestate { class EntityFactory; }
+
 namespace openage::scenario::trigger {
 
 
@@ -88,6 +90,8 @@ public:
  * RemovalEventHandler is a separate class: the handler is a
  * unit of dispatch, the runtime is the policy.
  */
+class OriginalScenario;
+
 class TriggerRuntime : public std::enable_shared_from_this<TriggerRuntime> {
 public:
 	TriggerRuntime(
@@ -103,6 +107,9 @@ public:
 	 * populated.
 	 */
 	void register_handlers();
+    void load_original(const util::json::Value &config, const std::shared_ptr<gamestate::EntityFactory> &factory);
+    std::shared_ptr<OriginalScenario> original_scenario() const { return this->original_; }
+    void schedule_evaluation(TriggerId id, time::time_t at);
 
 	/**
 	 * Add a trigger from a MissionTriggerDefinition IR
@@ -136,6 +143,9 @@ public:
 	 * explicit value. The runtime does NOT consult any clock
 	 * itself, so it stays a pure policy object.
 	 */
+	void add_area(const gamestate::MissionAreaDefinition &area) { this->areas_.emplace(area.area_id, area); }
+	void notify_entity_changed(gamestate::entity_id_t entity_id, time::time_t at);
+
 	void notify_entity_removed(
 		openage::gamestate::entity_id_t entity_id,
 		openage::time::time_t at);
@@ -183,12 +193,14 @@ private:
 	 * All registered triggers, by id.
 	 */
 	std::unordered_map<TriggerId, std::shared_ptr<TriggerInstance>> triggers_;
+	std::unordered_map<std::string, gamestate::MissionAreaDefinition> areas_;
 
 	/**
 	 * The mission state (objective lifecycle + victory
 	 * state). Owned by the runtime.
 	 */
 	MissionState mission_state_;
+    std::shared_ptr<OriginalScenario> original_;
 
 	/**
 	 * GameState pointer; the runtime does not own it.

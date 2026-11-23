@@ -106,18 +106,19 @@ void HudRenderStage::update() {
 	if (this->selection_render_pass) [[likely]] {
 		this->selection_render_pass->clear_renderables();
 		for (const auto &quad : this->selection_quads) {
-			auto unifs = this->selection_shader->new_uniform_input(
-				"obj_world_position", quad.world_center,
-				"half_size", Eigen::Vector2f{quad.half_width, quad.half_height},
-				"in_col", quad.color);
-
-			Renderable overlay_obj{
-				unifs,
-				this->selection_geometry,
-				true,   // alpha_blending
-				false,  // depth_test
-			};
-			this->selection_render_pass->add_renderables(std::move(overlay_obj));
+			const Eigen::Vector2f half_size{quad.half_width, quad.half_height};
+			auto ring = this->selection_shader->new_uniform_input(
+				"obj_world_position", quad.world_center, "half_size", half_size,
+				"health_color", quad.health_color, "overlay_bar", false,
+				"health_fraction", quad.health_fraction, "sprite_top", quad.sprite_top);
+			this->selection_render_pass->add_renderables(Renderable{ring, this->selection_geometry, true, false});
+			if (quad.health_fraction >= 0.0f) {
+				auto bar = this->selection_shader->new_uniform_input(
+					"obj_world_position", quad.world_center, "half_size", half_size,
+					"health_color", quad.health_color, "overlay_bar", true,
+					"health_fraction", quad.health_fraction, "sprite_top", quad.sprite_top);
+				this->selection_render_pass->add_renderables(Renderable{bar, this->selection_geometry, true, false});
+			}
 		}
 	}
 }

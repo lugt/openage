@@ -18,6 +18,17 @@ using entity_id_t = uint64_t;
  */
 using player_id_t = uint64_t;
 
+struct PlayerEconomy {
+	int64_t wood = 0;
+	int64_t food = 0;
+	int64_t gold = 0;
+	int64_t stone = 0;
+	int64_t population = 0;
+	int64_t population_capacity = 0;
+
+	bool operator==(const PlayerEconomy &) const = default;
+};
+
 /**
  * Per-slot configuration passed into \p Game at construction.
  *

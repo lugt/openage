@@ -167,7 +167,8 @@ constexpr int STEP_COST[8] = {1, 1, 1, 1, 1, 1, 1, 1};
 GridAStarPathfinder::Result GridAStarPathfinder::find_path(
 	openage::gamestate::scenario::CellPosition start,
 	openage::gamestate::scenario::CellPosition target,
-	std::vector<openage::gamestate::scenario::CellPosition> &waypoints_out) {
+	std::vector<openage::gamestate::scenario::CellPosition> &waypoints_out,
+	const StepAllowed &step_allowed) {
 	waypoints_out.clear();
 
 	if (start == target) {
@@ -225,7 +226,6 @@ GridAStarPathfinder::Result GridAStarPathfinder::find_path(
 			return Result::PATH_FOUND;
 		}
 
-		const int h_cur = this->chebyshev(current, target);
 		for (int i = 0; i < 8; ++i) {
 			const CellPosition neighbour{
 				current.x + NEIGHBOUR_DX[i],
@@ -235,6 +235,9 @@ GridAStarPathfinder::Result GridAStarPathfinder::find_path(
 			}
 			if (not this->diagonal_clear(current, neighbour)) {
 				// Diagonal corner-cut blocked.
+				continue;
+			}
+			if (step_allowed and not step_allowed(current, neighbour)) {
 				continue;
 			}
 			const int tentative_g = current_g + STEP_COST[i];

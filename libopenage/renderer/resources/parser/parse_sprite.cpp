@@ -151,7 +151,6 @@ Animation2dInfo parse_sprite_file(const util::Path &path,
 	std::vector<AngleData> angles;
 
 	// largest frame index = total length of animation
-	size_t largest_frame_idx = 0;
 
 	// Map frame data to angle
 	std::unordered_map<size_t, std::vector<FrameData>> frames;
@@ -187,11 +186,6 @@ Animation2dInfo parse_sprite_file(const util::Path &path,
 			}
 			frames.at(frame.angle).push_back(frame);
 
-			// check for the largest index, so we can use it to
-		    // interpolate the total animation length
-			if (frame.index > largest_frame_idx) {
-				largest_frame_idx = frame.index;
-			}
 		})};
 
 	for (auto line : lines) {
@@ -213,7 +207,7 @@ Animation2dInfo parse_sprite_file(const util::Path &path,
 	}
 
 	// Order frames by index
-	for (auto angle_frames : frames) {
+	for (auto &angle_frames : frames) {
 		std::sort(angle_frames.second.begin(),
 		          angle_frames.second.end(),
 		          [](FrameData &f1, FrameData &f2) {
@@ -288,20 +282,17 @@ Animation2dInfo parse_sprite_file(const util::Path &path,
 					continue;
 				}
 				if (frame.index > frame_infos.size()) {
-					// set empty frames if an index is missing
-					for (size_t i = frame_infos.size() - 1; i < frame.index; ++i) {
-						frame_infos.push_back(nullptr);
+					if (frame_infos.empty()) {
+						throw Error{MSG(err) << "Missing first frame in sprite " << path};
 					}
+					frame_infos.resize(frame.index, frame_infos.back());
 				}
 				frame_infos.push_back(std::make_shared<FrameInfo>(
 					texture_id_map.at(frame.texture_id),
 					frame.subtex_id));
 			}
-			if (frame_infos.size() < largest_frame_idx) {
-				// insert empty frames at the end if an indices are missing
-				for (size_t i = frame_infos.size() - 1; i < largest_frame_idx; ++i) {
-					frame_infos.push_back(nullptr);
-				}
+			if (frame_infos.empty()) {
+				throw Error{MSG(err) << "Missing frames for sprite layer in " << path};
 			}
 
 			angle_infos.push_back(std::make_shared<AngleInfo>(angle_start, frame_infos));

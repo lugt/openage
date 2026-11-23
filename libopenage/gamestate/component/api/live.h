@@ -23,6 +23,10 @@ public:
 	using APIComponent::APIComponent;
 
 	component_t get_type() const override;
+	std::optional<int64_t> get_attribute_max(const nyan::fqon_t &attribute) const;
+
+	void set_resistance(const nyan::Object &ability) { this->resistance = ability; }
+	const std::optional<nyan::Object> &get_resistance() const { return this->resistance; }
 
 	/**
 	 * Add a new attribute to the component attributes.
@@ -138,6 +142,7 @@ private:
 	 * Map of attribute values by attribute type.
 	 */
 	attribute_storage_t attribute_values;
+	std::optional<nyan::Object> resistance;
 
 	/**
 	 * Attribute-change callback registry. The attribute FQON identifies

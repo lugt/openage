@@ -18,6 +18,12 @@ RemovalEventHandler::RemovalEventHandler() :
 
 
 void RemovalEventHandler::add_observer(observer_t observer) {
+	this->add_observer([observer = std::move(observer)](entity_id_t id, time::time_t) {
+		observer(id);
+	});
+}
+
+void RemovalEventHandler::add_observer(timed_observer_t observer) {
 	this->observers.push_back(std::move(observer));
 }
 
@@ -58,7 +64,7 @@ void RemovalEventHandler::invoke(
 	// succeeds. Observers include the mission-1 objective controller
 	// (event-driven ACTIVE -> COMPLETED transition).
 	for (auto &observer : this->observers) {
-		observer(target_id);
+		observer(target_id, time);
 	}
 
 	log::log(MSG(info) << "RemovalEventHandler: target " << target_id

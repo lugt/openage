@@ -1,0 +1,37 @@
+# NYAN FILE
+!version 0.2.0
+
+import de2_base.data.game_entity.generic.shore_fish.shore_fish as fish
+import de2_base.data.game_entity.generic.villager.villager as villager
+import de2_base.data.util.resource.types as resources
+import engine.ability.property.type as props
+import engine.ability.type as ability
+import engine.util.graphics as graphics
+import engine.util.patch as patch
+import engine.util.resource as resource
+
+ShoreFishing(patch.Patch):
+    Patch.patch = EnableShoreFishing
+
+    EnableShoreFishing<villager.Villager>(patch.NyanPatch):
+        GameEntity.abilities += {FishFromShore}
+
+FishFromShore(ability.Gather):
+    Gather.auto_resume = True
+    Gather.resume_search_range = inf
+    Gather.targets = {fish.Shorefish.Harvestable.ShorefishResourceSpot}
+    Gather.gather_rate = FishRate
+    Gather.container = villager.Villager.ResourceStorage.FishContainer
+    Ability.properties = {props.Animated: Animated}
+
+    FishRate(resource.ResourceRate):
+        ResourceRate.type = resources.Food
+        # The original task and sprite are imported. Use the tutorial's
+        # base rate until the current DAT's fisherman unit record is decoded.
+        ResourceRate.rate = 0.43
+
+    Animated(props.Animated):
+        Animated.animations = {Work}
+
+        Work(graphics.Animation):
+            Animation.sprite = "./shore_fishing_graphics/fish.sprite"

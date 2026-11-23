@@ -189,6 +189,8 @@ private:
  * EffectKind via a small dispatch table; the runtime does
  * NOT consult the AoE2 DE parser.
  */
+void register_scenario_effect_handlers(const std::shared_ptr<openage::event::EventLoop> &loop);
+
 std::shared_ptr<TriggerEffect> make_trigger_effect(
 	const gamestate::MissionTriggerEffect &ir);
 

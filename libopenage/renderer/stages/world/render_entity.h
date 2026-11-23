@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 #include "coord/phys.h"
@@ -38,7 +40,8 @@ public:
 	            const curve::Continuous<coord::phys3> &position,
 	            const curve::Segmented<coord::phys_angle_t> &angle,
 	            const std::string animation_path,
-	            const time::time_t time = 0.0);
+	            const time::time_t time = 0.0,
+	            uint32_t owner = 0);
 
 	/**
 	 * This function is for DEBUGGING and should not be used.
@@ -65,6 +68,16 @@ public:
 	 * @return Game entity ID.
 	 */
 	uint32_t get_id();
+
+	// Hold this lock while copying the curves and acknowledging the update.
+	std::unique_lock<std::shared_mutex> lock_update() { return std::unique_lock{this->mutex}; }
+	void acknowledge_update() { this->changed = false; }
+	uint32_t get_locked_id() const { return this->ref_id; }
+	uint32_t get_owner() const { return this->owner; }
+
+	void mark_removed(const time::time_t &at);
+	bool is_removed(const time::time_t &at) const;
+	bool is_selectable() const { return not this->removed.load(); }
 
 	/**
 	 * Get the position of the entity inside the game world.
@@ -101,6 +114,9 @@ private:
 	 * ID of the game entity in the gamestate.
 	 */
 	uint32_t ref_id;
+	uint32_t owner{0};
+	std::atomic<bool> removed{false};
+	time::time_t removal_time = time::TIME_MIN;
 
 	/**
 	 * Position inside the game world.

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "coord/phys.h"
 #include "time/time.h"
@@ -43,6 +44,20 @@ public:
 	                                       const std::shared_ptr<openage::gamestate::GameState> &state,
 	                                       const coord::phys3 &destination,
 	                                       const time::time_t &start_time);
+
+	/**
+	 * Follow a planned route through the same collision and animation logic
+	 * as a normal move. The first waypoint is replaced by the current position.
+	 */
+	static const time::time_t move_along_path(const std::shared_ptr<GameEntity> &entity,
+	                                          const std::shared_ptr<GameState> &state,
+	                                          std::vector<coord::phys3> waypoints,
+	                                          const time::time_t &start_time);
+
+	/** Cancel planned movement and release its destination in dynamic occupancy. */
+	static void halt(const std::shared_ptr<GameEntity> &entity,
+	                 const std::shared_ptr<GameState> &state,
+	                 const time::time_t &time);
 };
 
 } // namespace system

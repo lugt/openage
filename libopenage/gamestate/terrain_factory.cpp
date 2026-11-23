@@ -263,7 +263,8 @@ std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk_with_tiles(
 	const std::shared_ptr<GameState> &gstate,
 	const util::Vector2s size,
 	const coord::tile_delta offset,
-	const std::vector<nyan::fqon_t> &tile_fqons) {
+	const std::vector<nyan::fqon_t> &tile_fqons,
+	const std::vector<uint8_t> &tile_elevations) {
 	// Ensure test_terrains list is populated so we can fall back when a tile
 	// FQON is missing or doesn't resolve to a terrain. Mirrors add_chunk().
 	if (test_terrains.empty()) {
@@ -271,6 +272,9 @@ std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk_with_tiles(
 	}
 
 	const size_t expected = size[0] * size[1];
+	if (not tile_elevations.empty() and tile_elevations.size() != expected) {
+		throw Error{ERR << "Terrain elevation count does not match chunk size " << size};
+	}
 	// nyan orderedset(text) de-duplicates, so a chunk whose every tile
 	// shares one terrain (the common tutorial case: an all-grass map)
 	// collapses to a single FQON. Accept that and broadcast the lone FQON
@@ -296,7 +300,8 @@ std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk_with_tiles(
 	std::vector<TerrainTile> tiles{};
 	tiles.reserve(expected);
 
-	for (const auto &tile_fqon : effective_fqons) {
+	for (size_t i = 0; i < effective_fqons.size(); ++i) {
+		const auto &tile_fqon = effective_fqons[i];
 		nyan::Object terrain_obj;
 		std::string terrain_info_path;
 		bool resolved = false;
@@ -308,18 +313,7 @@ std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk_with_tiles(
 			try {
 				terrain_obj = db_view->get_object(tile_fqon);
 				if (api::APITerrain::is_terrain(terrain_obj)) {
-					if (has_graphics) {
-						terrain_info_path = api::APITerrain::get_terrain_path(terrain_obj);
-					}
-					else {
-						// No graphical assets in this modpack (e.g. the
-						// schema-only 'engine' modpack used by the tutorial):
-						// fall back to the bundled test terrain texture, which
-						// the renderer resolves relative to assets/converted
-						// (-> assets/test/textures/test_terrain.terrain). Mirrors
-						// the legacy add_chunk() path for non-graphical modpacks.
-						terrain_info_path = test_terrain_paths.front();
-					}
+					terrain_info_path = api::APITerrain::get_terrain_path(terrain_obj);
 					resolved = true;
 				}
 			}
@@ -344,7 +338,8 @@ std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk_with_tiles(
 			}
 		}
 
-		tiles.push_back({terrain_obj, terrain_info_path, terrain_elevation_t::zero()});
+		const double elevation = tile_elevations.empty() ? 0 : tile_elevations[i];
+		tiles.push_back({terrain_obj, terrain_info_path, terrain_elevation_t{elevation}});
 	}
 
 	auto chunk = std::make_shared<TerrainChunk>(size, offset, std::move(tiles));

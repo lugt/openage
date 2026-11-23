@@ -13,6 +13,7 @@
 #include "log/message.h"
 #include "scenario/mission_pack.h"
 #include "scenario/trigger/trigger_condition.h"
+#include "scenario/trigger/original_scenario.h"
 #include "scenario/trigger/trigger_effect.h"
 #include "time/time.h"
 
@@ -37,6 +38,7 @@ void TriggerRuntime::register_handlers() {
 	if (not this->loop_) {
 		return;
 	}
+	register_scenario_effect_handlers(this->loop_);
 	this->loop_->add_event_handler(
 		std::make_shared<TriggerEvaluateHandler>(
 			this->shared_from_this()));
@@ -70,7 +72,10 @@ TriggerId TriggerRuntime::add_trigger(
 	// writer, not the runtime).
 	std::vector<std::shared_ptr<TriggerCondition>> conditions;
 	for (auto &cir : def.conditions) {
-		auto c = make_trigger_condition(*this->state_, def.delay, cir);
+		auto area = this->areas_.find(cir.target_area_id);
+		if (cir.kind == "AoE2Condition" and not this->original_) throw std::invalid_argument{"Original condition requires scenario context"};
+        auto c = cir.kind == "AoE2Condition" ? this->original_->condition(cir) :
+            make_trigger_condition(*this->state_, def.delay, cir, area == this->areas_.end() ? nullptr : &area->second);
 		if (c) {
 			conditions.push_back(c);
 		}
@@ -79,7 +84,8 @@ TriggerId TriggerRuntime::add_trigger(
 	// Construct the effect list. Same skip-on-unknown-kind.
 	std::vector<std::shared_ptr<TriggerEffect>> effects;
 	for (auto &eir : def.effects) {
-		auto e = make_trigger_effect(eir);
+		if (eir.kind == "AoE2Effect" and not this->original_) throw std::invalid_argument{"Original effect requires scenario context"};
+        auto e = eir.kind == "AoE2Effect" ? this->original_->effect(eir) : make_trigger_effect(eir);
 		if (e) {
 			e->set_effect_index(effects.size());
 			e->set_parent_trigger_id(def.id);
@@ -128,9 +134,20 @@ void TriggerRuntime::index_trigger_conditions(
 }
 
 
-void TriggerRuntime::notify_entity_removed(
-	openage::gamestate::entity_id_t entity_id,
-	openage::time::time_t at) {
+void TriggerRuntime::notify_entity_removed(gamestate::entity_id_t entity_id, time::time_t at) {
+	this->notify_entity_changed(entity_id, at);
+}
+
+void TriggerRuntime::load_original(const util::json::Value &config, const std::shared_ptr<gamestate::EntityFactory> &factory) {
+    this->original_ = std::make_shared<OriginalScenario>(*this, this->state_, factory, config);
+}
+
+void TriggerRuntime::schedule_evaluation(TriggerId id, time::time_t at) {
+    this->loop_->create_event("trigger.evaluate", this->event_entity_, this->state_, at, {{"trigger_id", static_cast<int64_t>(id)}});
+}
+
+void TriggerRuntime::notify_entity_changed(gamestate::entity_id_t entity_id, time::time_t at) {
+    if (this->original_) this->original_->changed(at);
 
 	if (not this->loop_ or not this->state_) {
 		return;
@@ -187,6 +204,7 @@ void TriggerRuntime::evaluate_trigger(
 	if (instance->state() == TriggerState::WAITING_DELAY) {
 		if (instance->evaluate_conditions(*this->state_, at)) {
 			instance->fire(this->loop_, this->event_entity_, this->state_, at);
+    if (this->original_) this->original_->complete_objective(trigger_id);
 		}
 		else {
 			instance->cancel_delayed_fire();
@@ -225,6 +243,7 @@ void TriggerRuntime::evaluate_trigger(
 	// entity_fqon, creation_seq), which is the stable
 	// order across runs.
 	instance->fire(this->loop_, this->event_entity_, this->state_, at);
+    if (this->original_) this->original_->complete_objective(trigger_id);
 }
 
 

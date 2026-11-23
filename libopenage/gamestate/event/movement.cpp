@@ -13,8 +13,9 @@
 namespace openage::gamestate::event {
 
 
-WaypointReachedHandler::WaypointReachedHandler() :
-	openage::event::OnceEventHandler{"game.waypoint_reached"} {
+WaypointReachedHandler::WaypointReachedHandler(Notify notify) :
+	openage::event::OnceEventHandler{"game.waypoint_reached"},
+	notify{std::move(notify)} {
 }
 
 
@@ -39,6 +40,9 @@ void WaypointReachedHandler::invoke(
 	auto wy = params.get("waypoint_y", int64_t{0});
 	(void)state;
 
+	if (this->notify) {
+		this->notify(entity_id, time);
+	}
 	log::log(MSG(info) << "WaypointReachedHandler: entity=" << entity_id
 	                   << " segment=" << segment_index << "/" << segment_count
 	                   << " waypoint=(" << wx << "," << wy << ")"
@@ -54,8 +58,9 @@ time::time_t WaypointReachedHandler::predict_invoke_time(
 }
 
 
-MovementArrivedHandler::MovementArrivedHandler() :
-	openage::event::OnceEventHandler{"game.movement_arrived"} {
+MovementArrivedHandler::MovementArrivedHandler(Notify notify) :
+	openage::event::OnceEventHandler{"game.movement_arrived"},
+	notify{std::move(notify)} {
 }
 
 
@@ -79,6 +84,9 @@ void MovementArrivedHandler::invoke(
 	auto wy = params.get("waypoint_y", int64_t{0});
 	(void)state;
 
+	if (this->notify) {
+		this->notify(entity_id, time);
+	}
 	log::log(MSG(info) << "MovementArrivedHandler: entity=" << entity_id
 	                   << " status=" << status
 	                   << " waypoint=(" << wx << "," << wy << ")"

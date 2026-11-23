@@ -9,6 +9,10 @@
 #include "gamestate/event/attack.h"
 #include "gamestate/event/apply_discrete_effect.h"
 #include "gamestate/event/death.h"
+#include "gamestate/event/construction.h"
+#include "gamestate/event/economy_action.h"
+#include "gamestate/event/gather.h"
+#include "gamestate/player.h"
 #include "gamestate/event/movement.h"
 #include "gamestate/event/removal.h"
 #include "gamestate/event/process_command.h"
@@ -26,8 +30,38 @@
 #include "gamestate/map.h"
 #include "scenario/mission_pack.h"
 #include "scenario/trigger/trigger_runtime.h"
+#include "scenario/trigger/original_scenario.h"
 
 namespace openage::gamestate {
+namespace {
+
+class DiplomacyHandler final : public openage::event::OnceEventHandler {
+public:
+	DiplomacyHandler() : OnceEventHandler{"game.diplomacy"} {}
+
+	void setup_event(const std::shared_ptr<openage::event::Event> &,
+	                 const std::shared_ptr<openage::event::State> &) override {}
+
+	void invoke(openage::event::EventLoop &, const std::shared_ptr<openage::event::EventEntity> &,
+	            const std::shared_ptr<openage::event::State> &state, const time::time_t &at,
+	            const param_map &params) override {
+		auto game = std::static_pointer_cast<GameState>(state);
+		const auto source = params.get("source", player_id_t{});
+		const auto target = params.get("target", player_id_t{});
+		const auto stance = params.get("stance", DiplomaticStance::Self);
+		if (game->set_stance(source, target, stance, true)) {
+			game->update_visibility(at);
+		}
+	}
+
+	time::time_t predict_invoke_time(const std::shared_ptr<openage::event::EventEntity> &,
+	                                const std::shared_ptr<openage::event::State> &,
+	                                const time::time_t &at) override {
+		return at;
+	}
+};
+
+} // namespace
 
 GameSimulation::GameSimulation(const util::Path &root_dir,
                                const std::shared_ptr<cvar::CVarManager> &cvar_manager,
@@ -60,39 +94,22 @@ GameSimulation::GameSimulation(const util::Path &root_dir,
 // initialization lifecycle is visible at a glance from the top of the
 // file).
 
-// P4.3: synthesize the data-driven defeat_enemy trigger IR from the
-// Mission Pack's VictoryDefinition.required_removals. The committed
-// dump (docs/mvp/reports/mission1-scenario-dump/) is contractually
-// zero-trigger -- test_p1_dump.py pins trigger_count==0 because the
-// original scenario source is BLOCKED (Path D) -- so the trigger
-// cannot live in scenario.json yet. Instead the production wiring
-// translates required_removals (the committed data signal) into a
-// MissionTriggerDefinition that the TriggerRuntime executes. When
-// Path C unblocks the original scenario data and the dump carries
-// TriggerDefinition records, pack.triggers is fed directly and this
-// synthesis becomes a fallback.
-//
-// Mission 1 has a single required_removal ("EnemyVillager"), so one
-// trigger declares victory on its destruction. A multi-removal
-// victory condition is future work (would need an AND-aggregator).
+// Synthesize one victory trigger with a removal condition for every target.
 gamestate::MissionTriggerDefinition make_defeat_enemy_trigger_ir(
-	const std::string &required_removal) {
+	const std::vector<std::string> &required_removals) {
 
 	gamestate::MissionTriggerDefinition def;
-	def.trigger_id = "mission_01.defeat_" + required_removal;
+	def.trigger_id = "mission_01.defeat_" + required_removals.front();
 	def.initially_enabled = true;
 	def.looping = false;
 	def.delay = 0.0;
 
-	// Condition: the required-removal entity is destroyed. The
-	// loader registers named entities under BOTH the full instance
-	// FQON and the short scenario_object_id, so the short name from
-	// required_removals resolves directly via
-	// GameState::get_entity_id_by_instance.
-	gamestate::MissionTriggerCondition cond;
-	cond.kind = "EntityDestroyed";
-	cond.target_scenario_object_id = required_removal;
-	def.conditions.push_back(cond);
+	for (const auto &target : required_removals) {
+		gamestate::MissionTriggerCondition condition;
+		condition.kind = "EntityDestroyed";
+		condition.target_scenario_object_id = target;
+		def.conditions.push_back(std::move(condition));
+	}
 
 	// Effects (stable effect_index order):
 	//   0: SetObjective(ACTIVE)  -- mark the objective active
@@ -233,6 +250,7 @@ bool GameSimulation::initialize() {
 		// observer closure looks up the map lazily at fire time;
 		// if there is no map (defensive), it no-ops.
 		this->register_dynamic_occupancy_removal_observer();
+		this->game->get_state()->update_player_economies(time::time_t::zero());
 	}
 	catch (...) {
 		this->lifecycle = SimulationLifecycle::Failed;
@@ -290,9 +308,15 @@ void GameSimulation::run() {
 	this->start();
 
 	time::time_t last_logged_at = time::time_t{0};
+	time::time_t next_snapshot_update = time::time_t::zero();
 	while (this->lifecycle == SimulationLifecycle::Running and this->running) {
 		time::time_t current_time = this->time_loop->get_clock()->get_time();
 		this->event_loop->reach_time(current_time, this->game->get_state());
+		if (current_time >= next_snapshot_update) {
+			this->game->get_state()->update_visibility(current_time);
+			this->game->get_state()->update_player_economies(current_time);
+			next_snapshot_update = current_time + time::time_t::from_double(0.1);
+		}
 
 		// P4.3: no per-tick objective work. Mission 1 victory is
 		// event-driven: DeathEventHandler -> game.removal ->
@@ -405,18 +429,46 @@ void GameSimulation::init_event_handlers() {
 	auto death_handler = std::make_shared<gamestate::event::DeathEventHandler>();
 	this->removal_handler = std::make_shared<gamestate::event::RemovalEventHandler>();
 	auto wait_handler = std::make_shared<gamestate::event::WaitHandler>();
-	auto waypoint_handler = std::make_shared<gamestate::event::WaypointReachedHandler>();
-	auto movement_arrived_handler = std::make_shared<gamestate::event::MovementArrivedHandler>();
+	auto notify_move = [this](entity_id_t entity, time::time_t at) {
+		if (this->trigger_runtime) {
+			this->trigger_runtime->notify_entity_changed(entity, at);
+		}
+	};
+	auto waypoint_handler = std::make_shared<gamestate::event::WaypointReachedHandler>(notify_move);
+	auto movement_arrived_handler = std::make_shared<gamestate::event::MovementArrivedHandler>(notify_move);
 	auto group_move_handler = std::make_shared<
 		openage::gamestate::event::GroupMoveHandler>(
 			std::shared_ptr<openage::gamestate::GameSimulation>{});
 	this->event_loop->add_event_handler(drag_select_handler);
 	this->event_loop->add_event_handler(spawn_handler);
 	this->event_loop->add_event_handler(command_handler);
+	this->event_loop->add_event_handler(std::make_shared<DiplomacyHandler>());
 	this->event_loop->add_event_handler(manager_handler);
 	this->event_loop->add_event_handler(attack_handler);
 	this->event_loop->add_event_handler(apply_discrete_effect_handler);
 	this->event_loop->add_event_handler(death_handler);
+	this->event_loop->add_event_handler(std::make_shared<gamestate::event::ConstructionHandler>());
+	this->event_loop->add_event_handler(std::make_shared<gamestate::event::EconomyActionHandler>(this->entity_factory));
+	this->event_loop->add_event_handler(std::make_shared<gamestate::event::GatherHandler>(
+		[this](GameState &state, player_id_t owner, time::time_t at) {
+            if (this->trigger_runtime and this->trigger_runtime->original_scenario()) {
+                this->trigger_runtime->original_scenario()->changed(at);
+                return;
+            }
+			if (owner != 0 or not this->trigger_runtime
+			    or not state.get_entity_id_by_instance("GatheringTownCenter")) {
+				return;
+			}
+			auto &mission = this->trigger_runtime->mission_state();
+			const auto player = state.get_player(owner);
+			if (player->has_enough("de2_base.data.util.resource.types.Food", 50)
+			    and player->has_enough("de2_base.data.util.resource.types.Wood", 50)
+			    and player->has_enough("de2_base.data.util.resource.types.Gold", 50)) {
+				mission.set_objective_state("mission_02.stockpile", ::openage::scenario::trigger::ObjectiveState::COMPLETED);
+				mission.declare_victory("stockpile_ready");
+			}
+			mission.notify_progress();
+		}));
 	this->event_loop->add_event_handler(this->removal_handler);
 	this->event_loop->add_event_handler(wait_handler);
 	this->event_loop->add_event_handler(waypoint_handler);
@@ -449,24 +501,32 @@ void GameSimulation::wire_trigger_data(const std::string &mission_pack_dir) {
 
 	// Data-driven triggers (empty for the Mission 1 reconstruction
 	// until Path C unblocks the original scenario data).
+	for (const auto &area : pack.areas) {
+		this->trigger_runtime->add_area(area);
+	}
+    if (pack.original_scenario.is_object() and pack.original_scenario.has("mission")) {
+        this->trigger_runtime->load_original(pack.original_scenario, this->entity_factory);
+    }
 	for (const auto &td : pack.triggers) {
 		this->trigger_runtime->add_trigger(td);
 	}
 
-	// Fallback synthesis: translate the pack's
-	// VictoryDefinition.required_removals into defeat_enemy triggers.
-	// This is the path Mission 1 takes today (the dump carries zero
-	// TriggerDefinition records but a non-empty required_removals
-	// list). Each required_removal becomes one EntityDestroyed ->
-	// SetObjective + CompleteObjective + DeclareVictory trigger.
-	for (const auto &removal : pack.victory.required_removals) {
+    if (auto original = this->trigger_runtime->original_scenario()) original->initialize();
+
+	if (pack.victory.kind == "resource-stockpile") {
+		this->trigger_runtime->add_objective("mission_02.stockpile");
+		this->trigger_runtime->mission_state().set_objective_state(
+			"mission_02.stockpile", ::openage::scenario::trigger::ObjectiveState::ACTIVE);
+	}
+
+	if (not pack.victory.required_removals.empty()) {
 		this->trigger_runtime->add_trigger(
-			make_defeat_enemy_trigger_ir(removal));
+			make_defeat_enemy_trigger_ir(pack.victory.required_removals));
 	}
 
 	log::log(MSG(info) << "GameSimulation::wire_trigger_data: "
 	                   << "triggers=" << pack.triggers.size()
-	                   << " (data) + " << pack.victory.required_removals.size()
+	                   << " (data) + " << (pack.victory.required_removals.empty() ? 0 : 1)
 	                   << " (synthesized from required_removals)"
 	                   << "; runtime trigger_count="
 	                   << this->trigger_runtime->trigger_count());
@@ -474,14 +534,8 @@ void GameSimulation::wire_trigger_data(const std::string &mission_pack_dir) {
 
 
 void GameSimulation::register_trigger_handler() {
-	// P4.3: subscribe the TriggerRuntime to game.removal so trigger
-	// evaluation is driven by the event handler chain instead of
-	// per-batch polling. The runtime's notify_entity_removed takes a
-	// simulation time; the observer obtains it from
-	// time_loop->get_clock()->get_time() (the same source the run()
-	// loop uses for reach_time). The runtime stays a pure policy
-	// object and never consults the clock itself. A null runtime or
-	// removal handler is a no-op.
+	// Use the event timestamp so movement checkpoints and removals are
+	// evaluated in the same simulation timeline.
 	if (not this->trigger_runtime) {
 		return;
 	}
@@ -489,8 +543,7 @@ void GameSimulation::register_trigger_handler() {
 		return;
 	}
 	this->removal_handler->add_observer(
-		[this](openage::gamestate::entity_id_t target_id) {
-			auto at = this->time_loop->get_clock()->get_time();
+		[this](openage::gamestate::entity_id_t target_id, time::time_t at) {
 			this->trigger_runtime->notify_entity_removed(target_id, at);
 		});
 }

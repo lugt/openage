@@ -35,7 +35,12 @@ bool MissionState::set_objective_state(
 		                   << this->objectives_.size() << ")");
 		return false;
 	}
-	it->second = new_state;
+	if (it->second != new_state) {
+		it->second = new_state;
+		if (this->objective_listener_) {
+			this->objective_listener_();
+		}
+	}
 	return true;
 }
 

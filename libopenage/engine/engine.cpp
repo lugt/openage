@@ -190,6 +190,9 @@ void Engine::loop() {
 		// thread must be free to drive the presenter.
 		this->presenter->run();
 		log::log(MSG(info) << "presenter exited");
+		// Presenter::run requests both workers to stop. Their last
+		// callbacks can still reference the HUD and renderer.
+		this->threads.clear();
 		// Make sure that the presenter gets destructed in the same thread,
 		// otherwise OpenGL complains about missing contexts.
 		this->presenter.reset();

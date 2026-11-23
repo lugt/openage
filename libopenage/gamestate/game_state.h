@@ -3,11 +3,15 @@
 #pragma once
 
 #include <memory>
+#include <map>
+#include <shared_mutex>
 #include <optional>
 #include <unordered_map>
 
 #include "event/state.h"
 #include "gamestate/types.h"
+#include "gamestate/visibility.h"
+#include "time/time.h"
 
 
 namespace nyan {
@@ -27,6 +31,8 @@ class EventLoop;
 
 namespace gamestate {
 class GameEntity;
+enum class DiplomaticStance { Self, Ally, Neutral, Enemy };
+
 class Map;
 class Player;
 
@@ -69,6 +75,10 @@ public:
 	 * @param player New player.
 	 */
 	void add_player(const std::shared_ptr<Player> &player);
+	DiplomaticStance get_stance(player_id_t source, player_id_t target) const;
+	bool set_stance(player_id_t source, player_id_t target, DiplomaticStance stance, bool reciprocal = false);
+	void set_player_name(player_id_t player, std::string name);
+	std::string get_player_name(player_id_t player) const;
 
 	/**
 	 * Get the player index (read-only).
@@ -104,6 +114,17 @@ public:
 	 * @param terrain Map object.
 	 */
 	void set_map(const std::shared_ptr<Map> &map);
+	void enable_fog(bool share_allied_vision = false) {
+		this->fog_of_war = true;
+		this->share_allied_vision = share_allied_vision;
+	}
+	void update_visibility(time::time_t at);
+	std::shared_ptr<const VisibilitySnapshot> visibility(player_id_t player) const;
+	bool can_see(player_id_t player, entity_id_t entity) const;
+	void update_player_economies(time::time_t at);
+	PlayerEconomy player_economy(player_id_t player) const;
+	std::string action_feedback(player_id_t player) const;
+	void set_action_feedback(player_id_t player, std::string message);
 
 	/**
 	 * P4.4C: set the EventLoop handle. The constructor sets it
@@ -241,11 +262,21 @@ private:
 	 * Map of all players in the current game by their ID.
 	 */
 	std::unordered_map<player_id_t, std::shared_ptr<Player>> players;
+	std::unordered_map<player_id_t, std::string> player_names;
+	std::map<std::pair<player_id_t, player_id_t>, DiplomaticStance> diplomacy;
+	mutable std::shared_mutex diplomacy_mutex;
 
 	/**
 	 * Map of the current game.
 	 */
 	std::shared_ptr<Map> map;
+	bool fog_of_war = false;
+	bool share_allied_vision = false;
+	std::unordered_map<player_id_t, std::shared_ptr<const VisibilitySnapshot>> visibility_by_player;
+	mutable std::shared_mutex visibility_mutex;
+	std::unordered_map<player_id_t, PlayerEconomy> player_economies;
+	std::unordered_map<player_id_t, std::string> economy_feedback;
+	mutable std::shared_mutex economy_mutex;
 
 	/**
 	 * TODO: Only for testing

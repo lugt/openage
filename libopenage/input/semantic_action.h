@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "gamestate/types.h"
+#include "time/time.h"
 
 
 namespace openage::gamestate {
@@ -133,6 +134,7 @@ struct SemanticAction {
 	std::optional<double> world_x;
 	std::optional<double> world_y;
 	std::optional<openage::gamestate::entity_id_t> target_entity;
+	std::vector<gamestate::entity_id_t> actors;
 
 	/**
 	 * Stable diagnostic string. Used by the HUD log + demo
@@ -180,7 +182,7 @@ SemanticAction resolve_context_action(
 	const std::shared_ptr<openage::gamestate::GameState> &state,
 	const SelectionSnapshot &selection,
 	const PickResult &pick,
-	openage::gamestate::player_id_t self_player);
+	openage::gamestate::player_id_t self_player, time::time_t now = time::time_t::zero());
 
 
 } // namespace openage::input

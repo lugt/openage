@@ -33,6 +33,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "util/json_minimal.h"
 
 
 namespace openage::gamestate {
@@ -55,6 +56,7 @@ struct MissionChunkDefinition {
 	int64_t size_x{0};
 	int64_t size_y{0};
 	std::vector<std::string> tile_fqons;  // row-major, length == size_x * size_y
+	std::vector<uint8_t> tile_elevations; // same order; empty for programmatically built flat packs
 };
 
 
@@ -79,8 +81,11 @@ struct MissionEntityPlacement {
 	std::string scenario_object_id;       // stable name the loader registers
 	std::string entity_definition_fqon;   // resolves via nyan at load time
 	int64_t player_id{0};
-	int64_t pos_x{0};
-	int64_t pos_y{0};
+	int64_t construction_seconds{0};
+	double pos_x{0};
+	double pos_y{0};
+	double height{0};
+	int64_t genie_id{-1};
 	double rotation{0.0};
 };
 
@@ -90,11 +95,13 @@ struct MissionTriggerCondition {
 	std::string target_scenario_object_id;  // empty if N/A
 	std::string target_area_id;
 	std::string target_trigger_id;
+	util::json::Value args;
 	int64_t target_player_id{-1};  // -1 = not set
 };
 
 
 struct MissionTriggerEffect {
+	util::json::Value args;
 	std::string kind;
 	std::string target_scenario_object_id;
 	std::string target_area_id;
@@ -126,7 +133,14 @@ struct MissionVictoryDefinition {
 };
 
 
+struct MissionDiplomacy {
+	int64_t source;
+	int64_t target;
+	std::string relation;
+};
+
 struct MissionPack {
+	util::json::Value original_scenario;
 	std::string schema_version;
 	std::string produced_at_commit;
 	std::string scenario_kind;        // "reconstruction" until Path C unblocks
@@ -137,6 +151,9 @@ struct MissionPack {
 	bool is_imported_original{false};
 	std::string source_status;        // "BLOCKED" until Path C unblocks
 
+	bool fog_of_war{false};
+	bool share_allied_vision{false};
+	std::vector<MissionDiplomacy> diplomacy;
 	MissionMapDefinition map;
 	std::vector<MissionPlayerDefinition> players;
 	std::vector<MissionEntityPlacement> placements;

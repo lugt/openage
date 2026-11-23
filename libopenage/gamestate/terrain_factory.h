@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include <memory>
 #include <shared_mutex>
 #include <vector>
@@ -74,7 +76,8 @@ public:
 		const std::shared_ptr<GameState> &gstate,
 		const util::Vector2s size,
 		const coord::tile_delta offset,
-		const std::vector<nyan::fqon_t> &tile_fqons);
+		const std::vector<nyan::fqon_t> &tile_fqons,
+		const std::vector<uint8_t> &tile_elevations = {});
 
 	// TODO: Add tiles
 	// std::shared_ptr<TerrainTile> add_tile(const std::shared_ptr<openage::event::EventLoop> &loop,

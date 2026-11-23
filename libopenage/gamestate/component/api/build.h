@@ -2,36 +2,35 @@
 
 #pragma once
 
+#include <string>
+#include <optional>
+#include <utility>
+
 #include "gamestate/component/api_component.h"
 #include "gamestate/component/types.h"
+#include "gamestate/types.h"
 
 
 namespace openage::gamestate::component {
 
 /**
- * Component backing the \p engine.ability.type.Constructable and
- * \p engine.ability.type.Foundation nyan abilities.
- *
- * A building slot gains both:
- *   - Foundation at placement time (it is a phantom tile)
- *   - Constructable once construction completes and the entity can take
- *     its real place in the world
- *
- * Sharing a single component class keeps the construction pipeline
- * (villager targets foundation -> progress advances -> foundation
- * transforms into the Constructable building) symmetrical: the same
- * component is on the entity the whole time, only its progress curve
- * and "is constructed" flag change.
- *
- * Progress is stored as a 0..1 float curve so the activity graph can
- * advance it via curve::Continuous<float> (same primitive training and
- * research reuse in Phase C/D).
+ * Tracks construction progress for placed buildings. Completed buildings
+ * start at 100 percent unless their scenario placement schedules construction.
  */
 class Build final : public APIComponent {
 public:
 	using APIComponent::APIComponent;
 
 	component_t get_type() const override;
+	bool is_under_construction() const { return this->progress < 100; }
+	int64_t get_progress() const { return this->progress; }
+	void set_progress(int64_t progress) { this->progress = progress; }
+	std::string get_construction_animation() const;
+	bool ordered_by_player = false;
+	std::optional<std::pair<entity_id_t, uint64_t>> assignment;
+
+private:
+	int64_t progress = 100;
 };
 
 } // namespace openage::gamestate::component

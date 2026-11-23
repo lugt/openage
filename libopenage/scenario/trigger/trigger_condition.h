@@ -224,7 +224,8 @@ private:
 std::shared_ptr<TriggerCondition> make_trigger_condition(
 	const openage::gamestate::GameState &state,
 	openage::time::time_t trigger_delay,
-	const gamestate::MissionTriggerCondition &ir);
+	const gamestate::MissionTriggerCondition &ir,
+	const gamestate::MissionAreaDefinition *area = nullptr);
 
 
 }  // namespace openage::scenario::trigger

@@ -12,8 +12,12 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
+#include <QVariantList>
+#include <QImage>
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 #include "gamestate/types.h"
 #include "presenter/viewmodel/selection_model.h"
@@ -37,7 +41,7 @@ class HudQmlAdapter : public QObject {
 	Q_PROPERTY(qint64 selectedOwnerPlayerId READ selected_owner_player_id
 		NOTIFY selected_changed)
 	Q_PROPERTY(bool selectedIsAlive READ selected_is_alive
-		NOTIFY selected_changed)
+		NOTIFY health_changed)
 
 	Q_PROPERTY(qint64 selectedHpCurrent READ selected_hp_current
 		NOTIFY health_changed)
@@ -59,6 +63,26 @@ class HudQmlAdapter : public QObject {
 		NOTIFY mission_changed)
 	Q_PROPERTY(QString missionVictoryReason READ mission_victory_reason
 		NOTIFY mission_changed)
+	Q_PROPERTY(QVariantList selectionCards READ selection_cards NOTIFY selection_details_changed)
+	Q_PROPERTY(QVariantList actionOptions READ action_options NOTIFY selection_details_changed)
+	Q_PROPERTY(QString actionStatus READ action_status NOTIFY action_status_changed)
+	Q_PROPERTY(int constructionProgress READ construction_progress NOTIFY selection_details_changed)
+	Q_PROPERTY(bool canStop READ can_stop NOTIFY selection_details_changed)
+	Q_PROPERTY(int commandBarHeight READ command_bar_height CONSTANT)
+	Q_PROPERTY(int economyBarWidth READ economy_bar_width CONSTANT)
+	Q_PROPERTY(int economyBarHeight READ economy_bar_height CONSTANT)
+	Q_PROPERTY(qint64 wood READ wood NOTIFY economy_changed)
+	Q_PROPERTY(qint64 food READ food NOTIFY economy_changed)
+	Q_PROPERTY(qint64 gold READ gold NOTIFY economy_changed)
+	Q_PROPERTY(qint64 stone READ stone NOTIFY economy_changed)
+	Q_PROPERTY(qint64 population READ population NOTIFY economy_changed)
+	Q_PROPERTY(qint64 populationCapacity READ population_capacity NOTIFY economy_changed)
+	Q_PROPERTY(bool mapUnits READ map_units NOTIFY map_options_changed)
+	Q_PROPERTY(bool mapViewport READ map_viewport NOTIFY map_options_changed)
+	Q_PROPERTY(QString minimap READ minimap NOTIFY map_changed)
+	Q_PROPERTY(QVariantList diplomacy READ diplomacy NOTIFY diplomacy_changed)
+	Q_PROPERTY(QString missionRoute READ mission_route NOTIFY mission_changed)
+	Q_PROPERTY(QString missionStockpile READ mission_stockpile NOTIFY mission_changed)
 	Q_PROPERTY(QString missionDefeatEnemyState READ mission_defeat_enemy_state
 		NOTIFY mission_changed)
 
@@ -93,15 +117,61 @@ public:
 	QString mission_lifecycle() const { return this->ms_lifecycle_; }
 	bool mission_is_victory() const { return this->ms_victory_; }
 	QString mission_victory_reason() const { return this->ms_reason_; }
+	QVariantList selection_cards() const { return this->cards; }
+	QVariantList action_options() const { return this->actions; }
+	QString action_status() const { return this->status; }
+	void set_action_status(QString status);
+	Q_INVOKABLE void requestAction(const QString &option, bool build) { emit action_requested(option, build); }
+	int construction_progress() const { return this->construction; }
+	bool can_stop() const { return this->stop_enabled; }
+	int command_bar_height() const { return 146; }
+	int economy_bar_width() const { return 360; }
+	int economy_bar_height() const { return 42; }
+	qint64 wood() const { return this->economy.wood; }
+	qint64 food() const { return this->economy.food; }
+	qint64 gold() const { return this->economy.gold; }
+	qint64 stone() const { return this->economy.stone; }
+	qint64 population() const { return this->economy.population; }
+	qint64 population_capacity() const { return this->economy.population_capacity; }
+	void refresh_economy(gamestate::player_id_t player);
+	bool map_units() const { return this->show_units; }
+	bool map_viewport() const { return this->show_viewport; }
+	void set_selection_details(QVariantList cards, QVariantList actions, int construction, bool can_stop);
+	Q_INVOKABLE void selectCard(int index) { emit card_requested(index); }
+	Q_INVOKABLE void stopSelected() { emit stop_requested(); }
+	Q_INVOKABLE void clearSelection() { emit clear_requested(); }
+	Q_INVOKABLE void toggleMapUnits();
+	Q_INVOKABLE void toggleMapViewport();
+	QString minimap() const { return this->minimap_url; }
+	QVariantList diplomacy() const { return this->relations; }
+	void set_minimap(QImage image);
+	void set_diplomacy(QVariantList players);
+	Q_INVOKABLE void moveCamera(qreal x, qreal y) { emit camera_requested(x, y); }
+	Q_INVOKABLE void changeDiplomacy(int player, int stance) { emit diplomacy_requested(player, stance); }
+	bool is_interactive(qreal x, qreal y, qreal width, qreal height) const;
+	QString mission_route() const { return this->ms_route_; }
+	QString mission_stockpile() const { return this->ms_stockpile_; }
 	QString mission_defeat_enemy_state() const { return this->ms_defeat_state_; }
 
 signals:
+	void selection_details_changed();
+	void action_status_changed();
+	void action_requested(const QString &option, bool build);
+	void map_options_changed();
+	void card_requested(int index);
+	void stop_requested();
+	void clear_requested();
+	void map_changed();
+	void diplomacy_changed();
+	void camera_requested(qreal x, qreal y);
+	void diplomacy_requested(int player, int stance);
 	void selected_changed();
 	void health_changed();
 	void mission_changed();
+	void economy_changed();
 
 private:
-	void refresh_selection();
+	void refresh_selection(std::optional<gamestate::entity_id_t> entity_id);
 	void refresh_mission();
 
 	qint64 sel_id_{-1};
@@ -117,10 +187,22 @@ private:
 	QString ms_lifecycle_{"RUNNING"};
 	bool ms_victory_{false};
 	QString ms_reason_;
+	QString minimap_url;
+	QImage minimap_image;
+	QVariantList relations;
+	QVariantList cards;
+	QVariantList actions;
+	QString status;
+	int construction = -1;
+	bool stop_enabled = false;
+	bool show_units = true;
+	bool show_viewport = true;
+	QString ms_route_;
+	QString ms_stockpile_;
 	QString ms_defeat_state_{"INACTIVE"};
+	gamestate::PlayerEconomy economy;
 
 	std::shared_ptr<openage::gamestate::GameSimulation> sim_;
-	viewmodel::SelectionModel *model_{nullptr};
 };
 
 

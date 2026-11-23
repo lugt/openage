@@ -83,9 +83,11 @@ class ValidationResult:
 # Condition kinds the validator accepts. Unknown kinds are rejected.
 # Keep in sync with spec §7 + the plan §P4 candidate list.
 SUPPORTED_CONDITION_KINDS: frozenset[str] = frozenset({
+    "AoE2Condition",
     "TimerElapsed",
     "EntityInArea",
     "EntityDestroyed",
+    "EntityVisitedArea",
     "EntityAlive",
     "EntityOwnedBy",
     "PlayerOwnsCount",
@@ -95,6 +97,7 @@ SUPPORTED_CONDITION_KINDS: frozenset[str] = frozenset({
 
 # Effect kinds the validator accepts.
 SUPPORTED_EFFECT_KINDS: frozenset[str] = frozenset({
+    "AoE2Effect",
     "DisplayInstruction",
     "SetObjective",
     "CompleteObjective",
@@ -319,6 +322,8 @@ def validate(scenario: ScenarioDefinition) -> ValidationResult:
                 continue
             _check_effect_kind(errors, eff, location=f"{loc}.effect[{eff.kind}]")
             obj_id, area_id, trig_id = next(_walk_effect_args(eff))
+            if eff.kind in {"SetObjective", "CompleteObjective", "DeclareVictory"}:
+                obj_id, area_id = None, None
             _check_references(
                 errors,
                 target_scenario_object_id=obj_id,

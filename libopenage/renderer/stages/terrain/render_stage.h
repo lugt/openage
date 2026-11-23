@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "gamestate/visibility.h"
+
 #include <memory>
 #include <shared_mutex>
 
@@ -81,6 +83,7 @@ public:
 	 * Update the terrain mesh and texture information.
 	 */
 	void update();
+	void set_visibility(const std::shared_ptr<const gamestate::VisibilitySnapshot> &snapshot);
 
 	/**
 	 * Resize the FBO for the terrain rendering. This basically updates the output
@@ -144,6 +147,8 @@ private:
 	/**
 	 * Output texture.
 	 */
+	std::shared_ptr<renderer::Texture2d> fog_texture;
+	std::shared_ptr<const gamestate::VisibilitySnapshot> visibility;
 	std::shared_ptr<renderer::Texture2d> output_texture;
 
 	/**

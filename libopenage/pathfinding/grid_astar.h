@@ -37,6 +37,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <set>
 #include <utility>
@@ -69,6 +70,8 @@ struct MoverFootprint {
 
 class GridAStarPathfinder {
 public:
+	using StepAllowed = std::function<bool(gamestate::scenario::CellPosition,
+	                                      gamestate::scenario::CellPosition)>;
 	enum class Result : uint8_t {
 		PATH_FOUND = 0,
 		NO_PATH,
@@ -105,7 +108,7 @@ public:
 		openage::gamestate::scenario::CellPosition start,
 		openage::gamestate::scenario::CellPosition target,
 		std::vector<openage::gamestate::scenario::CellPosition>
-			&waypoints_out);
+		&waypoints_out, const StepAllowed &step_allowed = {});
 
 private:
 	// Inflated static obstacles: pre-computed at construction.

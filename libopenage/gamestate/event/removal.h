@@ -79,6 +79,8 @@ public:
 	 * for new consumers of game.removal.
 	 */
 	void add_observer(observer_t observer);
+	using timed_observer_t = std::function<void(entity_id_t, time::time_t)>;
+	void add_observer(timed_observer_t observer);
 
 	void setup_event(const std::shared_ptr<openage::event::Event> &event,
 	                 const std::shared_ptr<openage::event::State> &state) override;
@@ -100,7 +102,7 @@ private:
 	 * removals do NOT call observers (the observer is told about
 	 * a successful mutation only).
 	 */
-	std::vector<observer_t> observers;
+	std::vector<timed_observer_t> observers;
 };
 
 

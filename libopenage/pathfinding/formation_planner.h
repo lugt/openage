@@ -117,8 +117,8 @@ FormationPlan plan_formation(
 	int map_max_x,
 	int map_max_y,
 	const std::vector<openage::gamestate::component::FootprintBounds>
-		&reservations =
-		{});
+		&reservations = {},
+	const openage::gamestate::scenario::NavigationGrid *navigation = nullptr);
 
 
 } // namespace openage::pathfinding

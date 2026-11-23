@@ -3,6 +3,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 
 #include <nyan/nyan.h>
@@ -57,7 +58,9 @@ public:
 	std::shared_ptr<GameEntity> add_game_entity(const std::shared_ptr<openage::event::EventLoop> &loop,
 	                                            const std::shared_ptr<GameState> &state,
 	                                            player_id_t owner_id,
-	                                            const nyan::fqon_t &nyan_entity);
+	                                            const nyan::fqon_t &nyan_entity,
+	                                            bool attach_renderer = true);
+	void attach_entity_renderer(const std::shared_ptr<GameEntity> &entity);
 
 	/**
 	 * Create a new player.
@@ -68,12 +71,14 @@ public:
 	 * @param loop Event loop for the gamestate.
 	 * @param state State of the game.
 	 * @param player_setup fqon of the player setup in the nyan database.
+	 * @param id Scenario player ID, or a generated ID if omitted.
 	 *
 	 * @return New player.
 	 */
 	std::shared_ptr<Player> add_player(const std::shared_ptr<openage::event::EventLoop> &loop,
 	                                   const std::shared_ptr<GameState> &state,
-	                                   const nyan::fqon_t &player_setup);
+	                                   const nyan::fqon_t &player_setup,
+	                                   std::optional<player_id_t> id = std::nullopt);
 
 	/**
 	 * Attach a renderer which enables graphical display options for all ingame entities.
@@ -108,13 +113,6 @@ private:
 	 * @return Unique ID for a game entity.
 	 */
 	entity_id_t get_next_entity_id();
-
-	/**
-	 * Get a unique ID for creating a player.
-	 *
-	 * @return Unique ID for a player.
-	 */
-	player_id_t get_next_player_id();
 
 	/**
 	 * ID of the next game entity to be created.

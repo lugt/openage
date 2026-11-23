@@ -103,6 +103,9 @@ public:
 	 */
 	void clear_renderables();
 
+	/** Remove renderables identified by their uniform inputs. */
+	void remove_renderables(const std::vector<std::shared_ptr<UniformInput>> &uniforms);
+
 	using compare_func = std::function<bool(const Renderable &, const Renderable &)>;
 
 	/**

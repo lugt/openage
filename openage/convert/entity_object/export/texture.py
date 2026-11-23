@@ -121,11 +121,20 @@ class Texture:
                 # Use shadows if no main graphics are inside
                 input_frames = input_data.get_frames(layer=1)
 
-            for frame in input_frames:
-                subtex = TextureImage(
-                    frame.get_picture_data(),
-                    hotspot=frame.get_hotspot()
-                )
+            masks = {}
+            if layer == 0 and input_frames is input_data.main_frames:
+                masks = input_data.playercolor_by_main_frame
+                if masks:
+                    input_data.get_frames(layer=4)
+
+            for index, frame in enumerate(input_frames):
+                rgba = frame.get_picture_data()
+                if index in masks:
+                    mask = masks[index].get_picture_data()[:, :, 0]
+                    colored = (mask != 0) & (rgba[:, :, 3] != 0)
+                    rgba[colored, 1] = mask[colored]
+                    rgba[colored, 3] = 254
+                subtex = TextureImage(rgba, hotspot=frame.get_hotspot())
                 self.frames.append(subtex)
 
         elif isinstance(input_data, BlendingMode):

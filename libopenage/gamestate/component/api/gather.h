@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <unordered_map>
+
 #include "gamestate/component/api_component.h"
 #include "gamestate/component/types.h"
 
@@ -9,32 +11,24 @@
 namespace openage::gamestate::component {
 
 /**
- * Component backing the \p engine.ability.type.Gather nyan ability.
- *
- * Carries the gatherer state machine (current target ResourceSpot, carried
- * cargo count, return intent). Behavioural transitions are driven from the
- * GATHER / GATHER_PICKUP / RETURN_TO_DROP / DROP_RESOURCES systems listed in
- * gamestate/system/types.h via the activity graph attached to the entity's
- * \p Activity ability.
- *
- * Tutorial simplification: gather_rate and container capacity are read from
- * the nyan ability once at construction; per-cycle bookkeeping uses the
- * carrying integer below.
+ * Gather abilities keyed by the resource spot they target. A unit may have
+ * several abilities with different collection speeds and carrying capacities.
  */
 class Gather final : public APIComponent {
 public:
 	using APIComponent::APIComponent;
 
 	component_t get_type() const override;
+	void add_ability(const nyan::Object &ability);
+	const nyan::Object *find_ability(const nyan::fqon_t &spot) const;
 
-	/**
-	 * Units of resource currently being carried by the gatherer.
-	 *
-	 * Set by GATHER_PICKUP and cleared by DROP_RESOURCES; the actual
-	 * stockpile credit lives on Player.resources. Keeping the per-unit
-	 * count here avoids a round trip to Player on every harvester tick.
-	 */
+	uint64_t order{0};
 	int64_t carried_amount{0};
+	nyan::fqon_t carried_resource;
+	nyan::fqon_t carried_container;
+
+private:
+	std::unordered_map<nyan::fqon_t, nyan::Object> abilities;
 };
 
 } // namespace openage::gamestate::component

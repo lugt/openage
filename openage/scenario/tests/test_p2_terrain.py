@@ -137,8 +137,7 @@ def test_every_tile_belongs_to_exactly_one_chunk() -> None:
 
 
 def test_edge_chunk_handles_partial_size() -> None:
-    """A 10x10 map with 8x8 chunks produces one full chunk (8x8) and
-    four edge chunks (2x2 each)."""
+    """Right and bottom edge chunks retain their own tile dimensions."""
     m = MapDefinition(
         width=10, height=10,
         terrain_ids=["grass"] * 100,
@@ -151,6 +150,10 @@ def test_edge_chunk_handles_partial_size() -> None:
     assert sizes[(8, 0)] == 2
     assert sizes[(0, 8)] == 2
     assert sizes[(8, 8)] == 2
+    assert [chunk.bbox for chunk in snap.chunks] == [
+        (0, 0, 8, 8), (8, 0, 2, 8),
+        (0, 8, 8, 2), (8, 8, 2, 2),
+    ]
 
 
 # ---------------------------------------------------------------------------

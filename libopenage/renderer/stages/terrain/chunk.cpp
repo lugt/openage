@@ -85,7 +85,7 @@ std::shared_ptr<TerrainRenderMesh> TerrainChunk::create_mesh(const util::Vector2
 
 	for (size_t i = 0; i < v_width - 1; ++i) {
 		for (size_t j = 0; j < v_height - 1; ++j) {
-			auto tile = tiles.at(j + i * (v_height - 1));
+			const auto &tile = tiles.at(i + j * (v_width - 1));
 			if (tile.second != texture_path) {
 				// Skip tiles with different textures
 				continue;
@@ -94,10 +94,10 @@ std::shared_ptr<TerrainRenderMesh> TerrainChunk::create_mesh(const util::Vector2
 			// indices of the vertices of the current tile
 			// in the hightmap
 			std::array<size_t, 4> tile_verts{
-				j + i * v_height,           // top left
-				j + (i + 1) * v_height,     // bottom left
-				j + 1 + (i + 1) * v_height, // bottom right
-				j + 1 + i * v_height,       // top right
+				i + j * v_width,
+				i + 1 + j * v_width,
+				i + 1 + (j + 1) * v_width,
+				i + (j + 1) * v_width,
 			};
 
 			// add the vertices of the current tile to the vertex data vector
@@ -109,8 +109,8 @@ std::shared_ptr<TerrainRenderMesh> TerrainChunk::create_mesh(const util::Vector2
 					mesh_verts.push_back(v_vec[0]);
 					mesh_verts.push_back(v_vec[1]);
 					mesh_verts.push_back(v_vec[2]);
-					mesh_verts.push_back((v.ne / 10).to_float());
-					mesh_verts.push_back((v.se / 10).to_float());
+					mesh_verts.push_back(((v.ne + this->offset.ne) / 10).to_float());
+					mesh_verts.push_back(((v.se + this->offset.se) / 10).to_float());
 
 					// update the index map
 					// since new verts are added to the end of the vertex data vector

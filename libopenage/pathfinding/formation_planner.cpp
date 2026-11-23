@@ -42,7 +42,8 @@ bool slot_valid(
 	int map_max_x,
 	int map_max_y,
 	const std::vector<openage::gamestate::component::FootprintBounds>
-		&reservations) {
+		&reservations,
+	const openage::gamestate::scenario::NavigationGrid *navigation) {
 	openage::gamestate::component::FootprintBounds b;
 	b.min_x = cx - rx;
 	b.min_y = cy - ry;
@@ -63,9 +64,7 @@ bool slot_valid(
 	const int y_hi = static_cast<int>(std::floor(b.max_y - 1e-9));
 	for (int x = x_lo; x <= x_hi; ++x) {
 		for (int y = y_lo; y <= y_hi; ++y) {
-			if (static_occ.is_blocked(
-				    openage::gamestate::scenario::CellPosition{
-					    x, y})) {
+			if (static_occ.is_blocked({x, y}) or (navigation and not navigation->is_walkable({x, y}))) {
 				return false;
 			}
 		}
@@ -163,7 +162,8 @@ FormationPlan plan_formation(
 	int map_max_x,
 	int map_max_y,
 	const std::vector<openage::gamestate::component::FootprintBounds>
-		&reservations) {
+		&reservations,
+	const openage::gamestate::scenario::NavigationGrid *navigation) {
 	FormationPlan out;
 	const int n = static_cast<int>(selection.size());
 	if (n == 0) {
@@ -209,7 +209,7 @@ FormationPlan plan_formation(
 			double sy = cy + static_cast<double>(o.second) * slot_dy;
 			if (slot_valid(sx, sy, half_w, half_h, 0, dynamic,
 			        static_occ, map_min_x, map_min_y,
-			        map_max_x, map_max_y, reservations)) {
+			        map_max_x, map_max_y, reservations, navigation)) {
 				valid_centres.push_back({sx, sy});
 				if (valid_centres.size()
 				    >= static_cast<size_t>(n)) {

@@ -6,6 +6,7 @@
 
 #include "event/event_loop.h"
 #include "gamestate/component/api/live.h"
+#include "gamestate/component/api/build.h"
 #include "gamestate/component/types.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
@@ -87,6 +88,11 @@ void ApplyDiscreteEffectHandler::invoke(
 	// by P5+ when scripted effects land.
 	int64_t new_value = current.value() - amount;
 	live->set_attribute(time, attribute_fqon, new_value);
+	auto build = entity->try_get_component_as<component::Build>(component::component_t::BUILD);
+	if (build and not build->is_under_construction()
+	    and attribute_fqon == "de2_base.data.util.attribute.types.Health") {
+		entity->render_damage(time, *current, new_value, live->get_attribute_max(attribute_fqon).value_or(0));
+	}
 
 	log::log(MSG(info) << "ApplyDiscreteEffectHandler: applied amount=" << amount
 	                   << " target=" << target_id

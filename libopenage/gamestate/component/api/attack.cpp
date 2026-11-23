@@ -5,6 +5,7 @@
 #include <nyan/nyan.h>
 
 #include <algorithm>
+#include <unordered_map>
 #include <vector>
 
 #include "gamestate/component/types.h"
@@ -164,6 +165,50 @@ int64_t Attack::get_damage() const {
 	return damage;
 }
 
+int64_t Attack::get_damage_against(const nyan::Object &resistance) const {
+	std::unordered_map<nyan::fqon_t, int64_t> armor;
+	auto target_view = resistance.get_view();
+	for (const auto &fqon : stable_object_fqons(resistance.get_set("Resistance.resistances"))) {
+		auto entry = target_view->get_object(fqon);
+		if (entry.has("FlatAttributeChange.block_value")) {
+			auto type = entry.get_object("FlatAttributeChange.type").get_name();
+			auto value = entry.get_object("FlatAttributeChange.block_value");
+			armor.emplace(type, value.get_int("AttributeAmount.amount"));
+		}
+	}
+
+	const auto &attack = this->get_ability();
+	auto attack_view = attack.get_view();
+	int64_t total = 0;
+	int64_t fallback = 0;
+	const auto health = this->get_health_attribute_fqon();
+	for (const auto &batch_fqon : stable_object_fqons(attack.get_set("ApplyDiscreteEffect.batches"))) {
+		auto batch = attack_view->get_object(batch_fqon);
+		for (const auto &fqon : stable_object_fqons(batch.get_set("EffectBatch.effects"))) {
+			auto effect = attack_view->get_object(fqon);
+			if (not effect.extends("engine.effect.discrete.flat_attribute_change.type.FlatAttributeChangeDecrease")
+			    or not effect.has("FlatAttributeChange.change_value")) {
+				continue;
+			}
+			auto value = effect.get_object("FlatAttributeChange.change_value");
+			if (value.get_object("AttributeAmount.type").get_name() != health) {
+				continue;
+			}
+			auto amount = value.get_int("AttributeAmount.amount");
+			if (fqon.ends_with(".AoE2AttackFallback")) {
+				fallback = amount;
+				continue;
+			}
+			auto type = effect.get_object("FlatAttributeChange.type").get_name();
+			auto block = armor.find(type);
+			if (block != armor.end()) {
+				total += std::max<int64_t>(0, amount - block->second);
+			}
+		}
+	}
+	return std::max(total, fallback);
+}
+
 nyan::fqon_t Attack::get_health_attribute_fqon() const {
 	nyan::fqon_t fqon;
 	visit_first_decrease_effect(
@@ -196,6 +241,7 @@ bool Attack::is_approaching() const {
 }
 
 void Attack::start_attack(entity_id_t target, const time::time_t &now) {
+	++this->order_id;
 	this->active = true;
 	this->target_id = target;
 	this->next_attack_time = now;

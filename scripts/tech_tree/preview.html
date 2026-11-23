@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>帝国时代 II · 文明科技树</title>
+<style>
+:root { color-scheme: light; --ink:#263d34; --muted:#738078; --paper:#f6f4ed; --line:#d9ded4; --green:#315f4d; --gold:#ad813e; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font:14px Inter,"PingFang SC","Microsoft YaHei",sans-serif; }
+button,input,select { font:inherit; }
+button,a,input,select { -webkit-tap-highlight-color:transparent; }
+button { cursor:pointer; }
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible { outline:3px solid #bf9755; outline-offset:3px; }
+.topbar { background:#203e32; color:#fff; padding:20px 28px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.brand { display:flex; align-items:center; gap:15px; }
+.brand-mark { width:36px; height:40px; border:1px solid #bdab7d; border-radius:2px 2px 18px 18px; display:grid; place-items:center; font-family:Georgia,serif; color:#e0c38c; font-size:23px; }
+h1 { margin:0; font-size:19px; font-weight:600; letter-spacing:1px; }
+.source { color:#bacabf; font-size:12px; margin-top:6px; }
+.top-links { display:flex; gap:22px; }
+.top-links a { color:#e2e8de; text-decoration:none; font-size:12px; }
+.layout { display:grid; grid-template-columns:220px minmax(0,1fr) 294px; min-height:calc(100vh - 86px); }
+.sidebar { background:#eeeee5; border-right:1px solid var(--line); padding:24px 18px; }
+.field-label { display:block; font-size:12px; font-weight:600; color:#64756a; margin-bottom:9px; }
+select,input[type=search] { width:100%; padding:10px 11px; border:1px solid #c8d1c4; color:var(--ink); border-radius:5px; background:#fffef9; }
+select { margin-bottom:18px; }
+.search { margin-bottom:20px; }
+.toggle { display:flex; gap:8px; align-items:center; font-size:12px; margin-bottom:25px; }
+input[type=checkbox] { accent-color:var(--green); width:15px; height:15px; }
+nav { display:grid; gap:3px; }
+nav button { background:none; border:0; color:#5f7166; text-align:left; padding:10px 12px; border-radius:4px; display:flex; justify-content:space-between; }
+nav button:hover,nav button.active { color:var(--green); background:#dce4d7; font-weight:600; }
+nav small { font-weight:400; color:#7d8b7c; }
+.sidebar-note { margin-top:24px; padding-top:18px; border-top:1px solid var(--line); font-size:11px; line-height:1.8; color:#7b857a; }
+.main { min-width:0; }
+.civ-header { padding:24px 30px 21px; border-bottom:1px solid var(--line); }
+.civ-title { display:flex; align-items:center; gap:16px; }
+.emblem { width:66px; height:66px; object-fit:contain; }
+h2 { font-size:29px; font-weight:550; margin:0 0 5px; }
+.english { color:var(--muted); font-size:12px; letter-spacing:1.5px; }
+.counts { margin-left:auto; display:flex; gap:30px; font-size:12px; color:var(--muted); }
+.counts strong { display:block; color:var(--green); font-size:25px; font-weight:550; margin-bottom:5px; }
+.civ-description { margin-top:14px; font-size:12px; line-height:1.8; color:#647367; }
+.civ-description summary { cursor:pointer; width:fit-content; }
+.civ-description p { white-space:pre-line; margin-bottom:0; }
+.tree-toolbar { padding:15px 30px; display:flex; align-items:center; gap:16px; color:var(--muted); font-size:11px; border-bottom:1px solid var(--line); }
+.legend { display:flex; align-items:center; gap:7px; }
+.legend i { width:8px; height:8px; background:var(--green); border-radius:2px; }
+.legend.unique i { background:var(--gold); }
+.legend.locked i { background:#b3b5ae; }
+.tree-toolbar .hint { margin-left:auto; }
+.tree-scroll { overflow:auto; max-height:calc(100vh - 303px); min-height:460px; position:relative; }
+.tree { min-width:760px; padding:0 24px 30px; position:relative; }
+.age-row { display:grid; grid-template-columns:92px repeat(4,minmax(150px,1fr)); position:sticky; top:0; z-index:3; background:#f6f4edf5; border-bottom:1px solid #c7d1c2; backdrop-filter:blur(8px); }
+.age { padding:17px 7px; font-size:12px; font-weight:600; color:var(--green); border-left:1px solid #e1e4d9; }
+.age span { font:italic 18px Georgia,serif; margin-right:9px; color:#ad986c; }
+.lane { display:grid; grid-template-columns:92px repeat(4,minmax(150px,1fr)); border-bottom:1px solid var(--line); position:relative; }
+.lane-label { padding:24px 10px 15px 0; font-size:12px; font-weight:600; position:relative; z-index:2; }
+.lane-label img { width:43px; height:43px; object-fit:contain; display:block; margin-bottom:9px; border-radius:3px; }
+.age-cell { padding:20px 10px; border-left:1px solid #e1e4d9; display:grid; grid-template-columns:repeat(auto-fill,minmax(76px,1fr)); gap:14px 9px; align-content:start; }
+.card { position:relative; z-index:2; display:flex; flex-direction:column; align-items:center; gap:6px; padding:8px 3px; background:#fbfaf5; border:1px solid #ced8c8; border-radius:5px; color:var(--ink); min-height:95px; text-align:center; font-size:11px; line-height:1.4; }
+.card:hover { border-color:#6a8c75; box-shadow:0 3px 12px #244d3212; }
+.card.selected { outline:2px solid var(--green); background:#e9efdf; }
+.card.related { border-color:#8aa281; background:#f0f3e8; }
+.card.unique { border-color:#c8ad79; }
+.card.unavailable { opacity:.55; background:#eeede7; }
+.card.unavailable img { filter:grayscale(1); }
+.card.unavailable::after { content:'×'; position:absolute; right:5px; top:1px; color:#a15442; font-size:18px; }
+.card img,.placeholder { width:44px; height:44px; object-fit:contain; border-radius:3px; }
+.placeholder { display:grid; place-items:center; background:#e3e7dc; font-size:21px; color:#6e826b; }
+.card-kind { position:absolute; top:3px; left:5px; color:#a78c55; font-size:9px; }
+.edges { position:absolute; inset:0; pointer-events:none; z-index:1; }
+.edges path { stroke:#628669; stroke-width:1.7; fill:none; opacity:.7; }
+.empty { padding:70px 25px; color:var(--muted); text-align:center; }
+.details { border-left:1px solid var(--line); background:#fcfbf6; padding:26px 22px; overflow:auto; max-height:calc(100vh - 86px); }
+.detail-head { display:flex; align-items:center; gap:14px; margin-bottom:19px; }
+.detail-head img,.detail-head .placeholder { width:58px; height:58px; }
+h3 { font-size:20px; font-weight:550; margin:0 0 5px; }
+.detail-id { color:var(--muted); font-size:11px; line-height:1.7; }
+.availability { padding:9px 11px; font-size:12px; background:#e5edde; color:var(--green); border-radius:4px; margin-bottom:22px; }
+.availability.disabled { background:#efe6df; color:#8f6151; }
+.detail-section { border-top:1px solid var(--line); margin-top:21px; padding-top:17px; }
+h4 { font-size:12px; margin:0 0 14px; color:#677668; font-weight:600; }
+.stat { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:11px 0; font-size:12px; }
+.stat span { color:var(--muted); }
+.stat strong { font-weight:500; }
+.requirements { display:grid; gap:7px; }
+.requirements button { text-align:left; color:#49664f; background:#eef1e7; border:1px solid #dbe1d3; padding:9px; font-size:11px; border-radius:4px; }
+.requirements button:hover { background:#e0e7d8; }
+.requirement-note { color:#84907d; font-size:11px; line-height:1.7; margin:10px 0; }
+.effect-list { font:10px/1.9 "SFMono-Regular",monospace; color:#798375; white-space:pre-wrap; word-break:break-all; }
+.detail-foot { font-size:11px; line-height:1.8; color:#8a9283; margin-top:26px; }
+.loading { padding:50px; text-align:center; }
+@media(max-width:1150px) { .layout { grid-template-columns:190px minmax(0,1fr); } .details { grid-column:2; max-height:none; border-top:1px solid var(--line); } .sidebar { grid-row:1 / 3; } .tree-scroll { max-height:65vh; } .counts { gap:16px; } }
+@media(max-width:650px) { .topbar { padding:16px; } h1 { font-size:16px; } .top-links { display:none; } .layout { display:block; } .sidebar { padding:16px; border-bottom:1px solid var(--line); } .field-label { display:none; } select { margin-bottom:10px; } .search { margin-bottom:10px; } .toggle { margin-bottom:9px; } nav { display:flex; overflow:auto; } nav button { white-space:nowrap; gap:8px; } .sidebar-note { display:none; } .civ-header { padding:20px 16px; } .emblem { width:48px; height:48px; } h2 { font-size:24px; } .counts { gap:12px; } .counts strong { font-size:20px; } .counts .node-total { display:none; } .tree-toolbar { padding:13px 16px; gap:12px; } .hint { display:none; } .tree { padding:0 12px 20px; } .tree-scroll { max-height:65vh; } .details { padding:22px 16px; max-height:none; } }
+@media(prefers-reduced-motion:no-preference) { .card { transition:background .15s,border-color .15s; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><div class="brand-mark" aria-hidden="true">II</div><div><h1>文明科技树</h1><div class="source" id="source"></div></div></div>
+  <div class="top-links"><a href="manifest.json" download>转换清单 ↓</a><a href="tech-trees.json" download>科技索引 ↓</a><a id="download-civ" download>当前文明数据 ↓</a></div>
+</header>
+<div class="layout">
+  <aside class="sidebar">
+    <label class="field-label" for="civilization">选择文明</label><select id="civilization" aria-label="选择文明"></select>
+    <input type="search" id="search" class="search" aria-label="搜索单位或科技" placeholder="搜索单位、建筑、科技…">
+    <label class="toggle"><input id="show-disabled" type="checkbox" checked>显示不可用项目</label>
+    <nav id="groups" aria-label="生产建筑"></nav>
+    <div class="sidebar-note">数据来自本机原版 DAT。<br>包含建筑、兵种升级、独有科技与原始前置条件。<br>全部原始记录保存在 raw 目录。</div>
+  </aside>
+  <main class="main">
+    <section class="civ-header">
+      <div class="civ-title"><img class="emblem" id="emblem" alt=""><div><h2 id="civ-name"></h2><div class="english" id="civ-english"></div></div><div class="counts"><div><strong id="available-count"></strong>可用项目</div><div class="node-total"><strong id="node-count"></strong>总览项目</div></div></div>
+      <details class="civ-description"><summary>文明特色与团队加成</summary><p id="civ-description"></p></details>
+    </section>
+    <div class="tree-toolbar"><span class="legend"><i></i>可用</span><span class="legend unique"><i></i>独有科技</span><span class="legend locked"><i></i>不可用</span><span class="hint">选择项目查看原始条件与效果 · 横向滚动查看时代</span></div>
+    <div class="tree-scroll" id="tree-scroll"><div class="tree" id="tree"><div class="loading">正在加载科技树…</div></div></div>
+  </main>
+  <aside class="details" id="details" aria-label="项目详情" aria-live="polite"></aside>
+</div>
+<script>
+'use strict';
+const catalog = /*__CATALOG__*/;
+const $ = id => document.getElementById(id);
+const escapeHtml = text => String(text ?? '').replace(/[&<>"']/g, value => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[value]));
+const kindNames = {technology:'科技',unit:'单位',building:'建筑'};
+const resourceNames = {'0':'食物','1':'木材','2':'石料','3':'黄金'};
+const statuses = {available:'该文明可用',disabled:'该文明禁用',prerequisite:'前置条件不可达',producer_unavailable:'生产建筑不可用'};
+const groupOrder = ['城镇中心','兵营','靶场','马厩','攻城武器厂','城堡','码头','铁匠铺','修道院','大学','磨坊','伐木场','采矿场','市场','建筑建造'];
+const techById = new Map(catalog.technologies.map(tech => [tech.id,tech]));
+let current = null;
+let selected = null;
+let activeGroup = '';
+let loader = null;
+let requestId = 0;
+let visibleNodes = [];
+function icon(node) {
+  return node.icon ? `<img src="${escapeHtml(node.icon)}" alt="" loading="lazy">` : `<span class="placeholder" aria-hidden="true">${kindNames[node.kind].slice(0,1)}</span>`;
+}
+function orderedGroups(nodes) {
+  return [...new Set(nodes.map(node => node.group))].sort((a,b) => {
+    const ai = groupOrder.indexOf(a), bi = groupOrder.indexOf(b);
+    return (ai < 0 ? 100 : ai) - (bi < 0 ? 100 : bi) || a.localeCompare(b,'zh');
+  });
+}
+function renderNavigation() {
+  const groups = orderedGroups(current.nodes);
+  $('groups').innerHTML = `<button data-group="" class="${activeGroup ? '' : 'active'}">全部建筑<small>${groups.length}</small></button>` + groups.map(group => `<button data-group="${escapeHtml(group)}" class="${activeGroup === group ? 'active' : ''}">${escapeHtml(group)}<small>${current.nodes.filter(node => node.group === group).length}</small></button>`).join('');
+}
+function ancestors(identifier, found = new Set()) {
+  if(found.has(identifier)) return found;
+  found.add(identifier);
+  const node = current.nodes.find(item => item.id === identifier);
+  for(const dependency of node?.dependencies ?? []) ancestors(dependency,found);
+  return found;
+}
+function renderTree() {
+  if(!current) return;
+  const query = $('search').value.trim().toLocaleLowerCase();
+  visibleNodes = current.nodes.filter(node => (!activeGroup || node.group === activeGroup) && ($('show-disabled').checked || node.available) && (!query || `${node.name} ${node.english} ${node.id}`.toLocaleLowerCase().includes(query)));
+  const groups = orderedGroups(visibleNodes);
+  const ages = current.era === 'antiquity' ? ['时代 I','时代 II','时代 III','时代 IV'] : ['黑暗时代','封建时代','城堡时代','帝王时代'];
+  const related = selected ? ancestors(selected) : new Set();
+  $('tree').innerHTML = `<div class="age-row"><div></div>${ages.map((age,index) => `<div class="age"><span>${['I','II','III','IV'][index]}</span>${age}</div>`).join('')}</div>` + groups.map(group => {
+    const nodes = visibleNodes.filter(node => node.group === group);
+    const producer = current.nodes.find(node => node.kind === 'building' && node.name === group);
+    return `<section class="lane" data-lane="${escapeHtml(group)}"><div class="lane-label">${producer?.icon ? `<img src="${producer.icon}" alt="">` : ''}${escapeHtml(group)}</div>${[1,2,3,4].map(age => `<div class="age-cell">${nodes.filter(node => node.age === age).sort((a,b) => (a.kind === 'technology') - (b.kind === 'technology') || a.genie_id - b.genie_id).map(node => `<button class="card ${node.available ? '' : 'unavailable'} ${node.unique ? 'unique' : ''} ${node.id === selected ? 'selected' : related.has(node.id) ? 'related' : ''}" data-node="${node.id}" aria-label="${escapeHtml(node.name)} ${kindNames[node.kind]} ${statuses[node.status]}" title="${escapeHtml(node.name)} · ${node.id}"><span class="card-kind">${kindNames[node.kind]}</span>${icon(node)}<span>${escapeHtml(node.name)}</span></button>`).join('')}</div>`).join('')}</section>`;
+  }).join('') + (groups.length ? '' : '<p class="empty">没有符合条件的项目</p>') + '<svg class="edges" id="edges" aria-hidden="true"></svg>';
+  requestAnimationFrame(drawEdges);
+}
+function drawEdges() {
+  const svg = $('edges');
+  if(!svg || !selected) return;
+  const tree = $('tree');
+  const origin = tree.getBoundingClientRect();
+  const relevant = ancestors(selected);
+  const paths = [];
+  for(const node of visibleNodes.filter(node => relevant.has(node.id))) {
+    const target = tree.querySelector(`[data-node="${node.id}"]`);
+    if(!target) continue;
+    for(const dependency of node.dependencies) {
+      const source = tree.querySelector(`[data-node="${dependency}"]`);
+      if(!source || source.closest('.lane') !== target.closest('.lane')) continue;
+      const a = source.getBoundingClientRect(), b = target.getBoundingClientRect();
+      const x1 = a.right-origin.left, y1 = a.top+a.height/2-origin.top;
+      const x2 = b.left-origin.left, y2 = b.top+b.height/2-origin.top;
+      const blocked = [...target.closest('.lane').querySelectorAll('.card')].some(card => {
+        if(card === source || card === target) return false;
+        const bounds = card.getBoundingClientRect();
+        return bounds.left < b.left && bounds.right > a.right && bounds.top < a.top+a.height/2 && bounds.bottom > a.top+a.height/2;
+      });
+      if(Math.abs(y1-y2) < 4 && x2 > x1 && !blocked) paths.push(`<path d="M ${x1} ${y1} H ${x2}" marker-end="url(#dependency-arrow)"/>`);
+      else {
+        // Route through row and column padding, keeping unrelated cards clear.
+        const sourceCell = source.closest('.age-cell').getBoundingClientRect();
+        const targetCell = target.closest('.age-cell').getBoundingClientRect();
+        const lane = source.closest('.lane').getBoundingClientRect();
+        const sx = a.left+a.width/2-origin.left, sy = a.bottom-origin.top;
+        const tx = b.left+b.width/2-origin.left, ty = b.top-origin.top;
+        const right = sourceCell.right-origin.left-4;
+        const left = source.closest('.age-cell') === target.closest('.age-cell') ? right : targetCell.left-origin.left+4;
+        const gutter = lane.top-origin.top+10;
+        paths.push(`<path d="M ${sx} ${sy} V ${sy+7} H ${right} V ${gutter} H ${left} V ${ty-7} H ${tx} V ${ty}" marker-end="url(#dependency-arrow)"/>`);
+      }
+    }
+  }
+  svg.setAttribute('width',tree.scrollWidth);
+  svg.setAttribute('height',tree.scrollHeight);
+  svg.innerHTML = '<defs><marker id="dependency-arrow" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><polygon points="0 0,5 2.5,0 5" fill="#628669"/></marker></defs>' + paths.join('');
+}
+function selectNode(identifier) {
+  selected = identifier;
+  const node = current.nodes.find(item => item.id === identifier);
+  if(!node) {
+    const tech = techById.get(Number(identifier.slice(1)));
+    if(tech) $('details').innerHTML = `<h3>${escapeHtml(tech.name)}</h3><p class="detail-id">自动科技 · DAT #${tech.id}</p>${requirements(tech.required,tech.minimum)}<p class="detail-foot">自动科技可能由建筑落成或其他效果触发。完整字段保存在原始科技记录中。</p>`;
+    renderTree();
+    return;
+  }
+  const stats = Object.entries(node.cost).map(([resource,amount]) => `<div class="stat"><span>${resourceNames[resource]}</span><strong>${amount}</strong></div>`).join('') || '<div class="stat"><span>资源消耗</span><strong>无</strong></div>';
+  const combat = node.combat;
+  const combatStats = combat ? `<div class="detail-section"><h4>DAT 基础属性</h4><div class="stat"><span>生命值</span><strong>${node.hp}</strong></div><div class="stat"><span>视野</span><strong>${node.sight}</strong></div><div class="stat"><span>移动速度</span><strong>${Number(node.speed).toFixed(2)}</strong></div>${(combat.attacks ?? []).map(attack => `<div class="stat"><span>攻击类型 ${attack.class_}</span><strong>${attack.amount}</strong></div>`).join('')}</div>` : '';
+  const effects = node.effects?.length ? `<details class="detail-section"><summary>原始效果 · ${node.effects.length} 条</summary><pre class="effect-list">${escapeHtml(node.effects.map(effect => `type ${effect.type}  A ${effect.a}  B ${effect.b}\nC ${effect.c}  D ${effect.d}`).join('\n\n'))}</pre></details>` : '';
+  $('details').innerHTML = `<div class="detail-head">${icon(node)}<div><h3>${escapeHtml(node.name)}</h3><div class="detail-id">${kindNames[node.kind]} · DAT #${node.genie_id}</div></div></div><div class="availability ${node.available ? '' : 'disabled'}">${statuses[node.status]}${node.unique ? ' · 文明独有' : ''}</div><h4>资源与时间</h4>${stats}<div class="stat"><span>${node.kind === 'technology' ? '研究' : node.kind === 'building' ? '建造' : '训练'}时间</span><strong>${node.seconds} 秒</strong></div><div class="stat"><span>生产位置</span><strong>${escapeHtml(node.group)}</strong></div>${requirements(node.requirements,node.required_count)}${combatStats}${effects}<p class="detail-foot">预览展示文明可达性与 DAT 基础数据。局内加成由研究与文明效果进一步修改。节点连线展示展开后的前置关系，实际判断保留原始 N 项门槛。</p>`;
+  renderTree();
+}
+function requirements(ids, count) {
+  if(!ids.length) return '<div class="detail-section"><h4>前置条件</h4><p class="requirement-note">无科技前置条件</p></div>';
+  return `<div class="detail-section"><h4>前置条件</h4><p class="requirement-note">${ids.length} 项中需满足 ${count} 项</p><div class="requirements">${ids.map(id => `<button data-requirement="t${id}">${escapeHtml(techById.get(id)?.name ?? `科技 #${id}`)}<br><small>DAT #${id}</small></button>`).join('')}</div></div>`;
+}
+function loadCivilization(identifier) {
+  const civ = catalog.civilizations.find(item => item.id === Number(identifier));
+  if(!civ) return;
+  requestId = civ.id;
+  current = null;
+  selected = null;
+  activeGroup = '';
+  $('civ-name').textContent = civ.name;
+  $('civ-english').textContent = civ.english.toUpperCase();
+  $('emblem').src = civ.emblem ?? '';
+  $('emblem').hidden = !civ.emblem;
+  $('civ-description').textContent = civ.description;
+  $('available-count').textContent = civ.available_count;
+  $('node-count').textContent = civ.node_count;
+  $('download-civ').href = civ.data;
+  $('tree').innerHTML = '<div class="loading">正在加载科技树…</div>';
+  $('details').textContent = '';
+  $('groups').replaceChildren();
+  if(loader) loader.remove();
+  loader = document.createElement('script');
+  loader.src = civ.script;
+  loader.onerror = () => { $('tree').innerHTML = '<p class="empty">文明数据加载失败，请检查 civilizations 目录是否与本页一起保存。</p>'; };
+  document.head.append(loader);
+  location.hash = `civ=${civ.id}`;
+}
+window.openageTreeLoaded = civ => {
+  if(civ.id !== requestId) return;
+  current = civ;
+  renderNavigation();
+  renderTree();
+  selectNode(current.nodes.some(node => node.id === 't22') ? 't22' : current.nodes[0].id);
+};
+$('source').textContent = `原版 ${catalog.source.version}  ·  ${catalog.counts.civilizations} 个文明  ·  ${catalog.counts.technologies.toLocaleString()} 条科技记录`;
+$('civilization').innerHTML = catalog.civilizations.map(civ => `<option value="${civ.id}">${escapeHtml(civ.name)} · ${escapeHtml(civ.english)}</option>`).join('');
+$('civilization').addEventListener('change',event => { $('search').value=''; loadCivilization(event.target.value); });
+$('groups').addEventListener('click',event => { const button=event.target.closest('[data-group]'); if(button && current) { activeGroup=button.dataset.group; renderNavigation(); renderTree(); $('tree-scroll').scrollTop=0; } });
+$('tree').addEventListener('click',event => { const button=event.target.closest('[data-node]'); if(button) selectNode(button.dataset.node); });
+$('details').addEventListener('click',event => { const button=event.target.closest('[data-requirement]'); if(button) selectNode(button.dataset.requirement); });
+$('search').addEventListener('input',renderTree);
+$('show-disabled').addEventListener('change',renderTree);
+window.addEventListener('resize',() => requestAnimationFrame(drawEdges));
+new ResizeObserver(() => requestAnimationFrame(drawEdges)).observe($('tree-scroll'));
+const initial = Number(new URLSearchParams(location.hash.slice(1)).get('civ')) || 13;
+$('civilization').value = catalog.civilizations.some(civ => civ.id === initial) ? initial : catalog.civilizations[0].id;
+loadCivilization($('civilization').value);
+</script>
+</body>
+</html>

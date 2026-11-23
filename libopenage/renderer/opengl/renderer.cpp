@@ -177,6 +177,18 @@ void GlRenderer::render(const std::shared_ptr<RenderPass> &pass) {
 	shared_quad_vao->bind();
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	GLint color_index = 0;
+	for (const auto &texture : gl_target->get_texture_targets()) {
+		const auto format = texture->get_info().get_format();
+		if (format == resources::pixel_format::depth24) {
+			continue;
+		}
+		if (format == resources::pixel_format::r32ui) {
+			const GLuint clear_id[4]{};
+			glClearBufferuiv(GL_COLOR, color_index, clear_id);
+		}
+		++color_index;
+	}
 
 	// TODO: Option for face culling
 	// glEnable(GL_CULL_FACE);

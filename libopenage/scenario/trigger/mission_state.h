@@ -113,6 +113,9 @@ public:
 
 	// --- Mission lifecycle ----------------------------------------------
 
+    void set_instruction(std::string text) { this->instruction_ = std::move(text); this->notify_progress(); }
+    const std::string &instruction() const { return this->instruction_; }
+
 	MissionLifecycle lifecycle() const { return this->lifecycle_; }
 
 	bool is_victory() const {
@@ -150,11 +153,23 @@ public:
 		this->victory_listener_ = std::move(cb);
 	}
 
+	void notify_progress() {
+		if (this->objective_listener_) {
+			this->objective_listener_();
+		}
+	}
+
+	void set_objective_listener(std::function<void()> cb) {
+		this->objective_listener_ = std::move(cb);
+	}
+
 private:
 	std::unordered_map<std::string, ObjectiveState> objectives_;
 	MissionLifecycle lifecycle_{MissionLifecycle::RUNNING};
 	std::string victory_reason_;
+    std::string instruction_;
 	std::function<void(const std::string &reason)> victory_listener_;
+	std::function<void()> objective_listener_;
 };
 
 

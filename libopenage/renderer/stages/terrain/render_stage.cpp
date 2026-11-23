@@ -9,6 +9,9 @@
 #include "renderer/renderer.h"
 #include "renderer/resources/shader_source.h"
 #include "renderer/resources/texture_info.h"
+#include "renderer/resources/texture_data.h"
+#include "renderer/texture.h"
+#include "renderer/uniform_input.h"
 #include "renderer/shader_program.h"
 #include "renderer/stages/terrain/chunk.h"
 #include "renderer/stages/terrain/mesh.h"
@@ -58,6 +61,31 @@ void TerrainRenderStage::add_render_entity(const std::shared_ptr<RenderEntity> e
 	this->update();
 }
 
+void TerrainRenderStage::set_visibility(const std::shared_ptr<const gamestate::VisibilitySnapshot> &snapshot) {
+	if (snapshot == this->visibility) {
+		return;
+	}
+	if (snapshot and (not this->visibility or snapshot->width != this->visibility->width
+	                  or snapshot->height != this->visibility->height or snapshot->tiles != this->visibility->tiles)) {
+		std::vector<uint8_t> rgba;
+		rgba.reserve(snapshot->tiles.size() * 4);
+		for (auto tile : snapshot->tiles) {
+			const uint8_t shade = tile == gamestate::TileVisibility::Visible ? 255
+			                    : tile == gamestate::TileVisibility::Explored ? 100 : 0;
+			rgba.insert(rgba.end(), {shade, shade, shade, 255});
+		}
+		resources::Texture2dInfo info(snapshot->width, snapshot->height, resources::pixel_format::rgba8);
+		resources::Texture2dData data(info, std::move(rgba));
+		if (this->fog_texture and info == this->fog_texture->get_info()) {
+			this->fog_texture->upload(data);
+		}
+		else {
+			this->fog_texture = this->renderer->add_texture(data);
+		}
+	}
+	this->visibility = snapshot;
+}
+
 void TerrainRenderStage::update() {
 	this->model->fetch_updates();
 	auto current_time = this->clock->get_real_time();
@@ -81,6 +109,11 @@ void TerrainRenderStage::update() {
 				mesh->clear_requires_renderable();
 
 				mesh->set_uniforms(transform_unifs);
+			}
+			const auto &uniforms = mesh->get_uniforms();
+			uniforms->update("fog_enabled", bool(this->visibility));
+			if (this->visibility) {
+				uniforms->update("fog_map", this->fog_texture);
 			}
 		}
 	}

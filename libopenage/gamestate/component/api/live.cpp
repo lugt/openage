@@ -17,6 +17,18 @@ component_t Live::get_type() const {
 	return component_t::LIVE;
 }
 
+std::optional<int64_t> Live::get_attribute_max(const nyan::fqon_t &attribute) const {
+	const auto &ability = this->get_ability();
+	for (const auto &value : ability.get_set("Live.attributes")) {
+		auto ref = std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr());
+		auto setting = ability.get_view()->get_object(ref->get_name());
+		if (setting.get_object("AttributeSetting.attribute").get_name() == attribute) {
+			return setting.get_int("AttributeSetting.max_value");
+		}
+	}
+	return std::nullopt;
+}
+
 void Live::add_attribute(const time::time_t &time,
                          const nyan::fqon_t &attribute,
                          std::shared_ptr<curve::Discrete<int64_t>> starting_values) {

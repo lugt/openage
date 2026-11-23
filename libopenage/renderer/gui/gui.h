@@ -8,6 +8,8 @@
 
 #include "renderer/gui/guisys/public/gui_subtree.h"
 
+class QObject;
+
 namespace qtgui {
 class GuiInput;
 class GuiRenderer;
@@ -43,7 +45,9 @@ public:
 	             const util::Path &source,
 	             const util::Path &rootdir,
 	             const util::Path &assetdir,
-	             const std::shared_ptr<Renderer> &renderer);
+	             const std::shared_ptr<Renderer> &renderer,
+	             const char *context_property_name,
+	             QObject *context_property);
 	virtual ~GUI() = default;
 
 	/**

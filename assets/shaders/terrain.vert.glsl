@@ -4,6 +4,7 @@ layout (location = 0) in vec3 position;
 layout (location = 1) in vec2 uv;
 
 out vec2 tex_pos;
+out vec2 tile_pos;
 
 uniform mat4 model;
 
@@ -21,6 +22,8 @@ layout (std140) uniform camera {
 };
 
 void main() {
-	gl_Position = proj * view * model * vec4(position, 1.0);
+	vec4 world = model * vec4(position, 1.0);
+	gl_Position = proj * view * world;
+	tile_pos = vec2(-world.z, world.x);
     tex_pos = vec2(uv.x, 1.0 - uv.y);
 }

@@ -817,8 +817,10 @@ def _export_terrain(
         image = SLP(graphics_data)
 
     elif file_ext == "dds":
-        # TODO: Implement
-        pass
+        from .dds_terrain import export_dds_terrain
+        export_dds_terrain(graphics_data, target_path, compression_level)
+        outqueue.put(request_id)
+        return
 
     elif file_ext == "png":
         with target_path.open("wb") as imagefile:

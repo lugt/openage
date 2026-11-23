@@ -10,8 +10,7 @@
 namespace openage::gamestate::api {
 
 bool APITerrain::is_terrain(const nyan::Object &obj) {
-	nyan::fqon_t immediate_parent = obj.get_parents()[0];
-	return immediate_parent == "engine.util.terrain.Terrain";
+	return obj.extends("engine.util.terrain.Terrain");
 }
 
 const std::string APITerrain::get_terrain_path(const nyan::Object &terrain) {

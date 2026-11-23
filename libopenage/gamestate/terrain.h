@@ -50,6 +50,7 @@ public:
 	 * @return Terrain tile size (width x height).
 	 */
 	const util::Vector2s &get_size() const;
+    double height_at(double x, double y) const;
 
 	/**
 	 * Get the size of the terrain (in chunks).

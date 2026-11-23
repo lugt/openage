@@ -8,6 +8,9 @@
 add_py_modules(
 	__init__.py
 	NOINSTALL dumps.py
+	NOINSTALL de2_campaign.py
+	NOINSTALL de2_scenario.py
+	NOINSTALL de2_save_map.py
 	NOINSTALL ir.py
 	NOINSTALL loader.py
 	NOINSTALL terrain.py

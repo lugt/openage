@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "gamestate/types.h"
 #include "nyan/nyan.h"
@@ -122,6 +123,11 @@ public:
 	 */
 	const std::unordered_map<nyan::fqon_t, int64_t> &get_resources() const;
 
+    void disable_action(const nyan::fqon_t &subject) { this->disabled_actions.insert(subject); }
+    bool allows_action(const nyan::fqon_t &subject) const { return not this->disabled_actions.contains(subject); }
+	bool has_researched(const nyan::fqon_t &tech) const { return this->researched.contains(tech); }
+	void record_research(const nyan::fqon_t &tech) { this->researched.insert(tech); }
+
 protected:
 	/**
 	 * A player cannot be default copied because of their unique ID.
@@ -163,6 +169,8 @@ private:
 	 * cargo (not yet modelled) and unload straight into player.resources.
 	 */
 	std::unordered_map<nyan::fqon_t, int64_t> resources;
+	std::unordered_set<nyan::fqon_t> researched;
+    std::unordered_set<nyan::fqon_t> disabled_actions;
 };
 
 } // namespace openage::gamestate

@@ -16,6 +16,7 @@
 #include "gamestate/activity/types.h"
 #include "gamestate/activity/xor_event_gate.h"
 #include "gamestate/activity/xor_gate.h"
+#include "gamestate/component/api/attack.h"
 #include "gamestate/component/internal/activity.h"
 #include "gamestate/component/types.h"
 #include "gamestate/game_entity.h"
@@ -133,9 +134,11 @@ const time::time_t Activity::handle_subsystem(const time::time_t &start_time,
                                               const std::shared_ptr<openage::gamestate::GameState> &state,
                                               system_id_t system_id) {
 	switch (system_id) {
-	case system_id_t::IDLE:
-		return Idle::idle(entity, start_time);
-		break;
+	case system_id_t::IDLE: {
+		auto attack = entity->try_get_component_as<component::Attack>(component::component_t::ATTACK);
+		// A previous walk can finish in the activity graph during an attack.
+		return attack and attack->is_active() ? time::time_t::zero() : Idle::idle(entity, start_time);
+	}
 	case system_id_t::MOVE_COMMAND:
 		return Move::move_command(entity, state, start_time);
 		break;

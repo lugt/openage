@@ -5,6 +5,10 @@
 #include <stdexcept>
 
 #include "event/evententity.h"
+#include "gamestate/component/internal/ownership.h"
+#include "gamestate/game_entity.h"
+#include "gamestate/game_state.h"
+#include "gamestate/system/idle.h"
 #include "log/log.h"
 #include "log/message.h"
 
@@ -89,6 +93,70 @@ void DeclareVictoryEffect::enqueue(
 // ---------------------------------------------------------------------------
 
 
+namespace {
+
+class ChangeOwnershipEffect final : public TriggerEffect {
+public:
+	ChangeOwnershipEffect(std::string name, gamestate::player_id_t owner) :
+		name{std::move(name)}, owner{owner} {}
+
+	void enqueue(const std::shared_ptr<openage::event::EventLoop> &loop,
+	             const std::shared_ptr<openage::event::EventEntity> &target,
+	             const std::shared_ptr<openage::event::State> &state,
+	             time::time_t at) const override {
+		loop->create_event(this->event_name(), target, state, at,
+		                   {{"scenario_object", this->name}, {"player_id", this->owner}});
+	}
+
+	std::string event_name() const override { return "change_ownership"; }
+
+private:
+	std::string name;
+	gamestate::player_id_t owner;
+};
+
+class ChangeOwnershipHandler final : public openage::event::OnceEventHandler {
+public:
+	ChangeOwnershipHandler() : OnceEventHandler{"change_ownership"} {}
+
+	void invoke(openage::event::EventLoop &,
+	            const std::shared_ptr<openage::event::EventEntity> &,
+	            const std::shared_ptr<openage::event::State> &state,
+	            const time::time_t &time,
+	            const param_map &params) override {
+		auto game = std::static_pointer_cast<gamestate::GameState>(state);
+		auto id = game->get_entity_id_by_instance(params.get("scenario_object", std::string{}));
+		auto owner = params.get("player_id", gamestate::player_id_t{});
+		if (not id or not game->has_game_entity(*id) or not game->get_players().contains(owner)) {
+			return;
+		}
+		auto entity = game->get_game_entity(*id);
+		auto ownership = entity->try_get_component_as<gamestate::component::Ownership>(
+			gamestate::component::component_t::OWNERSHIP);
+		if (ownership and not entity->is_dead()) {
+			ownership->set_owner(time, owner);
+			if (entity->has_component(gamestate::component::component_t::IDLE)) {
+				gamestate::system::Idle::idle(entity, time);
+			}
+		}
+	}
+
+	void setup_event(const std::shared_ptr<openage::event::Event> &,
+	                 const std::shared_ptr<openage::event::State> &) override {}
+
+	time::time_t predict_invoke_time(const std::shared_ptr<openage::event::EventEntity> &,
+	                                const std::shared_ptr<openage::event::State> &,
+	                                const time::time_t &at) override {
+		return at;
+	}
+};
+
+} // namespace
+
+void register_scenario_effect_handlers(const std::shared_ptr<openage::event::EventLoop> &loop) {
+	loop->add_event_handler(std::make_shared<ChangeOwnershipHandler>());
+}
+
 std::shared_ptr<TriggerEffect> make_trigger_effect(
 	const gamestate::MissionTriggerEffect &ir) {
 
@@ -99,6 +167,10 @@ std::shared_ptr<TriggerEffect> make_trigger_effect(
 	// "set_objective_state") are a SEPARATE namespace -- they are
 	// the openage event-loop handler names, not data kinds, and
 	// are decoupled from the IR kind.
+	if (ir.kind == "ChangeOwnership") {
+		return std::make_shared<ChangeOwnershipEffect>(
+			ir.target_scenario_object_id, static_cast<gamestate::player_id_t>(ir.target_player_id));
+	}
 	if (ir.kind == "SetObjective") {
 		// target_scenario_object_id is the objective_id; the
 		// target_state string ("ACTIVE"/"INACTIVE") rides in

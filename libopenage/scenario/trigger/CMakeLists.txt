@@ -4,5 +4,6 @@ add_sources(libopenage
     trigger_effect.cpp
     trigger_instance.cpp
     trigger_runtime.cpp
+    original_scenario.cpp
     mission_state.cpp
 )

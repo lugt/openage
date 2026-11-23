@@ -3,12 +3,16 @@
 #include "mission_pack_loader.h"
 
 #include <algorithm>
+#include <set>
 #include <unordered_map>
 #include <utility>
 
 #include <nyan/nyan.h>
 
 #include "error/error.h"
+#include "event/event_loop.h"
+#include "gamestate/component/api/build.h"
+#include "gamestate/component/api/live.h"
 #include "gamestate/component/internal/activity.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
@@ -17,6 +21,7 @@
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
+#include "gamestate/manager.h"
 #include "gamestate/player.h"
 #include "gamestate/terrain.h"
 #include "gamestate/terrain_chunk.h"
@@ -217,7 +222,8 @@ void load_mission_pack_into_game_state(
 				static_cast<coord::tile_t>(chunk.offset_x),
 				static_cast<coord::tile_t>(chunk.offset_y),
 			},
-			tile_fqons));
+			tile_fqons,
+			chunk.tile_elevations));
 	}
 	auto terrain = terrain_factory->add_terrain(
 		util::Vector2s{
@@ -229,27 +235,49 @@ void load_mission_pack_into_game_state(
 	state->set_map(map);
 
 	// 2. Players.
-	// The Mission Pack's PlayerDefinition does not yet carry a
-	// player_setup FQON (the openage/scenario IR rounds through a
-	// separate PlayerSetup loader). For the MVP reconstruction we
-	// use an empty FQON, which produces a player with neither civ
-	// patches nor starting resources — exactly what the demo 7 log
-	// observes today. P5 / P7 will wire the PlayerSetup FQON back in
-	// once the IR exposes it on PlayerDefinition.
+	// Preserve slots already initialized by Game with a PlayerSetup.
+	// Placements, trigger ownership effects and diplomacy all use the pack IDs.
 	std::unordered_map<int64_t, std::shared_ptr<Player>> players_by_id;
 	for (const auto &p : pack.players) {
-		nyan::fqon_t player_setup_fqon{};
-		auto player = entity_factory->add_player(event_loop, state, player_setup_fqon);
+		if (p.player_id < 0 or players_by_id.contains(p.player_id)) {
+			throw MissionPackLoadError{"Invalid or duplicate player ID " + std::to_string(p.player_id)};
+		}
+		const auto id = static_cast<player_id_t>(p.player_id);
+		const bool existing = state->get_players().contains(id);
+		auto player = existing ? state->get_player(id) : entity_factory->add_player(event_loop, state, {}, id);
+		if (not existing) {
+			state->add_player(player);
+		}
+		if (pack.victory.kind == "resource-stockpile") {
+			for (const auto *resource : {"de2_base.data.util.resource.types.Food",
+			                             "de2_base.data.util.resource.types.Wood",
+			                             "de2_base.data.util.resource.types.Gold"}) {
+				player->spend(resource, player->get_resource(resource));
+			}
+		}
 		players_by_id[p.player_id] = player;
-		state->add_player(player);
+		state->set_player_name(player->get_id(), p.name);
 	}
 
-	// 3. Diplomacy. Empty matrix for the MVP reconstruction (spec
-	//    §6.1 — the IR's VictoryDefinition drives completion; the
-	//    openage objective_controller reads required_removals and
-	//    checks player removals).
-	log::log(MSG(info) << "load_mission_pack_into_game_state: diplomacy: "
-	                   << "(empty matrix; MVP reconstruction)");
+	std::set<std::pair<int64_t, int64_t>> relationships;
+	for (const auto &entry : pack.diplomacy) {
+		if (not players_by_id.contains(entry.source) or not players_by_id.contains(entry.target)
+		    or entry.source == entry.target or not relationships.emplace(entry.source, entry.target).second) {
+			throw MissionPackLoadError{"Invalid or duplicate diplomacy pair"};
+		}
+		auto stance = DiplomaticStance::Enemy;
+		if (entry.relation == "ally") {
+			stance = DiplomaticStance::Ally;
+		}
+		else if (entry.relation == "neutral") {
+			stance = DiplomaticStance::Neutral;
+		}
+		else if (entry.relation != "enemy") {
+			throw MissionPackLoadError{"Unknown diplomacy stance " + entry.relation};
+		}
+		state->set_stance(players_by_id.at(entry.source)->get_id(),
+		                  players_by_id.at(entry.target)->get_id(), stance);
+	}
 
 	// 4. Placements.
 	// Spawn at sim_time=0, matching Game::load_scenario's old behavior
@@ -280,14 +308,31 @@ void load_mission_pack_into_game_state(
 			static_cast<player_id_t>(ep.player_id),
 			nyan::fqon_t{ep.entity_definition_fqon});
 
+		entity->genie_id = ep.genie_id;
+
+		const auto build = entity->try_get_component_as<component::Build>(component::component_t::BUILD);
+		const auto live = entity->try_get_component_as<component::Live>(component::component_t::LIVE);
+		const nyan::fqon_t health = "de2_base.data.util.attribute.types.Health";
+		if (ep.construction_seconds > 0) {
+			if (not build or not build->get_ability().extends("engine.ability.type.Constructable")
+			    or not live or live->get_attribute_max(health).value_or(0) <= 0) {
+				throw MissionPackLoadError{"construction requires a building with health: " + ep.scenario_object_id};
+			}
+			build->set_progress(0);
+			live->set_attribute(now, health, 1);
+		}
+		else if (build and live) {
+			if (auto max_health = live->get_attribute_max(health)) {
+				live->set_attribute(now, health, *max_health);
+			}
+		}
+
 		// Wire position component.
 		auto entity_pos = std::dynamic_pointer_cast<component::Position>(
 			entity->get_component(component::component_t::POSITION));
 		if (entity_pos) {
-			coord::phys3 pos = coord::tile{
-				static_cast<coord::tile_t>(ep.pos_x),
-				static_cast<coord::tile_t>(ep.pos_y),
-			}.to_phys3();
+			coord::phys3 pos{coord::phys_t::from_double(ep.pos_x), coord::phys_t::from_double(ep.pos_y), coord::phys_t::from_double(ep.height)};
+            entity_pos->set_angle(now, coord::phys_angle_t::from_double(ep.rotation * 180.0 / 3.141592653589793));
 			entity_pos->set_position(now, pos);
 		}
 
@@ -302,6 +347,10 @@ void load_mission_pack_into_game_state(
 		// ability; we set its center here.
 		if (entity->has_footprint()) {
 			auto fp = entity->footprint();
+            if (pack.original_scenario.is_object() and pack.original_scenario.has("definitions")) {
+                const auto &definition = pack.original_scenario.at("definitions").at(std::to_string(ep.genie_id));
+                fp.set_extents(definition.at("radius_x").as_number(), definition.at("radius_y").as_number());
+            }
 			fp.set_center(static_cast<double>(ep.pos_x),
 			             static_cast<double>(ep.pos_y));
 			entity->set_footprint(fp);
@@ -325,8 +374,7 @@ void load_mission_pack_into_game_state(
 			// entity_definition_fqon). The pathfinder
 			// never sees Villager/Enemy as a static
 			// obstacle.
-			req.is_static = (ep.entity_definition_fqon.find(
-				"town_center") != std::string::npos);
+			req.is_static = not entity->has_component(component::component_t::MOVE);
 			// Propagate is_static to the footprint so
 			// downstream consumers (the DynamicOccupancy
 			// spawn-time helper, etc.) can skip buildings.
@@ -335,7 +383,15 @@ void load_mission_pack_into_game_state(
 			// which placements are buildings (TC).
 			fp.set_is_static(req.is_static);
 			entity->set_footprint(fp);
-			auto pf = validator.validate(req);
+			// Original scenarios legally overlap decorations and map-edge objects.
+            // Preserve those placements; new construction continues using the validator.
+            auto pf = (pack.original_scenario.is_object() and pack.original_scenario.has("mission"))
+                ? openage::gamestate::scenario::PlacementFailure{}
+                : validator.validate(req);
+            if (pack.original_scenario.is_object() and pack.original_scenario.has("mission")) {
+                pf.reason = openage::gamestate::scenario::PlacementFailureReason::OK;
+                pf.requested_bounds = fp.bounds();
+            }
 			if (not pf.ok()) {
 				throw MissionPackLoadError{
 					"load_mission_pack_into_game_state: "
@@ -349,7 +405,7 @@ void load_mission_pack_into_game_state(
 			// entities write to the grid. Units (Villager,
 			// Enemy) do NOT permanently block any cell.
 			if (req.is_static && fp.blocks_pathfinding()) {
-				auto conflict = occ->occupy(req.entity, pf.requested_bounds);
+				auto conflict = occ->occupy(req.entity, pf.requested_bounds, pack.original_scenario.has("mission"));
 				if (conflict.has_value()) {
 					throw MissionPackLoadError{
 						"load_mission_pack_into_game_state: "
@@ -378,6 +434,17 @@ void load_mission_pack_into_game_state(
 		}
 
 		state->add_game_entity(entity);
+		if (ep.construction_seconds > 0) {
+			for (int64_t progress = 25; progress <= 100; progress += 25) {
+				openage::event::EventHandler::param_map::map_t params{
+					{"entity_id", entity->get_id()},
+					{"progress", progress},
+				};
+				event_loop->create_event("game.construction", entity->get_manager(), state,
+				                         now + time::time_t::from_double(ep.construction_seconds * progress / 100.0),
+				                         params);
+			}
+		}
 
 		// P4.4F Task 3: register the entity in the Map's shared
 		// DynamicOccupancy at spawn time so the Move runtime's
@@ -462,6 +529,11 @@ void load_mission_pack_into_game_state(
 		                   << " (synthesized into a defeat_enemy trigger "
 		                   << "by GameSimulation::wire_trigger_data)");
 	}
+	if (pack.fog_of_war) {
+		state->enable_fog(pack.share_allied_vision);
+		state->update_visibility(now);
+	}
+
 }
 
 

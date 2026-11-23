@@ -104,6 +104,11 @@ MANUAL
 
 run_regression() {
 	print_header "regression"
+	# OPENAGE_RUN_BIN is a TEST hook only (scripts/tests/ use it to substitute
+	# a fake engine); the default and the normal user command remain
+	# $REPO/bin/run.
+	local run_bin="${OPENAGE_RUN_BIN:-$REPO/bin/run}"
+	echo "run binary       : $run_bin"
 	local pass=0
 	local fail=0
 	local fail_ids=""
@@ -120,7 +125,7 @@ run_regression() {
 		# append the same output to the log. (Running each demo twice
 		# doubled the wall clock for no extra coverage.)
 		local out
-		out="$("$REPO/bin/run" test -d gamestate.tests.simulation_demo "$ID" 2>&1)"
+		out="$("$run_bin" test -d gamestate.tests.simulation_demo "$ID" 2>&1)"
 		printf '%s\n' "$out" >> "$LOG"
 		if echo "$out" | grep -qE "DEMO.*PASS|WW MISSION 1 HEADLESS REGRESSION: PASS|MISSION 1 LIFECYCLE: PASS|NATIVE LOAD: PASS"; then
 			echo "demo $ID: PASS"
@@ -142,6 +147,13 @@ run_regression() {
 		echo "PASS=$pass FAIL=$fail"
 		echo "Failed IDs: $fail_ids"
 	} >> "$LOG"
+	# Truthful aggregate exit: any demo that did not print a PASS marker
+	# (crash, missing marker, silent non-zero exit) must fail the whole
+	# regression run -- a FAIL=1 summary with exit 0 is a false positive.
+	if [ "$fail" -gt 0 ]; then
+		echo "regression: FAIL (exit 1; $fail demo(s) did not print PASS)"
+		exit 1
+	fi
 }
 
 run_windowed() {

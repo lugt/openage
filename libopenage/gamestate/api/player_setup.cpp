@@ -13,8 +13,7 @@
 namespace openage::gamestate::api {
 
 bool APIPlayerSetup::is_player_setup(const nyan::Object &obj) {
-	nyan::fqon_t immediate_parent = obj.get_parents()[0];
-	return immediate_parent == "engine.util.setup.PlayerSetup";
+	return obj.extends("engine.util.setup.PlayerSetup");
 }
 
 const std::vector<nyan::Object> APIPlayerSetup::get_modifiers(const nyan::Object &player_setup) {
@@ -53,7 +52,10 @@ const std::vector<nyan::Object> APIPlayerSetup::get_patches(const nyan::Object &
 	for (auto &patch_val : patches) {
 		auto patch_obj_val = std::dynamic_pointer_cast<nyan::ObjectValue>(patch_val.get_ptr());
 		auto patch_obj = db_view->get_object(patch_obj_val->get_name());
-		result.push_back(patch_obj);
+		if (patch_obj.extends("engine.util.patch.Patch")) {
+			patch_obj = patch_obj.get_object("Patch.patch");
+		}
+		result.push_back(std::move(patch_obj));
 	}
 
 	return result;

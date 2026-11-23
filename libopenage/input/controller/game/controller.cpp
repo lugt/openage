@@ -26,6 +26,7 @@
 #include "event/evententity.h"
 #include "event/state.h"
 #include "gamestate/component/api/attack.h"
+#include "gamestate/component/api/build.h"
 #include "gamestate/component/api/move.h"
 #include "gamestate/component/internal/commands/types.h"
 #include "gamestate/component/internal/ownership.h"
@@ -35,6 +36,7 @@
 #include "gamestate/event/spawn_entity.h"
 #include "gamestate/game.h"
 #include "gamestate/game_entity.h"
+#include "gamestate/component/api/gather.h"
 #include "gamestate/game_state.h"
 #include "gamestate/simulation.h"
 #include "input/controller/game/binding_context.h"
@@ -84,13 +86,17 @@ SelectionSnapshot make_selection_snapshot(
 PickResult pick_entity_at(
 	const std::shared_ptr<gamestate::GameState> &state,
 	const coord::phys3 &world_pos,
-	const time::time_t &now) {
+	const time::time_t &now,
+	gamestate::player_id_t viewer) {
 	PickResult pick;
 	pick.world_x = world_pos.ne.to_double();
 	pick.world_y = world_pos.se.to_double();
 
 	double closest_distance = std::numeric_limits<double>::infinity();
 	for (const auto &[id, entity] : state->get_game_entities()) {
+		if ((entity->is_dead() and not entity->is_harvestable_carcass()) or not state->can_see(viewer, id)) {
+			continue;
+		}
 		auto position = entity->try_get_component_as<gamestate::component::Position>(
 			gamestate::component::component_t::POSITION);
 		if (position == nullptr) {
@@ -130,8 +136,28 @@ PickResult pick_entity_at(
 }
 
 
+PickResult context_pick(const std::shared_ptr<gamestate::GameState> &state, const coord::phys3 &world,
+                        std::optional<uint32_t> sprite, gamestate::player_id_t viewer, time::time_t now) {
+	if (sprite and state->has_game_entity(*sprite) and state->can_see(viewer, *sprite)
+	    and (not state->get_game_entity(*sprite)->is_dead() or state->get_game_entity(*sprite)->is_harvestable_carcass())) {
+		auto ownership = state->get_game_entity(*sprite)->try_get_component_as<gamestate::component::Ownership>(
+			gamestate::component::component_t::OWNERSHIP);
+		return {true, *sprite, ownership ? ownership->get_owners().get(now) : viewer,
+		        world.ne.to_double(), world.se.to_double()};
+	}
+	return pick_entity_at(state, world, now, viewer);
+}
+
 } // namespace
 
+
+bool is_attack_target(const std::shared_ptr<gamestate::GameState> &state, const coord::phys3 &world,
+                      std::optional<uint32_t> sprite, gamestate::player_id_t viewer, time::time_t now) {
+	const auto pick = context_pick(state, world, sprite, viewer, now);
+	return pick.has_entity and not state->get_game_entity(pick.entity)->is_dead()
+	    and state->get_stance(viewer, pick.entity_owner) == gamestate::DiplomaticStance::Enemy
+	    and state->get_game_entity(pick.entity)->has_component(gamestate::component::component_t::LIVE);
+}
 
 Controller::Controller(const std::unordered_set<size_t> &controlled_factions,
                        size_t active_faction_id) :
@@ -153,7 +179,7 @@ size_t Controller::get_controlled() const {
 	return this->active_faction_id;
 }
 
-const std::vector<gamestate::entity_id_t> &Controller::get_selected() const {
+std::vector<gamestate::entity_id_t> Controller::get_selected() const {
 	std::unique_lock lock{this->mutex};
 
 	return this->selected;
@@ -259,8 +285,9 @@ void Controller::reset_drag_select() {
 void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
                     const std::shared_ptr<time::TimeLoop> &time_loop,
                     const std::shared_ptr<openage::gamestate::GameSimulation> &simulation,
-                    const std::shared_ptr<renderer::camera::Camera> &camera) {
-	binding_func_t create_entity_event{[&](const event_arguments &args,
+                    const std::shared_ptr<renderer::camera::Camera> &camera,
+                    std::function<std::optional<uint32_t>(coord::input)> sprite_picker, int bottom_hud_height) {
+	binding_func_t create_entity_event{[time_loop, simulation, camera](const event_arguments &args,
 	                                       const std::shared_ptr<Controller> controller) {
 		auto mouse_pos = args.mouse.to_phys3(camera);
 		event::EventHandler::param_map::map_t params{
@@ -281,21 +308,72 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	Event ev_mouse_lmb_ctrl{
 		event_class::MOUSE_BUTTON,
 		Qt::MouseButton::LeftButton,
-		Qt::KeyboardModifier::ControlModifier,
+		Qt::AltModifier | Qt::ControlModifier,
 		QEvent::MouseButtonRelease};
 
 	ctx->bind(ev_mouse_lmb_ctrl, create_entity_action);
 
-	binding_func_t context_action{[&](const event_arguments &args,
+	binding_func_t context_action{[time_loop, simulation, camera, sprite_picker](const event_arguments &args,
 	                                  const std::shared_ptr<Controller> controller) {
 		auto state = simulation->get_game()->get_state();
 		auto now = time_loop->get_clock()->get_time();
 		auto mouse_pos = args.mouse.to_phys3(camera);
-		auto selection = make_selection_snapshot(
-			state, controller->get_selected(), now);
-		auto pick = pick_entity_at(state, mouse_pos, now);
-		auto action = resolve_context_action(
-			state, selection, pick, controller->get_controlled());
+		auto selected_ids = controller->get_selected();
+		auto selection = make_selection_snapshot(state, selected_ids, now);
+		const auto viewer = controller->get_controlled();
+		const auto pick = context_pick(state, mouse_pos, sprite_picker ? sprite_picker(args.mouse) : std::nullopt,
+		                               viewer, now);
+		const auto resource_id = pick.entity;
+		if (pick.has_entity) {
+			const auto resource = state->get_game_entity(resource_id);
+			if (pick.entity_owner == viewer and selected_ids.size() == 1
+			    and state->has_game_entity(selected_ids.front())
+			    and state->get_game_entity(selected_ids.front())->construct_ability) {
+				const auto build = resource->try_get_component_as<gamestate::component::Build>(
+					gamestate::component::component_t::BUILD);
+				if (build and build->ordered_by_player and build->is_under_construction()) {
+					return simulation->get_event_loop()->create_event(
+						"game.economy_action", simulation->get_commander(), state, now, {
+							{"actor", selected_ids.front()}, {"site", resource_id},
+							{"issuer", gamestate::player_id_t{viewer}},
+						});
+				}
+			}
+			if (resource->resource_spot.has_value()) {
+				std::vector<gamestate::entity_id_t> workers;
+				for (auto id : selected_ids) {
+					if (not state->has_game_entity(id)) {
+						continue;
+					}
+					auto unit = state->get_game_entity(id);
+					auto gather = unit->try_get_component_as<gamestate::component::Gather>(
+						gamestate::component::component_t::GATHER);
+					auto owner = unit->try_get_component_as<gamestate::component::Ownership>(
+						gamestate::component::component_t::OWNERSHIP);
+					if (gather and owner and not unit->is_dead() and owner->get_owners().get(now) == viewer
+					    and gather->find_ability(resource->resource_spot->definition)) {
+						workers.push_back(id);
+					}
+				}
+				if (not workers.empty()) {
+					event::EventHandler::param_map::map_t params{
+						{"type", gamestate::component::command::command_t::GATHER},
+						{"target_id", resource_id}, {"entity_ids", workers}, {"issuer", gamestate::player_id_t{viewer}},
+					};
+					return simulation->get_event_loop()->create_event(
+						"game.send_command", simulation->get_commander(), state, now, params);
+				}
+			}
+		}
+		auto action = resolve_context_action(state, selection, pick, viewer, now);
+		if (action.kind == SemanticActionKind::MOVE and action.actors.size() > 1) {
+			event::EventHandler::param_map::map_t formation{
+				{"entity_ids", action.actors}, {"center_x", pick.world_x}, {"center_y", pick.world_y},
+				{"issuer", gamestate::player_id_t{viewer}},
+			};
+			return simulation->get_event_loop()->create_event(
+				"game.group_move", simulation->get_commander(), state, now, formation);
+		}
 
 		event::EventHandler::param_map::map_t params;
 		switch (action.kind) {
@@ -303,14 +381,14 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 			params = {
 				{"type", gamestate::component::command::command_t::MOVE},
 				{"target", mouse_pos},
-				{"entity_ids", controller->get_selected()},
+				{"entity_ids", action.actors},
 			};
 			break;
 		case SemanticActionKind::ATTACK:
 			params = {
 				{"type", gamestate::component::command::command_t::ATTACK},
 				{"target_id", action.target_entity.value()},
-				{"entity_ids", controller->get_selected()},
+				{"entity_ids", action.actors},
 			};
 			break;
 		case SemanticActionKind::NO_OP:
@@ -321,6 +399,7 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 			return std::shared_ptr<event::Event>{nullptr};
 		}
 
+		params.emplace("issuer", gamestate::player_id_t{viewer});
 		return simulation->get_event_loop()->create_event(
 			"game.send_command",
 			simulation->get_commander(),
@@ -330,31 +409,17 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	}};
 
 	binding_action move_entity_action{forward_action_t::SEND, context_action};
-	Event ev_mouse_rmb{
-		event_class::MOUSE_BUTTON,
-		Qt::MouseButton::RightButton,
-		Qt::KeyboardModifier::NoModifier,
-		QEvent::MouseButtonRelease};
 
-	ctx->bind(ev_mouse_rmb, move_entity_action);
-
-	binding_func_t init_drag_selection{[&](const event_arguments &args,
+	binding_func_t init_drag_selection{[](const event_arguments &args,
 	                                       const std::shared_ptr<Controller> controller) {
 		controller->set_drag_select_start(args.mouse);
 		return nullptr;
 	}};
 
 	binding_action init_drag_selection_action{forward_action_t::CLEAR, init_drag_selection};
-	Event ev_mouse_lmb_press{
-		event_class::MOUSE_BUTTON,
-		Qt::MouseButton::LeftButton,
-		Qt::KeyboardModifier::NoModifier,
-		QEvent::MouseButtonPress};
-
-	ctx->bind(ev_mouse_lmb_press, init_drag_selection_action);
 
 	binding_func_t drag_selection{
-		[&](const event_arguments &args,
+		[time_loop, simulation, camera, bottom_hud_height, sprite_picker = std::move(sprite_picker)](const event_arguments &args,
 	        const std::shared_ptr<Controller> controller) {
 			// A drag-select release without a registered press start must be a
 			// no-op: this happens when the left button press was consumed by
@@ -364,10 +429,22 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 				return std::shared_ptr<event::Event>{nullptr};
 			}
 
+			const auto start = controller->get_drag_select_start();
+			const auto distance = args.mouse - start;
+			const bool point_select = std::abs(distance.x) <= 3 and std::abs(distance.y) <= 3;
 			Eigen::Matrix4f cam_matrix = camera->get_projection_matrix() * camera->get_view_matrix();
 			event::EventHandler::param_map::map_t params{
-				{"controlled", controller->get_controlled()},
-				{"drag_start", controller->get_drag_select_start().to_viewport(camera).to_ndc_space(camera)},
+				{"controlled", gamestate::player_id_t{controller->get_controlled()}},
+				{"same_type", bool(args.e.mod_code & Qt::ShiftModifier)},
+				{"screen_bottom", 2.0f * bottom_hud_height / camera->get_viewport_size()[1] - 1.0f},
+				{"additive", bool(args.e.mod_code & (Qt::ControlModifier
+#ifdef __APPLE__
+				                                            | Qt::MetaModifier
+#endif
+				                                            ))},
+				{"previous_selection", std::function{[controller] { return controller->get_selected(); }}},
+				{"point_select", point_select},
+				{"drag_start", start.to_viewport(camera).to_ndc_space(camera)},
 				{"drag_end", args.mouse.to_viewport(camera).to_ndc_space(camera)},
 				{"camera_matrix", cam_matrix},
 				{"select_cb",
@@ -378,6 +455,9 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 					 }}},
 			};
 
+			if (point_select and sprite_picker) {
+				params.emplace("sprite_pick", sprite_picker(args.mouse));
+			}
 			auto event = simulation->get_event_loop()->create_event(
 				"game.drag_select",
 				simulation->get_commander(),
@@ -392,13 +472,20 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 		}};
 
 	binding_action drag_selection_action{forward_action_t::CLEAR, drag_selection};
-	Event ev_mouse_lmb_release{
-		event_class::MOUSE_BUTTON,
-		Qt::MouseButton::LeftButton,
-		Qt::KeyboardModifier::NoModifier,
-		QEvent::MouseButtonRelease};
-
-	ctx->bind(ev_mouse_lmb_release, drag_selection_action);
+	auto bind_mouse = [&](Qt::KeyboardModifiers modifiers) {
+		ctx->bind({event_class::MOUSE_BUTTON, Qt::LeftButton, static_cast<modset_t>(modifiers), QEvent::MouseButtonPress}, init_drag_selection_action);
+		ctx->bind({event_class::MOUSE_BUTTON, Qt::LeftButton, static_cast<modset_t>(modifiers), QEvent::MouseButtonRelease}, drag_selection_action);
+		ctx->bind({event_class::MOUSE_BUTTON_DBL, Qt::LeftButton, static_cast<modset_t>(modifiers), QEvent::MouseButtonDblClick}, init_drag_selection_action);
+		ctx->bind({event_class::MOUSE_BUTTON, Qt::RightButton, static_cast<modset_t>(modifiers), QEvent::MouseButtonRelease}, move_entity_action);
+	};
+	for (auto modifiers : {Qt::KeyboardModifiers{}, Qt::KeyboardModifiers{Qt::ControlModifier},
+	                       Qt::KeyboardModifiers{Qt::ShiftModifier}, Qt::ControlModifier | Qt::ShiftModifier}) {
+		bind_mouse(modifiers);
+	}
+#ifdef __APPLE__
+	bind_mouse(Qt::MetaModifier);
+	bind_mouse(Qt::MetaModifier | Qt::ShiftModifier);
+#endif
 }
 
 

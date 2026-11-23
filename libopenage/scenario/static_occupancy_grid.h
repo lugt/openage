@@ -1,3 +1,4 @@
+#include <set>
 // Copyright 2026 the openage authors. See copying.md for legal info.
 //
 // P4.4B: StaticOccupancyGrid + NavigationGrid.
@@ -111,7 +112,7 @@ public:
 	 */
 	std::optional<entity_id_t> occupy(
 		entity_id_t entity,
-		const openage::gamestate::component::FootprintBounds &bounds);
+		const openage::gamestate::component::FootprintBounds &bounds, bool allow_overlap = false);
 
 	/**
 	 * Release all cells currently blocked by `entity`. Safe to
@@ -132,7 +133,7 @@ private:
 	int min_x_, min_y_, max_x_, max_y_;
 	// Map cell -> blocker entity. Out-of-map cells are NOT
 	// stored; is_blocked returns true for them.
-	std::unordered_map<CellPosition, entity_id_t, CellHash> cells_;
+	std::unordered_map<CellPosition, std::set<entity_id_t>, CellHash> cells_;
 	// Map entity -> list of cells it occupies. Used by release()
 	// to clear all cells owned by an entity, and by occupy() to
 	// detect re-occupancy by the same entity.
@@ -176,7 +177,9 @@ public:
 
 private:
 	std::shared_ptr<StaticOccupancyGrid> occ_;
-	std::shared_ptr<Terrain> terrain_;
+	size_t width_{0};
+	size_t height_{0};
+	std::vector<uint8_t> land_costs_;
 };
 
 

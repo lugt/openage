@@ -243,6 +243,23 @@ void simulation_demo_51(const util::Path &path) {
 	}
 	log::log(MSG(info) << "demo 51: pin 4 PASS (production LMB click -> selection)");
 
+	// The same point-select path can inspect a hostile unit. The command
+	// binding must still reject a move for that selection.
+	camera->look_at_coord(position_at_zero(state, enemy_id).to_scene3());
+	bindings->lookup(lmb_press).transform(press_args, controller);
+	input::event_arguments inspect_args{
+		lmb_release, coord::input{641, 359}, coord::input_delta{1, -1}, {}};
+	bindings->lookup(lmb_release).transform(inspect_args, controller);
+	simulation->get_event_loop()->reach_time(time::time_t{0}, state);
+	if (controller->get_selected() != std::vector<entity_id_t>{enemy_id}) {
+		throw std::runtime_error{"demo 51 pin 5 FAILED: enemy could not be inspected"};
+	}
+	camera->look_at_coord(coord::scene3{4.0, 2.0, 0.0});
+	if (bindings->lookup(rmb).transform(args, controller) != nullptr) {
+		throw std::runtime_error{"demo 51 pin 5 FAILED: enemy selection issued a command"};
+	}
+	log::log(MSG(info) << "demo 51: pin 5 PASS (enemy point-select -> inspect only)");
+
 	log::log(MSG(info) << "DEMO 51: PASS (production RMB context input)");
 }
 

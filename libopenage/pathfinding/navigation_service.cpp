@@ -24,13 +24,14 @@ NavigationService::NavigationService(
 NavigationService::Path NavigationService::request_path(
 	openage::gamestate::scenario::CellPosition start,
 	openage::gamestate::scenario::CellPosition target,
-	MoverFootprint mover) const {
+	MoverFootprint mover,
+	const GridAStarPathfinder::StepAllowed &step_allowed) const {
 	Path out;
 	GridAStarPathfinder finder{
 		this->grid_.get(),
 		this->static_obstacles_,
 		mover};
-	out.result = finder.find_path(start, target, out.waypoints);
+	out.result = finder.find_path(start, target, out.waypoints, step_allowed);
 	if (out.result != GridAStarPathfinder::Result::PATH_FOUND) {
 		// Per spec §VI: any failure clears the waypoints so the
 		// Move runtime cannot accidentally traverse a partial

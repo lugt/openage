@@ -21,12 +21,13 @@ namespace {
 // in the Python side; this C++ side reports unsupported kinds as
 // errors (per spec §10.1 'unsupported variants fail/report clearly').
 const std::set<std::string> SUPPORTED_CONDITION_KINDS = {
-	"TimerElapsed", "EntityInArea", "EntityDestroyed",
+	"AoE2Condition", "TimerElapsed", "EntityInArea", "EntityDestroyed",
+	"EntityVisitedArea",
 	"EntityAlive", "EntityOwnedBy", "PlayerOwnsCount",
 	"AttributeCompare", "TriggerFired",
 };
 const std::set<std::string> SUPPORTED_EFFECT_KINDS = {
-	"DisplayInstruction", "SetObjective", "CompleteObjective",
+	"AoE2Effect", "DisplayInstruction", "SetObjective", "CompleteObjective",
 	"IssueMoveCommand", "IssueAttackCommand", "ActivateTrigger",
 	"DeactivateTrigger", "CreateEntity", "RemoveEntity",
 	"ChangeOwnership", "DeclareVictory", "DeclareDefeat",
@@ -41,6 +42,9 @@ MissionPack read_mission_pack(const std::string &dir) {
 	auto root = util::json::parse_file(scenario_path);
 
 	MissionPack pack;
+	if (root.has("ScenarioDefinition") and root.at("ScenarioDefinition").has("original_scenario")) {
+		pack.original_scenario = root.at("ScenarioDefinition").at("original_scenario");
+	}
 
 	// ---- top-level metadata ---------------------------------------
 	if (!root.has("schema_version")) {
@@ -77,6 +81,22 @@ MissionPack read_mission_pack(const std::string &dir) {
 		pack.is_imported_original = sd.at("is_imported_original").as_bool();
 	}
 
+	if (sd.has("fog_of_war")) {
+		pack.fog_of_war = sd.at("fog_of_war").as_bool();
+	}
+	if (sd.has("share_allied_vision")) {
+		pack.share_allied_vision = sd.at("share_allied_vision").as_bool();
+	}
+	if (sd.has("Diplomacy")) {
+		for (const auto &entry : sd.at("Diplomacy").as_array()) {
+			const auto &row = entry.as_array();
+			if (row.size() != 3) {
+				throw MissionPackError{"Diplomacy row must contain source, target and stance"};
+			}
+			pack.diplomacy.push_back({row[0].as_int(), row[1].as_int(), row[2].as_string()});
+		}
+	}
+
 	// ---- map ------------------------------------------------------
 	const auto &md = sd.at("MapDefinition");
 	pack.map.width = md.at("width").as_int();
@@ -99,6 +119,26 @@ MissionPack read_mission_pack(const std::string &dir) {
 		c.size_y = chunk.at("size").at("y").as_int();
 		for (const auto &fqon : chunk.at("tile_fqons").as_array()) {
 			c.tile_fqons.push_back(fqon.as_string());
+		}
+		if (chunk.contains("tile_elevations")) {
+			for (const auto &height : chunk.at("tile_elevations").as_array()) {
+				auto value = height.as_int();
+				if (!height.is_int() || value < 0 || value > 255) {
+					throw MissionPackError{scenario_path + ": tile elevation is outside [0, 255]"};
+				}
+				c.tile_elevations.push_back(static_cast<uint8_t>(value));
+			}
+			if (c.tile_elevations.size() != c.tile_fqons.size()) {
+				throw MissionPackError{scenario_path + ": tile_elevations and tile_fqons lengths differ"};
+			}
+		}
+		else if (pack.map.elevation_unique.size() == 1
+		         && pack.map.elevation_unique.front() >= 0
+		         && pack.map.elevation_unique.front() <= 255) {
+			c.tile_elevations.assign(c.tile_fqons.size(), static_cast<uint8_t>(pack.map.elevation_unique.front()));
+		}
+		else {
+			throw MissionPackError{scenario_path + ": missing tile_elevations for nonuniform or invalid elevation"};
 		}
 		if (static_cast<int64_t>(c.tile_fqons.size()) != c.size_x * c.size_y) {
 			throw MissionPackError{
@@ -130,9 +170,20 @@ MissionPack read_mission_pack(const std::string &dir) {
 		ep.scenario_object_id = e.at("ScenarioObjectId").as_string();
 		ep.entity_definition_fqon = e.at("entity_definition_fqon").as_string();
 		ep.player_id = e.at("PlayerId").as_int();
-		ep.pos_x = e.at("position").at("x").as_int();
-		ep.pos_y = e.at("position").at("y").as_int();
+		ep.pos_x = e.at("position").at("x").as_number();
+		ep.pos_y = e.at("position").at("y").as_number();
 		ep.rotation = e.at("rotation").as_float();
+        if (eval.has("AttributeOverrides")) {
+            const auto &overrides = e.at("AttributeOverrides");
+            if (overrides.has("genie_id")) ep.genie_id = overrides.at("genie_id").as_int();
+            if (overrides.has("height")) ep.height = overrides.at("height").as_number();
+        }
+		if (eval.has("AttributeOverrides") and e.at("AttributeOverrides").has("construction_seconds")) {
+			ep.construction_seconds = e.at("AttributeOverrides").at("construction_seconds").as_int();
+			if (ep.construction_seconds < 1 or ep.construction_seconds > 3600) {
+				throw MissionPackError{"construction_seconds must be between 1 and 3600"};
+			}
+		}
 		pack.placements.push_back(std::move(ep));
 	}
 
@@ -164,6 +215,7 @@ MissionPack read_mission_pack(const std::string &dir) {
 			for (const auto &cval : t.at("conditions").as_array()) {
 				MissionTriggerCondition cond;
 				cond.kind = cval.at("kind").as_string();
+                if (cval.has("args")) cond.args = cval.at("args");
 				if (cval.has("target_scenario_object_id") && cval.at("target_scenario_object_id").is_string()) {
 					cond.target_scenario_object_id = cval.at("target_scenario_object_id").as_string();
 				}
@@ -181,6 +233,7 @@ MissionPack read_mission_pack(const std::string &dir) {
 			for (const auto &eval : t.at("effects").as_array()) {
 				MissionTriggerEffect eff;
 				eff.kind = eval.at("kind").as_string();
+                if (eval.has("args")) eff.args = eval.at("args");
 				if (eval.has("target_scenario_object_id") && eval.at("target_scenario_object_id").is_string()) {
 					eff.target_scenario_object_id = eval.at("target_scenario_object_id").as_string();
 				}
@@ -371,7 +424,8 @@ void validate_mission_pack(const MissionPack &pack) {
 			}
 		}
 		for (const auto &e : t.effects) {
-			if (!e.target_scenario_object_id.empty()
+			if (e.kind != "SetObjective" and e.kind != "CompleteObjective" and e.kind != "DeclareVictory"
+			    and !e.target_scenario_object_id.empty()
 			    && scenario_obj_ids.find(e.target_scenario_object_id)
 			       == scenario_obj_ids.end()) {
 				throw MissionPackError{

@@ -2,16 +2,21 @@
 
 #include "send_command.h"
 
+#include <algorithm>
 #include <vector>
 
 #include "coord/phys.h"
 #include "event/event_loop.h"
 #include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/internal/commands/attack.h"
-#include "gamestate/component/internal/commands/idle.h"
+#include "gamestate/component/internal/ownership.h"
+#include "gamestate/component/api/attack.h"
+#include "gamestate/system/idle.h"
+#include "gamestate/system/move.h"
 #include "gamestate/component/internal/commands/move.h"
 #include "gamestate/component/types.h"
 #include "gamestate/game_entity.h"
+#include "gamestate/component/api/gather.h"
 #include "gamestate/game_state.h"
 #include "gamestate/types.h"
 #include "log/log.h"
@@ -61,15 +66,52 @@ void SendCommandHandler::invoke(openage::event::EventLoop &loop,
 	auto command_type = params.get("type", component::command::command_t::NONE);
 	std::vector<gamestate::entity_id_t> ids = params.get("entity_ids",
 	                                                     std::vector<gamestate::entity_id_t>{});
+	const bool has_issuer = params.check_type<player_id_t>("issuer");
+	const auto issuer = params.get("issuer", player_id_t{});
+	std::erase_if(ids, [&](entity_id_t id) {
+		if (not gstate->has_game_entity(id)) {
+			return true;
+		}
+		const auto entity = gstate->get_game_entity(id);
+		const auto owner = entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
+		return entity->is_dead() or (has_issuer and (not owner or owner->get_owners().get(time) != issuer));
+	});
+	if (command_type == component::command::command_t::GATHER) {
+		for (auto id : ids) {
+			openage::event::EventHandler::param_map::map_t order{
+				{"worker_id", id},
+				{"resource_id", params.get("target_id", entity_id_t{})},
+			};
+			loop.create_event("game.gather", target, state, time, order);
+		}
+		return;
+	}
 	for (auto id : ids) {
 		auto entity = gstate->get_game_entity(id);
+		++entity->construction_order;
 		auto command_queue = std::dynamic_pointer_cast<component::CommandQueue>(
 			entity->get_component(component::component_t::COMMANDQUEUE));
 
+		if (auto gather = entity->try_get_component_as<component::Gather>(component::component_t::GATHER);
+		    gather and (command_type == component::command::command_t::MOVE
+		                or command_type == component::command::command_t::ATTACK
+		                or command_type == component::command::command_t::IDLE)) {
+			++gather->order;
+		}
 		switch (command_type) {
-		case component::command::command_t::IDLE:
-			command_queue->add_command(time, std::make_shared<component::command::IdleCommand>());
+		case component::command::command_t::IDLE: {
+			while (not command_queue->get_queue().empty(time)) {
+				command_queue->pop_command(time);
+			}
+			if (auto attack = entity->try_get_component_as<component::Attack>(component::component_t::ATTACK)) {
+				attack->stop_attack();
+			}
+			system::Move::halt(entity, gstate, time);
+			if (entity->has_component(component::component_t::IDLE)) {
+				system::Idle::idle(entity, time);
+			}
 			break;
+		}
 		case component::command::command_t::MOVE: {
 			auto dest = params.get("target", coord::phys3{0, 0, 0});
 			log::log(MSG(info) << "SendCommandHandler: MOVE for " << ids.size()
@@ -99,7 +141,6 @@ void SendCommandHandler::invoke(openage::event::EventLoop &loop,
 		// TODO(Phase A6/C1-C3): construct the matching command class for each
 		// remaining type. We intentionally log instead of silently dropping so test
 		// data wiring problems surface instead of looking like no-op orders.
-		case component::command::command_t::GATHER:
 		case component::command::command_t::BUILD:
 		case component::command::command_t::TRAIN:
 		default:
