@@ -5,9 +5,9 @@ Provides the FileLikeObject abstract base class, which specifies a file-like
 interface, and various classes that implement the interface.
 """
 
+import os
 from abc import ABC, abstractmethod
 from io import UnsupportedOperation
-import os
 
 
 class FileLikeObject(ABC):
@@ -22,6 +22,10 @@ class FileLikeObject(ABC):
 
     def __init__(self):
         self.closed = False
+
+    @property
+    def name(self) -> str:
+        raise NotImplementedError()
 
     @abstractmethod
     def read(self, size: int = -1) -> bytes:
@@ -38,7 +42,7 @@ class FileLikeObject(ABC):
         """
 
     @abstractmethod
-    def write(self, data) -> None:
+    def write(self, data: bytes | bytearray) -> None:
         """
         Writes all of data to the file.
 
@@ -105,6 +109,15 @@ class FileLikeObject(ABC):
               it exists mostly for internal usage.
         """
 
+    def truncate(self, size: int) -> int:
+        raise UnsupportedOperation("truncate() not supported")
+
+    def fileno(self) -> int:
+        raise UnsupportedOperation("fileno() not supported")
+
+    def isatty(self) -> bool:
+        return False
+
     # allow usage with 'with'
     def __enter__(self):
         return self
@@ -132,8 +145,7 @@ class FileLikeObject(ABC):
         elif whence == os.SEEK_END:
             size = self.get_size()
             if size < 0:
-                raise UnsupportedOperation(
-                    "can only seek relative to file start or cursor")
+                raise UnsupportedOperation("can only seek relative to file start or cursor")
             target = offset + size
         else:
             raise UnsupportedOperation("unsupported seek mode")

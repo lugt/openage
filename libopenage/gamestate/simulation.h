@@ -262,7 +262,10 @@ public:
 	/**
 	 * Attach a renderer to the simulation.
 	 *
-	 * @param factory Factory for creating render entities.
+	 * May be called before the game is started; the game gets the renderer
+	 * attached once it is created.
+	 *
+	 * @param render_factory Factory for creating render entities.
 	 */
 	void attach_renderer(const std::shared_ptr<renderer::RenderFactory> &render_factory);
 
@@ -423,6 +426,11 @@ private:
 	 * register_trigger_handler().
 	 */
 	std::shared_ptr<gamestate::event::RemovalEventHandler> removal_handler;
+
+	/**
+	 * Factory for creating render entities, if a renderer is attached.
+	 */
+	std::shared_ptr<renderer::RenderFactory> render_factory;
 
 	/**
 	 * Mutex for thread-safe access to the simulation.

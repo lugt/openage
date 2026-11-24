@@ -6,14 +6,14 @@ hash_algo = "SHA3-256"
 [AoE2DE_s]
 # paths are mutually-exclusive alternatives (GameFileVersion semantics):
 # only one needs to exist. The Windows build ships AoE2DE_s.exe/AoE2DE.exe.
-# The macOS Feral port (2026) has neither; its executable lives in a .app
-# bundle outside the data root, so we use the data-root-relative dat file
-# as the macOS alias. A present-but-unhashed file still counts as "found"
-# (version_detect.py only logs dbg), so edition detection succeeds.
+# The macOS Feral port (2026) has neither at the data root; its executable
+# lives in a .app bundle, so we list both the .app binary and the
+# data-root-relative dat file as macOS aliases.
 paths = [
-	"AoE2DE_s.exe",
-	"AoE2DE.exe",
-	"resources/_common/dat/empires2_x2_p1.dat",
+  "AoE2DE_s.exe",
+  "AoE2DE.exe",
+  "Age Of Empires II.app/Contents/MacOS/Age Of Empires II",
+  "resources/_common/dat/empires2_x2_p1.dat",
 ]
 
   [AoE2DE_s.map]

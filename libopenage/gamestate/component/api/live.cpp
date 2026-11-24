@@ -3,12 +3,15 @@
 #include "live.h"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 
 #include "curve/container/iterator.h"
 #include "curve/container/map_filter_iterator.h"
 #include "curve/discrete.h"
 #include "gamestate/component/types.h"
+
+import nyan;
 
 
 namespace openage::gamestate::component {
@@ -23,6 +26,10 @@ std::optional<int64_t> Live::get_attribute_max(const nyan::fqon_t &attribute) co
 		auto ref = std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr());
 		auto setting = ability.get_view()->get_object(ref->get_name());
 		if (setting.get_object("AttributeSetting.attribute").get_name() == attribute) {
+			const auto &holder = setting.get_value("AttributeSetting.max_value");
+			if (const auto *flt = dynamic_cast<const nyan::Float *>(holder.get_ptr().get())) {
+				return std::llround(flt->get());
+			}
 			return setting.get_int("AttributeSetting.max_value");
 		}
 	}

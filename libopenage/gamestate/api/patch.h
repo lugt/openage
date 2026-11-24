@@ -2,10 +2,14 @@
 
 #pragma once
 
-#include <nyan/nyan.h>
+#include <string>
 
 #include "gamestate/api/types.h"
 
+
+namespace nyan {
+class Object;
+} // namespace nyan
 
 namespace openage::gamestate::api {
 
@@ -67,6 +71,6 @@ public:
 	 *         library cannot resolve a target (which is treated as an
 	 *         authoring error - see Transaction::add).
 	 */
-	static const nyan::fqon_t *get_target(const nyan::Object &patch);
+	static const std::string *get_target(const nyan::Object &patch);
 };
 } // namespace openage::gamestate::api

@@ -26,13 +26,14 @@ by ``extract_genie_units``) are kept separate from the dat-built dict so they
 survive ``evict()`` and are re-merged on the next build.
 """
 from __future__ import annotations
+
 import os
 import typing
 from collections import OrderedDict
 
 if typing.TYPE_CHECKING:
-    from openage.convert.value_object.read.genie_structure import GenieStructure
     from openage.convert.value_object.init.game_version import GameVersion
+    from openage.convert.value_object.read.genie_structure import GenieStructure
     from openage.convert.value_object.read.value_members import ValueMember
 
 
@@ -80,8 +81,17 @@ class DynamicLoader:
     extras.
     """
 
-    __slots__ = ('offset', 'cls', 'args', 'raw', 'game_version',
-                 'extra', 'post_build', 'pinned', '_built')
+    __slots__ = (
+        "_built",
+        "args",
+        "cls",
+        "extra",
+        "game_version",
+        "offset",
+        "pinned",
+        "post_build",
+        "raw",
+    )
 
     def __init__(
         self,
@@ -89,9 +99,9 @@ class DynamicLoader:
         cls: type,
         args: dict,
         raw,
-        game_version: "GameVersion",
-        extra: dict = None,
-        post_build: typing.Callable[[dict, "DynamicLoader"], None] = None,
+        game_version: GameVersion,
+        extra: dict | None = None,
+        post_build: typing.Callable[[dict, DynamicLoader], None] | None = None,
         pinned: bool = False,
     ):
         self.offset = offset

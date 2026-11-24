@@ -1,16 +1,19 @@
-FROM ubuntu:24.04
+FROM ubuntu:26.10
 
 RUN apt-get update && DEBIAN_FRONTEND="noninteractive" apt-get install -y sudo \
     && sudo apt-get update \
     && sudo DEBIAN_FRONTEND="noninteractive" apt-get install -y \
     apt-utils \
     build-essential \
+    ccache \
     cmake \
+    curl \
     cython3 \
     flex \
-    gcc \
-    g++ \
+    gcc-16 \
+    g++-16 \
     git \
+    just \
     libeigen3-dev \
     libepoxy-dev \
     libfontconfig1-dev \
@@ -30,7 +33,8 @@ RUN apt-get update && DEBIAN_FRONTEND="noninteractive" apt-get install -y sudo \
     python3-pil \
     python3-pip \
     python3-pygments \
-    python3-toml \
+    python3-setuptools \
+    python3-tomli-w \
     qml6-module-qtquick-controls \
     qt6-declarative-dev \
     qt6-multimedia-dev \
@@ -38,6 +42,5 @@ RUN apt-get update && DEBIAN_FRONTEND="noninteractive" apt-get install -y sudo \
     && sudo apt-get clean \
     && truncate -s 0 ~/.bash_history
 
-# At least cython >= 3.0.10 < 4.0.0 is required to avoid runtime errors
-# TODO: Remove this line once cython is upgraded in Ubuntu 24.04.3 (expected around August 2025)
-RUN pip install "cython>=3.0.10,<4.0.0" --break-system-packages
+# snapd is unavailable in containers
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh

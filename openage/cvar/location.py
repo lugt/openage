@@ -9,11 +9,12 @@ import pathlib
 
 from .. import config, default_dirs
 from ..util.fslike.directory import Directory
+from ..util.fslike.path import Path
 from ..util.fslike.union import Union
 from ..util.fslike.wrapper import WriteBlocker
 
 
-def get_config_path(custom_cfg_dir: str = None) -> Directory:
+def get_config_path(custom_cfg_dir: str | None = None) -> Path:
     """
     Locates the main configuration file by name in some searchpaths.
     Optionally, mount a custom directory with highest priority.
@@ -36,12 +37,7 @@ def get_config_path(custom_cfg_dir: str = None) -> Directory:
 
     # then the per-user config dir (probably ~/.config/openage)
     home_cfg = default_dirs.get_dir("config_home") / "openage"
-    result.mount(
-        Directory(
-            home_cfg,
-            create_if_missing=True
-        ).root
-    )
+    result.mount(Directory(home_cfg, create_if_missing=True).root)
 
     # the optional command line argument overrides it all
     if custom_cfg_dir:

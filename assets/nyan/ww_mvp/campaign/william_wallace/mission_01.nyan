@@ -78,7 +78,7 @@ MissionWood(engine.util.resource.Resource):
 # add a separate PlayerSetup and wire it via --player-setup-fqon.
 MissionWoodAmount(engine.util.resource.ResourceAmount):
     ResourceAmount.type = MissionWood
-    ResourceAmount.amount = 0
+    ResourceAmount.amount = 0.0
 
 # Empty modifier set used to satisfy PlayerSetup.modifiers.
 MissionEmptyModifier(engine.modifier.Modifier):

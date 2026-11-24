@@ -11,6 +11,7 @@ Note the [troubleshooting](#troubleshooting) and [FAQ](#faq) sections.
 
 We use `CMake` for all our building needs.
 We wrap `CMake` with an optional `configure` wrapper script.
+The `justfile` in the project root forwards the common build commands to the `./configure` build directory.
 You can build the project like a regular `CMake` project.
 
 For more build system internals, see [doc/buildsystem.md](/doc/buildsystem.md).
@@ -22,20 +23,22 @@ Dependencies are needed for:
 * C = compiling
 * R = running
 * A = asset conversion
-* S = sanity checks (make checkall)
+* S = sanity checks (just checkall)
 * O = optional, we can continue without it
 
 Dependency list:
 
-    C     gcc >=10 or clang >=10
-    CRA   python >=3.9
-    C     cython >=3.0.10 OR (>=0.29.31 AND <=3.0.7)
-    C     cmake >=3.16
+    C     gcc >=16 or clang >=21
+    CRA   python >=3.12
+    C     cython >=3.1
+    C     setuptools
+    C     cmake >=3.28
+    C     ninja
+    C   O just
       A   numpy
       A   lz4
       A   python imaging library (PIL) -> pillow
-     RA   setuptools (for python>=3.12 and cython<3.1)
-      A   toml
+      A   tomli_w
     CR    opengl >=3.3
     CR    libepoxy
     CR    libpng
@@ -52,9 +55,9 @@ Dependency list:
     CR    opusfile
     CRA   opus
     CRA   ogg
-       S  pycodestyle
+       S  ruff
     C     pygments
-       S  pylint
+       S  ty
     CR    qt6 >=6.2 (Core, Quick, QuickControls, Multimedia modules)
     CR    toml11
     CR  O vulkan
@@ -88,6 +91,26 @@ described below for some of the most common ones:
 - [Nix/NixOS](build_instructions/nix.md)
 - [Microsoft Windows](build_instructions/windows_msvc.md)
 
+#### Python environment via uv
+
+The python dependencies are declared in [pyproject.toml](/pyproject.toml), so
+[`uv`](https://docs.astral.sh/uv/) can set up a Python environment for you:
+
+```
+uv sync
+```
+
+This creates a `.venv/` with all required Python modules, and the CMake build
+will pick it up when you point it at the interpreter:
+
+```
+./configure -- -DPython3_EXECUTABLE=$PWD/.venv/bin/python
+```
+
+If you manage python packages with the system package manager instead, that
+works too: the linters are then taken from the system PATH. In that case just
+ignore the pyproject.toml.
+
 ### nyan installation
 
 `openage` depends on [`nyan`](https://github.com/SFTtech/nyan), which is the
@@ -95,8 +118,9 @@ engine configuration language.
 
 
 * For development, `nyan` can be built and used **without installation**
-(-> no "`make install`", since it can be found using [`cmake` user package registry](https://cmake.org/cmake/help/latest/manual/cmake-packages.7.html#user-package-registry)).
-Just clone the repo somewhere and [follow the `nyan` build instructions](https://github.com/SFTtech/nyan/blob/master/doc/building.md)).
+  (-> no installation needed, since it can be found using [`cmake` user package registry](https://cmake.org/cmake/help/latest/manual/cmake-packages.7.html#user-package-registry)).
+  Just clone the repo somewhere and [follow the `nyan` build instructions](https://github.com/SFTtech/nyan/blob/master/doc/building.md)).
+  Then `./configure ... -- -Dnyan_DIR=/directory/where/nyanConfig/is/in/`.
 
 * Alternatively, `openage` can download `nyan` automatically. This is
   activated with `./configure --download-nyan ...` or `cmake
@@ -121,17 +145,10 @@ Make sure you have all the dependencies installed.
 - Make sure you have everything from the [dependency list](#dependencies)
 - Select the compiler and mode: see `./configure --help`
   - Linux etc: `./configure`
-  - macOS:  `./configure --compiler=clang`
-    - hassle-free building on macOS (if above is not working)
-      - get the latest llvm build from: `https://github.com/llvm/llvm-project/releases/latest`
-        - (yeah, xcode still needs to be installed)
-      - install python deps: see [pip(3) install](https://github.com/SFTtech/openage/tree/master/doc/build_instructions/macos.md)
-      - install build deps (without llvm): see [brew install](https://github.com/SFTtech/openage/tree/master/doc/build_instructions/macos.md)
-      - configure: `CC=/path/to/downloaded-llvm/bin/clang CXX=/path/to/downloaded-llvm/bin/clang++ LD=/path/to/downloaded-llvm/bin/ld64.lld ./configure --download-nyan`
-      - a small build hint for later: use your freaking cores with the -j option later `make -j$(sysctl -n hw.ncpu)`
-- `make` generates and builds everything
-- `make run` or `bin/run` launches the game. Try `bin/run --help`!
-- `make test` runs the built-in tests.
+  - macOS: see the [macOS instructions](build_instructions/macos.md)
+- `just build` generates and builds everything
+- `just run` or `bin/run` launches the game. Try `bin/run --help`!
+- `just test` runs the built-in tests.
 
 
 ### Release
@@ -139,11 +156,11 @@ Make sure you have all the dependencies installed.
 Disclaimer: Use your distribution package of `openage` instead!
 Your distro package maintainers do all the nasty work for you,
 and will provide you with updates!
-Also, you don't need to `make install`, you can run `openage` within its git repo.
+Also, you don't need to install it; you can run `openage` within its git repo.
 
  - Set build mode: `./configure --mode=release --compiler=clang --prefix=/usr/local`
- - `make`
- - `make install` install the game to `/usr/local`
+ - `just build`
+ - `just install` install the game to `/usr/local`
    - beware, this will add *untracked* files to your drive
    - please use your distribution package instead!
  - launch `openage`, it's in `/usr/local/bin/openage`
@@ -158,17 +175,17 @@ The reference package is [created for Gentoo](https://github.com/SFTtech/gentoo-
   invocation.
 - To specify the to-be-used python version (or rather, executable),
   pass `-DPython3_EXECUTABLE=...` or `-DPython3_ROOT_DIR=...` to `cmake`
-- Use `make install DESTDIR=/tmp/your_temporary_packaging_dir`,
+- Use `DESTDIR=/tmp/your_temporary_packaging_dir just install`,
   which will then be packed/installed by your package manager.
 
 ### Troubleshooting
 
 - I wanna see compiler invocations
-  - `make VERBOSE=1`
+  - `ninja -C bin -v`
 - My `Qt`/`Python`/whatever is installed somewhere, but `cmake` can't find it!
   - Run `ccmake` or `cmake-gui` in the build directory to see and change config variables.
   - You can manually tell `cmake` where to look. Try something along the lines of
-    - `./configure -- -DPYTHON_INCLUDE_DIRS=/whereever/python/include/`
+    - `./configure -- -DPYTHON_INCLUDE_DIRS=/wherever/python/include/`
     - `-DPython3_EXECUTABLE=/your/py3/directory/`
 
 - I get compiler errors about missing header files

@@ -30,7 +30,7 @@ Engine::Engine(mode mode,
 	scenario_fqon{scenario_mode ? scenario_fqon : std::string{}},
 	threads{} {
 	log::log(INFO
-	         << "launching engine with root directory"
+	         << "launching engine with root directory: "
 	         << root_dir);
 
 	if (this->scenario_mode) {

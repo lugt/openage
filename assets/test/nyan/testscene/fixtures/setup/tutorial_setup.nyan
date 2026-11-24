@@ -45,7 +45,7 @@ TutorialWood(engine.util.resource.Resource):
 # --tutorial-player-setup-fqon.
 TutorialWoodAmount(engine.util.resource.ResourceAmount):
     ResourceAmount.type = TutorialWood
-    ResourceAmount.amount = 0
+    ResourceAmount.amount = 0.0
 
 # Empty modifier set used to satisfy PlayerSetup.modifiers.
 TutorialEmptyModifier(engine.modifier.Modifier):

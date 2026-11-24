@@ -1,4 +1,4 @@
-// Copyright 2022-2024 the openage authors. See copying.md for legal info.
+// Copyright 2022-2026 the openage authors. See copying.md for legal info.
 
 #include "render_entity.h"
 
@@ -28,7 +28,7 @@ void RenderEntity::update_tile(const util::Vector2s size,
 		throw Error(MSG(err) << "Cannot update tile: Vertices have not been initialized yet.");
 	}
 
-	// find the postion of the tile in the vertex array
+	// find the position of the tile in the vertex array
 	auto v_width = size[0] + 1;
 	auto left_corner = pos.ne + pos.se * v_width;
 

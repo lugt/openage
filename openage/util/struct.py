@@ -4,9 +4,9 @@
 Provides some classes designed to expand the functionality of struct.struct
 """
 
-
 from collections import OrderedDict
 from struct import Struct
+from typing import Self
 
 from ..util.files import read_guaranteed
 
@@ -18,9 +18,10 @@ class NamedStructMeta(type):
     Not unlike the meta-class for Enum, processes all the member attributes
     at class-creation time.
     """
+
     @classmethod
-    def __prepare__(mcs, name, bases, **kwds):
-        del mcs, name, bases, kwds  # unused variables
+    def __prepare__(cls, name, bases, **kwds):
+        del cls, name, bases, kwds  # unused variables
 
         return OrderedDict()
 
@@ -33,7 +34,7 @@ class NamedStructMeta(type):
 
         for membername, value in classdict.items():
             # ignore hidden and None members
-            if membername.startswith('_') or value is None:
+            if membername.startswith("_") or value is None:
                 continue
 
             valuehasspecstr = hasattr(value, "specstr")
@@ -43,7 +44,7 @@ class NamedStructMeta(type):
                 if callable(value) or isinstance(value, classmethod):
                     continue
 
-            if membername == 'endianness':
+            if membername == "endianness":
                 if specstr is not None:
                     raise SyntaxError("endianness has been given multiple times")
 
@@ -54,17 +55,14 @@ class NamedStructMeta(type):
                 continue
 
             if specstr is None:
-                raise SyntaxError("NamedStruct: endianness expected before "
-                                  "attribute " + membername)
+                raise SyntaxError("NamedStruct: endianness expected before attribute " + membername)
 
             if valuehasspecstr:
                 postprocessors[membername], value = value, value.specstr
             elif isinstance(value, str):
                 pass
             else:
-                raise TypeError(
-                    f"NamedStruct member {membername}: expected str, but got {repr(value)}"
-                )
+                raise TypeError(f"NamedStruct member {membername}: expected str, but got {value!r}")
 
             specstr += value
 
@@ -112,22 +110,20 @@ class NamedStruct(metaclass=NamedStructMeta):
     """
 
     # those values are set by the metaclass.
-    _postprocessors = None
-    _struct = None
-    _attributes = None
+    _postprocessors: dict
+    _struct: Struct
+    _attributes: list[str]
 
     def __init__(self, data):
-        if not self._struct:
-            raise NotImplementedError(
-                "Abstract NamedStruct can not be instantiated")
+        if getattr(self, "_struct", None) is None:
+            raise NotImplementedError("Abstract NamedStruct can not be instantiated")
 
         values = self._struct.unpack(data)
 
         if len(self._attributes) != len(values):
-            raise SyntaxError("number of attributes differs from number of "
-                              "struct fields")
+            raise SyntaxError("number of attributes differs from number of struct fields")
 
-        for name, value in zip(self._attributes, values):
+        for name, value in zip(self._attributes, values, strict=False):
             # pylint: disable=unsupported-membership-test
             if name in self._postprocessors:
                 # pylint: disable=unsubscriptable-object
@@ -136,21 +132,21 @@ class NamedStruct(metaclass=NamedStructMeta):
             setattr(self, name, value)
 
     @classmethod
-    def unpack(cls, data):
+    def unpack(cls, data) -> Self:
         """
         Unpacks data and returns a NamedStruct object that holds the fields.
         """
         return cls(data)
 
     @classmethod
-    def size(cls):
+    def size(cls) -> int:
         """
         Returns the size of the struct, in bytes.
         """
         return cls._struct.size
 
     @classmethod
-    def read(cls, fileobj):
+    def read(cls, fileobj) -> Self:
         """
         Reads the appropriate amount of data from fileobj, and unpacks it.
         """
@@ -158,7 +154,7 @@ class NamedStruct(metaclass=NamedStructMeta):
         return cls.unpack(data)
 
     @classmethod
-    def from_nullbytes(cls):
+    def from_nullbytes(cls) -> Self:
         """
         Decodes nullbytes (sort of a 'default' value).
         """
@@ -195,9 +191,12 @@ class NamedStruct(metaclass=NamedStructMeta):
         return str(type(self)) + ": " + repr(self.as_dict())
 
     def __str__(self):
-        return type(self).__name__ + ":\n\t" + "\n\t".join(
-            str(key).ljust(20) + " = " + str(value)
-            for key, value in sorted(self.as_dict().items())
+        return (
+            type(self).__name__
+            + ":\n\t"
+            + "\n\t".join(
+                str(key).ljust(20) + " = " + str(value) for key, value in sorted(self.as_dict().items())
+            )
         )
 
 
@@ -205,6 +204,7 @@ class FlagsMeta(type):
     """
     Metaclass for Flags. Compare to NamedStructMeta.
     """
+
     def __new__(mcs, name, bases, classdict, **kwds):
         del kwds  # unused variable
 
@@ -216,16 +216,14 @@ class FlagsMeta(type):
         specstr_found = False
 
         for membername, value in classdict.items():
-            if membername.startswith('_'):
+            if membername.startswith("_"):
                 continue
 
             if membername == "specstr":
                 specstr_found = True
 
                 if not isinstance(value, str):
-                    raise TypeError(
-                        "expected str as value for specstr, "
-                        "but got " + repr(value))
+                    raise TypeError("expected str as value for specstr, but got " + repr(value))
 
                 continue
 
@@ -233,9 +231,7 @@ class FlagsMeta(type):
                 continue
 
             if not isinstance(value, int):
-                raise TypeError(
-                    "expected int as value for flag " + membername + ", "
-                    "but got " + repr(value))
+                raise TypeError("expected int as value for flag " + membername + ", but got " + repr(value))
 
             flagvalue = 1 << value
             flags[flagvalue] = membername
@@ -269,7 +265,7 @@ class Flags(metaclass=FlagsMeta):
     """
 
     # set by the metaclass
-    _flags = None
+    _flags: dict
 
     def __init__(self, val):
         for flagvalue, flagname in self._flags.items():
@@ -288,14 +284,14 @@ class Flags(metaclass=FlagsMeta):
         """
         raise ValueError(
             "unknown flag values: " + bin(unknownflags) + " "
-            "in addition to existing flags: " + str(self.as_dict()))
+            "in addition to existing flags: " + str(self.as_dict())
+        )
 
     def as_dict(self):
         """
         Returns a key-value dict for all flags.
         """
-        return {flagname: getattr(self, flagname)
-                for flagname in self._flags.values()}
+        return {flagname: getattr(self, flagname) for flagname in self._flags.values()}
 
     def __repr__(self):
         return repr(type(self)) + ": " + repr(self.as_dict())

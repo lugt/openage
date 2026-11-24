@@ -2,21 +2,21 @@
 
 #include "game_state.h"
 
-#include <mutex>
 #include <algorithm>
 #include <cmath>
-#include "gamestate/component/internal/ownership.h"
-#include "gamestate/component/internal/position.h"
-
-#include <nyan/nyan.h>
+#include <mutex>
 
 #include "error/error.h"
 #include "log/log.h"
 
-#include "gamestate/game_entity.h"
 #include "gamestate/component/api/build.h"
+#include "gamestate/component/internal/ownership.h"
+#include "gamestate/component/internal/position.h"
+#include "gamestate/game_entity.h"
 #include "gamestate/map.h"
 #include "gamestate/player.h"
+
+import nyan;
 
 
 namespace openage::gamestate {

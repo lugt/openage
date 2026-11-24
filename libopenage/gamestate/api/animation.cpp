@@ -9,6 +9,8 @@
 #include "gamestate/api/property.h"
 #include "gamestate/api/types.h"
 
+import nyan;
+
 
 namespace openage::gamestate::api {
 

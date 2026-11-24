@@ -5,36 +5,39 @@ Verifies the guard macros of all C++ header files.
 """
 
 import re
+from pathlib import Path
 
 from .util import findfiles, readfile
 
 
-class HeaderIssue(Exception):
-    """ Some issue was detected with the Header guard. """
+class HeaderError(Exception):
+    """Some issue was detected with the Header guard."""
 
 
-GUARD_RE = re.compile((
-    # allow any number of comments or empty lines
-    "^(\\n|(#|//).*\\n)*"
+GUARD_RE = re.compile(
+    (
+        # allow any number of comments or empty lines
+        "^(\\n|(#|//).*\\n)*"
+        # the header guard
+        "#pragma once\n"
+    )
+)
 
-    # the header guard
-    "#pragma once\n"
-))
-
-NO_GUARD_REQUIRED_RE = re.compile((
-    # allow any number of comments or empty lines
-    "^(\\n|(#|//).*\\n)*"
-
-    # require comment "has no header guard"
-    "(#|//) has no header guard:"
-))
+NO_GUARD_REQUIRED_RE = re.compile(
+    (
+        # allow any number of comments or empty lines
+        "^(\\n|(#|//).*\\n)*"
+        # require comment "has no header guard"
+        "(#|//) has no header guard:"
+    )
+)
 
 
 def find_issues(dirname):
     """
     checks all headerguards in header files in the cpp folders.
     """
-    for fname in findfiles((dirname,), ('.h',)):
+    for fname in findfiles((Path(dirname),), (".h",)):
         try:
             data = readfile(fname)
 
@@ -45,7 +48,7 @@ def find_issues(dirname):
 
             match = GUARD_RE.match(data)
             if not match:
-                raise HeaderIssue("No valid header guard found (e.g. #pragma once)")
+                raise HeaderError("No valid header guard found (e.g. #pragma once)")
 
-        except HeaderIssue as exc:
+        except HeaderError as exc:
             yield (f"header guard issue in {fname}", exc.args[0], None)

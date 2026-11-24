@@ -24,8 +24,6 @@
 #include <utility>
 #include <vector>
 
-#include <nyan/nyan.h>
-
 #include "event/event_loop.h"
 #include "event/evententity.h"
 #include "event/eventhandler.h"
@@ -54,6 +52,8 @@
 #include "scenario/static_occupancy_grid.h"
 #include "scenario/swept_aabb.h"
 #include "util/fixed_point.h"
+
+import nyan;
 
 
 namespace openage::gamestate::system {

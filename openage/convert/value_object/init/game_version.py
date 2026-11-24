@@ -5,11 +5,12 @@
 """
 Stores information about base game editions and expansions.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass
 import enum
 import typing
+from dataclasses import dataclass
 
 from ..read.media_types import MediaType
 from .game_file_version import GameFileVersion
@@ -26,6 +27,7 @@ class Support(enum.Enum):
     """
     Support state of a game version
     """
+
     NOPE = "not supported"
     YES = "supported"
     BREAKS = "presence breaks conversion"
@@ -39,11 +41,11 @@ class GameBase:
     def __init__(
         self,
         game_id: str,
-        support: Support,
+        support: str,
         game_version_info: list[tuple[list[str], dict[str, str]]],
         media_paths: list[tuple[str, list[str]]],
         modpacks: dict[str, dict[str, str]],
-        **flags
+        **flags,
     ):
         """
         :param game_id: Unique id for the given game.
@@ -104,10 +106,13 @@ class GameBase:
         """
         self.media_paths[MediaType[media_type.upper()]] = paths
 
-    def __eq__(self, other: GameBase) -> bool:
+    def __eq__(self, other: object) -> bool:
         """
         Compare equality by comparing IDs.
         """
+        if not isinstance(other, GameBase):
+            return NotImplemented
+
         return self.game_id == other.game_id
 
     def __hash__(self) -> int:
@@ -126,11 +131,11 @@ class GameExpansion(GameBase):
         self,
         name: str,
         game_id: str,
-        support: Support,
+        support: str,
         game_version_info: list[tuple[list[str], dict[str, str]]],
         media_paths: list[tuple[str, list[str]]],
-        modpacks: list[str],
-        **flags
+        modpacks: dict[str, dict[str, str]],
+        **flags,
     ):
         """
         Create a new GameExpansion instance.
@@ -138,14 +143,7 @@ class GameExpansion(GameBase):
         :param name: Name of the game.
         :type name: str
         """
-        super().__init__(
-            game_id,
-            support,
-            game_version_info,
-            media_paths,
-            modpacks,
-            **flags
-        )
+        super().__init__(game_id, support, game_version_info, media_paths, modpacks, **flags)
 
         self.expansion_name = name
 
@@ -167,13 +165,13 @@ class GameEdition(GameBase):
         self,
         name: str,
         game_id: str,
-        support: Support,
+        support: str,
         game_version_info: list[tuple[list[str], dict[str, str]]],
         media_paths: list[tuple[str, list[str]]],
         install_paths: dict[str, list[str]],
-        modpacks: list[str],
+        modpacks: dict[str, dict[str, str]],
         expansions: list[str],
-        **flags
+        **flags,
     ):
         """
         Create a new GameEdition instance.
@@ -183,14 +181,7 @@ class GameEdition(GameBase):
         :param expansions: A list of expansions.
         :type expansion: list
         """
-        super().__init__(
-            game_id,
-            support,
-            game_version_info,
-            media_paths,
-            modpacks,
-            **flags
-        )
+        super().__init__(game_id, support, game_version_info, media_paths, modpacks, **flags)
 
         self.install_paths = install_paths
         self.edition_name = name
@@ -206,6 +197,7 @@ class GameVersion:
     Combination of edition and expansions that defines the exact version
     of a detected game in a folder.
     """
+
     edition: GameEdition
     expansions: tuple[GameExpansion, ...] = tuple()
     # Format variant of the read data files. This is detected from the data

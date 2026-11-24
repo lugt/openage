@@ -3,7 +3,9 @@
 """
 Main engine entry point for openage.
 """
+
 from __future__ import annotations
+
 import argparse
 import sys
 import typing
@@ -15,16 +17,27 @@ if typing.TYPE_CHECKING:
 
 
 def init_subparser(cli: ArgumentParser):
-    """ Initializes the parser for game-specific args. """
+    """Initializes the parser for game-specific args."""
     cli.set_defaults(entrypoint=main)
 
     cli.add_argument(
-        "--gl-debug", action='store_true',
-        help="throw exceptions directly from the OpenGL calls")
+        "--gl-debug", action="store_true", help="throw exceptions directly from the OpenGL calls"
+    )
+
+    cli.add_argument("--headless", action="store_true", help="run without displaying graphics")
+
+    cli.add_argument("--modpacks", nargs="+", type=str, help="list of modpacks to load")
 
     cli.add_argument(
-        "--headless", action='store_true',
-        help="run without displaying graphics")
+        "--window-size",
+        nargs=2,
+        type=int,
+        default=[1024, 768],
+        metavar=("WIDTH", "HEIGHT"),
+        help="Initial window size in pixels",
+    )
+
+    cli.add_argument("--vsync", action="store_true", help="Enable vertical synchronization")
 
     # ==========================================================================
     # Generic scenario launch (canonical names).
@@ -85,39 +98,35 @@ def init_subparser(cli: ArgumentParser):
         help=argparse.SUPPRESS)
 
     cli.add_argument(
-        "--modpacks", nargs="+", type=str,
-        help="list of modpacks to load")
-
-    cli.add_argument(
-        "--no-prompts", action='store_false', dest='show_prompts',
+        "--no-prompts",
+        action="store_false",
+        dest="show_prompts",
         help="disable user prompts (e.g. the asset-conversion prompt); "
-             "no conversion is attempted and, when no modpacks are "
-             "specified, the first available modpack is selected "
-             "automatically")
+        "no conversion is attempted and, when no modpacks are "
+        "specified, the first available modpack is selected "
+        "automatically",
+    )
 
     cli.add_argument(
-        "--no-convert", action='store_true', dest='no_convert',
+        "--no-convert",
+        action="store_true",
+        dest="no_convert",
         default=True,
         help="disable automatic converter / api-export runs. Openage will "
-             "only LOAD existing converted assets; missing or outdated "
-             "assets cause a fast, readable failure. Use the explicit "
-             "`openage convert` subcommand (or omit --no-convert) to run "
-             "the converter. Note: --no-prompts only gates the *interactive* "
-             "converter prompt; --no-convert is the hard kill switch and "
-             "is what production / tutorial should pass.")
+        "only LOAD existing converted assets; missing or outdated "
+        "assets cause a fast, readable failure. Use the explicit "
+        "`openage convert` subcommand (or omit --no-convert) to run "
+        "the converter. Note: --no-prompts only gates the *interactive* "
+        "converter prompt; --no-convert is the hard kill switch and "
+        "is what production / tutorial should pass.",
+    )
 
     cli.add_argument(
-        "--window-size", nargs=2, type=int, default=[1024, 768],
-        metavar=('WIDTH', 'HEIGHT'),
-        help="Initial window size in pixels")
-
-    cli.add_argument(
-        "--vsync", action='store_true',
-        help="Enable vertical synchronization")
-
-    cli.add_argument(
-        "--window-mode", choices=["fullscreen", "borderless", "windowed"], default="windowed",
-        help="Set the window mode")
+        "--window-mode",
+        choices=["fullscreen", "borderless", "windowed"],
+        default="windowed",
+        help="Set the window mode",
+    )
 
 
 def main(args, error):
@@ -130,7 +139,6 @@ def main(args, error):
 
     # we have to import stuff inside the function
     # as it depends on generated/compiled code
-    from .main_cpp import run_game
     from .. import config
     from ..assets import get_asset_path
     from ..convert.main import convert_assets
@@ -142,6 +150,7 @@ def main(args, error):
     from ..cppinterface.setup import setup as cpp_interface_setup
     from ..cvar.location import get_config_path
     from ..util.fslike.union import Union
+    from .main_cpp import run_game
 
     # initialize libopenage
     cpp_interface_setup(args)
@@ -265,8 +274,7 @@ def main(args, error):
         # ensure that specified modpacks are available
         for modpack in args.modpacks:
             if modpack not in available_modpacks:
-                raise FileNotFoundError(
-                    f"Modpack '{modpack}' not found in {asset_path / 'converted'}")
+                raise FileNotFoundError(f"Modpack '{modpack}' not found in {asset_path / 'converted'}")
 
         args.modpacks = [modpack.encode("utf-8") for modpack in args.modpacks]
 

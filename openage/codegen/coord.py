@@ -6,8 +6,10 @@ Generates libopenage/coord/coord_{xy, xyz, ne_se, ne_se_up}.{h, cpp}
 
 from mako.template import Template
 
+from ..util.fslike.path import Path
 
-def generate_coord_basetypes(projectdir):
+
+def generate_coord_basetypes(projectdir: Path):
     """
     Generates the test/demo method symbol lookup file from tests_cpp.
 
@@ -15,32 +17,23 @@ def generate_coord_basetypes(projectdir):
     """
     # pylint: disable=cell-var-from-loop
     # this list contains all required member lists.
-    member_lists = [
-        ["x", "y"],
-        ["x", "y", "z"],
-        ["ne", "se"],
-        ["ne", "se", "up"]
-    ]
+    member_lists = [["x", "y"], ["x", "y", "z"], ["ne", "se"], ["ne", "se", "up"]]
 
     # this list maps template file name to output file name.
     # the output filename is a mako template itself.
     template_files_spec = [
-        ("libopenage/coord/coord.h.template",
-         "libopenage/coord/coord_${''.join(members)}.gen.h"),
-        ("libopenage/coord/coord.cpp.template",
-         "libopenage/coord/coord_${''.join(members)}.gen.cpp")
+        ("libopenage/coord/coord.h.template", "libopenage/coord/coord_${''.join(members)}.gen.h"),
+        ("libopenage/coord/coord.cpp.template", "libopenage/coord/coord_${''.join(members)}.gen.cpp"),
     ]
 
     templates = []
     for template_filename, output_filename in template_files_spec:
         with projectdir.joinpath(template_filename).open() as template_file:
-            templates.append((
-                Template(template_file.read()),
-                Template(output_filename)
-            ))
+            templates.append((Template(template_file.read()), Template(output_filename)))
 
     for member_list in member_lists:
-        def format_members(formatstring, join_with=", "):
+
+        def format_members(formatstring, join_with=", ", member_list=member_list):
             """
             For being called by the template engine.
 
@@ -60,5 +53,5 @@ def generate_coord_basetypes(projectdir):
             with projectdir.joinpath(output_filename).open("w") as output_file:
                 output = template.render(**template_dict)
                 output_file.write(output)
-                if not output.endswith('\n'):
-                    output_file.write('\n')
+                if not output.endswith("\n"):
+                    output_file.write("\n")

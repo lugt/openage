@@ -5,8 +5,8 @@ Some utilities.
 """
 
 import logging
-import os
-
+from collections.abc import Iterable, Iterator
+from pathlib import Path
 
 SHEBANG = "#!/.*\n(#?\n)?"
 
@@ -23,8 +23,7 @@ def log_setup(setting, default=1):
     else: setting + default is used.
     """
 
-    levels = (logging.ERROR, logging.WARNING, logging.INFO,
-              logging.DEBUG, logging.NOTSET)
+    levels = (logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG, logging.NOTSET)
 
     factor = clamp(default + setting, 0, len(levels) - 1)
     level = levels[factor]
@@ -34,7 +33,7 @@ def log_setup(setting, default=1):
 
 
 def clamp(number, smallest, largest):
-    """ return number but limit it to the inclusive given value range """
+    """return number but limit it to the inclusive given value range"""
     return max(smallest, min(number, largest))
 
 
@@ -45,6 +44,7 @@ class Strlazy:
     so do_something is only called when the debug message is actually printed
     do_something could also be an f-string.
     """
+
     def __init__(self, fun):
         self.fun = fun
 
@@ -52,21 +52,21 @@ class Strlazy:
         return self.fun()
 
 
-def has_ext(fname, exts):
+def has_ext(fname: Path, exts: Iterable[str]) -> bool:
     """
     Returns true if fname ends in any of the extensions in ext.
     """
     for ext in exts:
-        if ext == '':
-            if os.path.splitext(fname)[1] == '':
+        if ext == "":
+            if fname.suffix == "":
                 return True
-        elif fname.endswith(ext):
+        elif fname.name.endswith(ext):
             return True
 
     return False
 
 
-def readfile(filename):
+def readfile(filename: Path) -> str:
     """
     reads the file, and returns it as a str object.
 
@@ -74,13 +74,13 @@ def readfile(filename):
     returns it from the cache.
     """
     if filename not in FILECACHE:
-        with open(filename, 'rb') as fileobj:
+        with open(filename, "rb") as fileobj:
             data = fileobj.read()
 
         try:
-            data = data.decode('utf-8')
+            data = data.decode("utf-8")
         except UnicodeDecodeError:
-            data = data.decode('utf-8', errors='replace')
+            data = data.decode("utf-8", errors="replace")
             BADUTF8FILES.add(filename)
 
         FILECACHE[filename] = data
@@ -88,35 +88,39 @@ def readfile(filename):
     return FILECACHE[filename]
 
 
-def writefile(filename, new_content):
+def writefile(filename: Path, new_content: str) -> None:
     """
     writes the file and update it in the cache.
     """
     if filename in BADUTF8FILES:
         raise ValueError(f"{filename}: cannot write due to utf8-errors.")
 
-    with open(filename, 'w', encoding='utf8') as fileobj:
+    with open(filename, "w", encoding="utf8") as fileobj:
         fileobj.write(new_content)
 
     FILECACHE[filename] = new_content
 
 
-def findfiles(paths, exts=None):
+def findfiles(paths: Iterable[Path], exts: Iterable[str] | None = None) -> Iterator[Path]:
     """
     yields all files in paths with names ending in an ext from exts.
 
+    A path that is a file is yielded as-is: the extension filter only
+    applies to files found under a directory path.
     If exts is None, all extensions are accepted.
 
     hidden dirs and files are ignored.
     """
     for path in paths:
-        for filename in os.listdir(path):
-            if filename.startswith('.'):
+        if not path.is_dir():
+            yield path
+            continue
+
+        for filename in path.iterdir():
+            if filename.name.startswith("."):
                 continue
 
-            filename = os.path.join(path, filename)
-
-            if os.path.isdir(filename):
+            if filename.is_dir():
                 yield from findfiles((filename,), exts)
                 continue
 
@@ -124,7 +128,34 @@ def findfiles(paths, exts=None):
                 yield filename
 
 
-def issue_str(title, filename, fix=None):
+def select_files(
+    check_files: Iterable[Path] | None,
+    locations: Iterable[Path],
+    exts: Iterable[str] | None = None,
+) -> Iterator[Path]:
+    """
+    Yields the files to check from the given locations.
+
+    A location that is a directory is searched for files ending in an ext
+    from exts (all files if exts is None); a location that is a direct file
+    is always used.
+
+    If check_files is given, only files from that set are yielded: those
+    that are one of the locations, or lie under one of them and match exts.
+    """
+    if check_files is None:
+        yield from findfiles(locations, exts)
+        return
+
+    for path in check_files:
+        if path in locations:
+            yield path
+        elif any(path.is_relative_to(location) for location in locations):
+            if exts is None or has_ext(path, exts):
+                yield path
+
+
+def issue_str(title: str, filename: Path, fix=None) -> tuple[str, Path, None]:
     """
     Creates a formated (title, text) desciption of an issue.
 
@@ -135,8 +166,14 @@ def issue_str(title, filename, fix=None):
 
 
 # gread hint, pylint. thank you so much.
-# pylint: disable=too-many-arguments
-def issue_str_line(title, filename, line, line_number, highlight, fix=None):
+def issue_str_line(
+    title: str,
+    filename: Path,
+    line: str,
+    line_number: int,
+    highlight: tuple[int, int],
+    fix=None,
+) -> tuple[str, str, None]:
     """
     Creates a formated (title, text) desciption of an issue with information
     about the location in the file.
@@ -154,11 +191,14 @@ def issue_str_line(title, filename, line, line_number, highlight, fix=None):
     return (
         title,
         (
-            filename + "\n"
-            "\tline: " + str(line_number) + "\n"   # line number
-            "\tat:   '" + line + "'\n"             # line content
-            "\t      " + (' ' * start) +           # mark position with ^
-            "\x1b[32;1m^" + ("~" * (end - start)) + "\x1b[m"
+            f"{filename}\n"
+            "\tline: " + str(line_number) + "\n"  # line number
+            "\tat:   '" + line + "'\n"  # line content
+            "\t      "
+            + (" " * start)  # mark position with ^
+            + "\x1b[32;1m^"
+            + ("~" * (end - start))
+            + "\x1b[m"
         ),
-        fix
+        fix,
     )

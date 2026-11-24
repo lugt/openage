@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <nyan/nyan.h>
+#include <nyan/config.h>
 
 #include "gamestate/component/api/footprint.h"
 #include "pathfinding/navigation_service.h"

@@ -21,14 +21,14 @@ Quick usage guide on when to use which ValueMember:
                    when repeating substructures appear in a data file.
                    (e.g. multiple unit objects, list of coordinates)
 """
+
 from __future__ import annotations
+
 import typing
-
-
+from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
 from enum import Enum
 from math import isclose
-from abc import ABC, abstractmethod
-from collections.abc import Mapping
 
 from .dynamic_loader import DynamicLoader
 
@@ -38,11 +38,11 @@ class ValueMember(ABC):
     Stores a value member from a data file.
     """
 
-    __slots__ = ('_name', '_value')
+    __slots__ = ("_name", "_value")
 
     def __init__(self, name: str):
         self._name = name
-        self._value = None
+        self._value: typing.Any = None
 
     @property
     def name(self) -> str:
@@ -65,7 +65,7 @@ class ValueMember(ABC):
         """
 
     @abstractmethod
-    def diff(self, other: ValueMember) -> ValueMember:
+    def diff(self, other: typing.Self) -> ValueMember:
         """
         Returns a new member object that contains the diff between
         self's and other's values.
@@ -82,7 +82,7 @@ class IntMember(ValueMember):
     Stores numeric integer values.
     """
 
-    def __init__(self, name: str, value: typing.Union[int, float]):
+    def __init__(self, name: str, value: float):
         super().__init__(name)
 
         self._value = int(value)
@@ -90,12 +90,8 @@ class IntMember(ValueMember):
     def get_type(self) -> StorageType:
         return StorageType.INT_MEMBER
 
-    def diff(
-        self,
-        other: IntMember
-    ) -> typing.Union[NoDiffMember, IntMember]:
+    def diff(self, other: IntMember) -> NoDiffMember | IntMember:
         if self.get_type() is other.get_type():
-
             if self.value == other.value:
                 return NoDiffMember(self.name, self)
 
@@ -105,8 +101,7 @@ class IntMember(ValueMember):
                 return IntMember(self.name, diff_value)
 
         else:
-            raise TypeError(
-                f"type {type(self)} member cannot be diffed with type {type(other)}")
+            raise TypeError(f"type {type(self)} member cannot be diffed with type {type(other)}")
 
 
 class FloatMember(ValueMember):
@@ -114,7 +109,7 @@ class FloatMember(ValueMember):
     Stores numeric floating point values.
     """
 
-    def __init__(self, name: str, value: typing.Union[int, float]):
+    def __init__(self, name: str, value: float):
         super().__init__(name)
 
         self._value = float(value)
@@ -122,10 +117,7 @@ class FloatMember(ValueMember):
     def get_type(self) -> StorageType:
         return StorageType.FLOAT_MEMBER
 
-    def diff(
-        self,
-        other: FloatMember
-    ) -> typing.Union[NoDiffMember, FloatMember]:
+    def diff(self, other: FloatMember) -> NoDiffMember | FloatMember:
         if self.get_type() is other.get_type():
             # Float must have the last 6 digits in common
             if isclose(self.value, other.value, rel_tol=1e-7):
@@ -137,8 +129,7 @@ class FloatMember(ValueMember):
                 return FloatMember(self.name, diff_value)
 
         else:
-            raise TypeError(
-                f"type {type(self)} member cannot be diffed with type {type(other)}")
+            raise TypeError(f"type {type(self)} member cannot be diffed with type {type(other)}")
 
 
 class BooleanMember(ValueMember):
@@ -154,10 +145,7 @@ class BooleanMember(ValueMember):
     def get_type(self) -> StorageType:
         return StorageType.BOOLEAN_MEMBER
 
-    def diff(
-        self,
-        other: BooleanMember
-    ) -> typing.Union[NoDiffMember, BooleanMember]:
+    def diff(self, other: BooleanMember) -> NoDiffMember | BooleanMember:
         if self.get_type() is other.get_type():
             if self.value == other.value:
                 return NoDiffMember(self.name, self)
@@ -166,8 +154,7 @@ class BooleanMember(ValueMember):
                 return BooleanMember(self.name, other.value)
 
         else:
-            raise TypeError(
-                f"type {type(self)} member cannot be diffed with type {type(other)}")
+            raise TypeError(f"type {type(self)} member cannot be diffed with type {type(other)}")
 
 
 class IDMember(ValueMember):
@@ -183,10 +170,7 @@ class IDMember(ValueMember):
     def get_type(self) -> StorageType:
         return StorageType.ID_MEMBER
 
-    def diff(
-        self,
-        other: IDMember
-    ) -> typing.Union[NoDiffMember, IDMember]:
+    def diff(self, other: IDMember) -> NoDiffMember | IDMember:
         if self.get_type() is other.get_type():
             if self.value == other.value:
                 return NoDiffMember(self.name, self)
@@ -195,8 +179,7 @@ class IDMember(ValueMember):
                 return IDMember(self.name, other.value)
 
         else:
-            raise TypeError(
-                f"type {type(self)} member cannot be diffed with type {type(other)}")
+            raise TypeError(f"type {type(self)} member cannot be diffed with type {type(other)}")
 
 
 class BitfieldMember(ValueMember):
@@ -217,15 +200,12 @@ class BitfieldMember(ValueMember):
         :param pos: Position in the bitfield, starting with the least significant bit.
         :type pos: int
         """
-        return bool(self.value & (2 ** pos))
+        return bool(self.value & (2**pos))
 
     def get_type(self) -> StorageType:
         return StorageType.BITFIELD_MEMBER
 
-    def diff(
-        self,
-        other: BitfieldMember
-    ) -> typing.Union[NoDiffMember, BitfieldMember]:
+    def diff(self, other: BitfieldMember) -> NoDiffMember | BitfieldMember:
         """
         Uses XOR to determine which bits are different in 'other'.
         """
@@ -238,8 +218,7 @@ class BitfieldMember(ValueMember):
                 return BitfieldMember(self.name, difference)
 
         else:
-            raise TypeError(
-                f"type {type(self)} member cannot be diffed with type {type(other)}")
+            raise TypeError(f"type {type(self)} member cannot be diffed with type {type(other)}")
 
     def __len__(self):
         return len(self.value)
@@ -250,7 +229,7 @@ class StringMember(ValueMember):
     Stores string values.
     """
 
-    def __init__(self, name: str, value: StringMember):
+    def __init__(self, name: str, value: str):
         super().__init__(name)
 
         self._value = str(value)
@@ -258,10 +237,7 @@ class StringMember(ValueMember):
     def get_type(self) -> StorageType:
         return StorageType.STRING_MEMBER
 
-    def diff(
-        self,
-        other: StringMember
-    ) -> typing.Union[NoDiffMember, StringMember]:
+    def diff(self, other: StringMember) -> NoDiffMember | StringMember:
         if self.get_type() is other.get_type():
             if self.value == other.value:
                 return NoDiffMember(self.name, self)
@@ -270,8 +246,7 @@ class StringMember(ValueMember):
                 return StringMember(self.name, other.value)
 
         else:
-            raise TypeError(
-                f"type {type(self)} member cannot be diffed with type {type(other)}")
+            raise TypeError(f"type {type(self)} member cannot be diffed with type {type(other)}")
 
     def __len__(self):
         return len(self.value)
@@ -288,18 +263,10 @@ class ContainerMember(ValueMember):
     def __init__(
         self,
         name: str,
-        submembers: list[typing.Union[IntMember,
-                                      FloatMember,
-                                      BooleanMember,
-                                      IDMember,
-                                      BitfieldMember,
-                                      StringMember,
-                                      ArrayMember,
-                                      ContainerMember]]
+        submembers: Sequence[ValueMember] | dict[str, ValueMember] | DynamicLoader,
     ):
         """
-        :param submembers: Stored members as a list or dict
-        :type submembers: list, dict
+        :param submembers: Stored members as a list, a dict or a dynamic loader.
         """
         super().__init__(name)
 
@@ -316,10 +283,7 @@ class ContainerMember(ValueMember):
     def get_type(self) -> StorageType:
         return StorageType.CONTAINER_MEMBER
 
-    def diff(
-        self,
-        other: ContainerMember
-    ) -> typing.Union[NoDiffMember, ContainerMember]:
+    def diff(self, other: ContainerMember) -> NoDiffMember | ContainerMember:
         if self.get_type() is other.get_type():
             diff_dict = {}
 
@@ -347,17 +311,12 @@ class ContainerMember(ValueMember):
             return ContainerMember(self.name, diff_dict)
 
         else:
-            raise TypeError(
-                f"type {type(self)} member cannot be diffed with type {type(other)}")
+            raise TypeError(f"type {type(self)} member cannot be diffed with type {type(other)}")
 
-    def _create_dict(self, member_list: list[typing.Union[IntMember,
-                                                          FloatMember,
-                                                          BooleanMember,
-                                                          IDMember,
-                                                          BitfieldMember,
-                                                          StringMember,
-                                                          ArrayMember,
-                                                          ContainerMember]]) -> None:
+    def _create_dict(
+        self,
+        member_list: Sequence[ValueMember],
+    ) -> None:
         """
         Creates the dict from the member list passed to __init__.
         """
@@ -379,20 +338,13 @@ class ArrayMember(ValueMember):
     Stores an ordered list of members with the same type.
     """
 
-    __slots__ = ('_allowed_member_type')
+    __slots__ = ("_allowed_member_type",)
 
     def __init__(
         self,
         name: str,
         allowed_member_type: StorageType,
-        members: list[typing.Union[IntMember,
-                                   FloatMember,
-                                   BooleanMember,
-                                   IDMember,
-                                   BitfieldMember,
-                                   StringMember,
-                                   ArrayMember,
-                                   ContainerMember]]
+        members: Sequence[ValueMember],
     ):
         super().__init__(name)
 
@@ -404,8 +356,10 @@ class ArrayMember(ValueMember):
         for member in members:
             if not isinstance(member, (NoDiffMember, LeftMissingMember, RightMissingMember)):
                 if member.get_type() is not self._allowed_member_type:
-                    raise TypeError("%s has type %s, but this ArrayMember only allows %s"
-                                    % (member, member.get_type(), allowed_member_type))
+                    raise TypeError(
+                        "%s has type %s, but this ArrayMember only allows %s"
+                        % (member, member.get_type(), allowed_member_type)
+                    )
 
     def get_type(self) -> StorageType:
         if self._allowed_member_type is StorageType.INT_MEMBER:
@@ -436,7 +390,7 @@ class ArrayMember(ValueMember):
         key_member_name: str,
         force_not_found: bool = False,
         force_duplicate: bool = False,
-        merge_field: str = None
+        merge_field: str | None = None,
     ) -> ContainerMember:
         """
         Returns a ContainerMember generated from an array with type ARRAY_CONTAINER.
@@ -457,9 +411,10 @@ class ArrayMember(ValueMember):
         :type merge_field: str
         """
         if self.get_type() is not StorageType.ARRAY_CONTAINER:
-            raise TypeError("%s: Container can only be generated from arrays with"
-                            " type 'contarray', not %s"
-                            % (self, self.get_type()))
+            raise TypeError(
+                "%s: Container can only be generated from arrays with"
+                " type 'contarray', not %s" % (self, self.get_type())
+            )
 
         member_dict = {}
         for container in self.value:
@@ -467,8 +422,9 @@ class ArrayMember(ValueMember):
                 if force_not_found:
                     continue
 
-                raise KeyError("%s: Container %s has no member called %s"
-                               % (self, container, key_member_name))
+                raise KeyError(
+                    "%s: Container %s has no member called %s" % (self, container, key_member_name)
+                )
 
             key_member_value = container[key_member_name].value
 
@@ -483,17 +439,15 @@ class ArrayMember(ValueMember):
                 if force_duplicate:
                     continue
 
-                raise KeyError("%s: Duplicate key %s for container member %s"
-                               % (self, key_member_value, key_member_name))
+                raise KeyError(
+                    "%s: Duplicate key %s for container member %s" % (self, key_member_value, key_member_name)
+                )
 
             member_dict.update({key_member_value: container})
 
         return ContainerMember(self.name, member_dict)
 
-    def diff(
-        self,
-        other: ArrayMember
-    ) -> typing.Union[NoDiffMember, ArrayMember]:
+    def diff(self, other: ArrayMember) -> NoDiffMember | ArrayMember:
         if self.get_type() == other.get_type():
             diff_list = []
             other_list = other.value
@@ -527,8 +481,7 @@ class ArrayMember(ValueMember):
             return ArrayMember(self.name, self._allowed_member_type, diff_list)
 
         else:
-            raise TypeError(
-                f"type {type(self)} member cannot be diffed with type {type(other)}")
+            raise TypeError(f"type {type(self)} member cannot be diffed with type {type(other)}")
 
     def __getitem__(self, key):
         """
@@ -566,15 +519,13 @@ class NoDiffMember(ValueMember):
         """
         Returns the value of a member.
         """
-        raise NotImplementedError(
-            f"{type(self)} cannot have values; use 'ref' instead")
+        raise NotImplementedError(f"{type(self)} cannot have values; use 'ref' instead")
 
     def get_type(self) -> typing.NoReturn:
         """
         Returns the type of a member.
         """
-        raise NotImplementedError(
-            f"{type(self)} cannot have a type")
+        raise NotImplementedError(f"{type(self)} cannot have a type")
 
     def diff(self, other: typing.Any) -> typing.NoReturn:
         """
@@ -583,8 +534,7 @@ class NoDiffMember(ValueMember):
 
         If they are equal, return a NoDiffMember.
         """
-        raise NotImplementedError(
-            f"{type(self)} cannot be diffed")
+        raise NotImplementedError(f"{type(self)} cannot be diffed")
 
 
 class LeftMissingMember(ValueMember):
@@ -615,15 +565,13 @@ class LeftMissingMember(ValueMember):
         """
         Returns the value of a member.
         """
-        raise NotImplementedError(
-            f"{type(self)} cannot have values; use 'ref' instead")
+        raise NotImplementedError(f"{type(self)} cannot have values; use 'ref' instead")
 
     def get_type(self) -> typing.NoReturn:
         """
         Returns the type of a member.
         """
-        raise NotImplementedError(
-            f"{type(self)} cannot have a type")
+        raise NotImplementedError(f"{type(self)} cannot have a type")
 
     def diff(self, other: typing.Any) -> typing.NoReturn:
         """
@@ -632,8 +580,7 @@ class LeftMissingMember(ValueMember):
 
         If they are equal, return a NoDiffMember.
         """
-        raise NotImplementedError(
-            f"{type(self)} cannot be diffed")
+        raise NotImplementedError(f"{type(self)} cannot be diffed")
 
 
 class RightMissingMember(ValueMember):
@@ -664,15 +611,13 @@ class RightMissingMember(ValueMember):
         """
         Returns the value of a member.
         """
-        raise NotImplementedError(
-            f"{type(self)} cannot have values; use 'ref' instead")
+        raise NotImplementedError(f"{type(self)} cannot have values; use 'ref' instead")
 
     def get_type(self) -> typing.NoReturn:
         """
         Returns the type of a member.
         """
-        raise NotImplementedError(
-            f"{type(self)} cannot have a type")
+        raise NotImplementedError(f"{type(self)} cannot have a type")
 
     def diff(self, other: typing.Any) -> typing.NoReturn:
         """
@@ -681,8 +626,7 @@ class RightMissingMember(ValueMember):
 
         If they are equal, return a NoDiffMember.
         """
-        raise NotImplementedError(
-            f"{type(self)} cannot be diffed")
+        raise NotImplementedError(f"{type(self)} cannot be diffed")
 
 
 class StorageType(Enum):
@@ -690,19 +634,19 @@ class StorageType(Enum):
     Types for values members.
     """
 
-    INT_MEMBER       = "int"
-    FLOAT_MEMBER     = "float"
-    BOOLEAN_MEMBER   = "boolean"
-    ID_MEMBER        = "id"
-    BITFIELD_MEMBER  = "bitfield"
-    STRING_MEMBER    = "string"
+    INT_MEMBER = "int"
+    FLOAT_MEMBER = "float"
+    BOOLEAN_MEMBER = "boolean"
+    ID_MEMBER = "id"
+    BITFIELD_MEMBER = "bitfield"
+    STRING_MEMBER = "string"
     CONTAINER_MEMBER = "container"
 
     # Array types                       # array of:
-    ARRAY_INT        = "intarray"       # IntegerMembers
-    ARRAY_FLOAT      = "floatarray"     # FloatMembers
-    ARRAY_BOOL       = "boolarray"      # BooleanMembers
-    ARRAY_ID         = "idarray"        # IDMembers
-    ARRAY_BITFIELD   = "bitfieldarray"  # BitfieldMembers
-    ARRAY_STRING     = "stringarray"    # StringMembers
-    ARRAY_CONTAINER  = "contarray"      # ContainerMembers
+    ARRAY_INT = "intarray"  # IntegerMembers
+    ARRAY_FLOAT = "floatarray"  # FloatMembers
+    ARRAY_BOOL = "boolarray"  # BooleanMembers
+    ARRAY_ID = "idarray"  # IDMembers
+    ARRAY_BITFIELD = "bitfieldarray"  # BitfieldMembers
+    ARRAY_STRING = "stringarray"  # StringMembers
+    ARRAY_CONTAINER = "contarray"  # ContainerMembers

@@ -57,7 +57,21 @@
 #include "time/time.h"
 #include "util/fixed_point.h"
 
+import nyan;
+
 namespace openage::gamestate {
+
+namespace {
+
+int64_t get_nyan_int_or_float(const nyan::Object &obj, const char *member) {
+	const auto &holder = obj.get_value(member);
+	if (const auto *flt = dynamic_cast<const nyan::Float *>(holder.get_ptr().get())) {
+		return std::llround(flt->get());
+	}
+	return obj.get_int(member);
+}
+
+} // namespace
 
 /**
  * Create a simple test activity for the game entity.
@@ -268,7 +282,7 @@ std::shared_ptr<Player> EntityFactory::add_player(const std::shared_ptr<openage:
 	// player.resources[ResourceAmount.type.fqon] += amount.
 	for (const auto &res : api::APIPlayerSetup::get_start_resources(setup_obj)) {
 		nyan::Object type_obj = res.get_object("ResourceAmount.type");
-		int64_t amount = res.get_int("ResourceAmount.amount");
+		int64_t amount = get_nyan_int_or_float(res, "ResourceAmount.amount");
 		player->add_resource(type_obj.get_name(), amount);
 	}
 
@@ -331,7 +345,8 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 				auto setting_obj_val = std::dynamic_pointer_cast<nyan::ObjectValue>(setting.get_ptr());
 				auto setting_obj = owner_db_view->get_object(setting_obj_val->get_name());
 				auto attribute = setting_obj.get_object("AttributeSetting.attribute");
-				auto start_value = setting_obj.get_int("AttributeSetting.starting_value");
+				// attribute settings are floats so tech multipliers stay exact
+				auto start_value = get_nyan_int_or_float(setting_obj, "AttributeSetting.starting_value");
 
 				live->add_attribute(time::TIME_MIN,
 				                    attribute.get_name(),
@@ -439,7 +454,7 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 				                     option.get_float(research ? "ResearchableTech.research_time" : "CreatableGameEntity.creation_time")};
 				for (const auto &value : cost.get_set("ResourceCost.amount")) {
 					const auto amount = owner_db_view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr())->get_name());
-					decoded.cost[amount.get_object("ResourceAmount.type").get_name()] += amount.get_int("ResourceAmount.amount");
+					decoded.cost[amount.get_object("ResourceAmount.type").get_name()] += get_nyan_int_or_float(amount, "ResourceAmount.amount");
 				}
 				entity->action_options.push_back(std::move(decoded));
 			}
@@ -538,7 +553,7 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 			for (const auto &entry : ability_obj.get_set(provides ? "ProvideContingent.amount" : "UseContingent.amount")) {
 				const auto amount = owner_db_view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(entry.get_ptr())->get_name());
 				if (amount.get_object("ResourceAmount.type").get_name() == "de2_base.data.util.resource.types.PopulationSpace") {
-					population += amount.get_int("ResourceAmount.amount");
+					population += get_nyan_int_or_float(amount, "ResourceAmount.amount");
 				}
 			}
 		}

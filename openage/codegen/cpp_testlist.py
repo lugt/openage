@@ -1,4 +1,4 @@
-# Copyright 2015-2022 the openage authors. See copying.md for legal info.
+# Copyright 2015-2026 the openage authors. See copying.md for legal info.
 
 """
 Generates code for C++ testing, mostly the table to look up symbols from test
@@ -6,6 +6,8 @@ names.
 """
 
 import collections
+
+from ..util.fslike.path import Path
 
 
 class Namespace:
@@ -44,8 +46,7 @@ class Namespace:
 
         for namespacename, namespace in sorted(self.namespaces.items()):
             yield f"namespace {namespacename} {{\n"
-            for line in namespace.gen_prototypes():
-                yield line
+            yield from namespace.gen_prototypes()
             yield f"}} // {namespacename}\n\n"
 
     def get_functionnames(self):
@@ -53,15 +54,14 @@ class Namespace:
         Yields all function names in this namespace,
         as well as all subnamespaces.
         """
-        for name in self.functions:
-            yield name
+        yield from self.functions
 
         for namespacename, namespace in sorted(self.namespaces.items()):
             for name in namespace.get_functionnames():
                 yield namespacename + "::" + name
 
 
-def generate_testlist(projectdir):
+def generate_testlist(projectdir: Path):
     """
     Generates the test/demo method symbol lookup file from tests_cpp.
 
@@ -72,21 +72,20 @@ def generate_testlist(projectdir):
     from ..testing.list_processor import list_targets_cpp
 
     for testname, _, _, _ in list_targets_cpp():
-        root_namespace.add_functionname(testname.split('::'))
+        root_namespace.add_functionname(testname.split("::"))
 
     func_prototypes = list(root_namespace.gen_prototypes())
 
     method_mappings = [
-        f"{{\"{functionname}\", ::{functionname}}}"
-        for functionname in root_namespace.get_functionnames()
+        f'{{"{functionname}", ::{functionname}}}' for functionname in root_namespace.get_functionnames()
     ]
 
     tmpl_path = projectdir.joinpath("libopenage/testing/testlist.cpp.template")
     with tmpl_path.open() as tmpl:
         content = tmpl.read()
 
-    content = content.replace('FUNCTION_PROTOTYPES', "".join(func_prototypes))
-    content = content.replace('METHOD_MAPPINGS', ",\n\t".join(method_mappings))
+    content = content.replace("FUNCTION_PROTOTYPES", "".join(func_prototypes))
+    content = content.replace("METHOD_MAPPINGS", ",\n\t".join(method_mappings))
 
     gen_path = projectdir.joinpath("libopenage/testing/testlist.gen.cpp")
     with gen_path.open("w") as gen:

@@ -7,9 +7,8 @@
 ```
 brew update-reset && brew update
 brew install --cask font-dejavu
-brew install cmake python3 libepoxy freetype fontconfig harfbuzz opus opusfile qt6 libogg libpng toml11 eigen
-brew install llvm
-pip3 install --upgrade --break-system-packages cython numpy mako lz4 pillow pygments setuptools toml
+brew install cmake just ninja python3 libepoxy freetype fontconfig harfbuzz opus opusfile libogg libpng toml11 eigen
+brew install qtbase qtdeclarative qtmultimedia
 ```
 
 You will also need [nyan](https://github.com/SFTtech/nyan/blob/master/doc/building.md) and its dependencies:
@@ -31,30 +30,44 @@ git clone https://github.com/SFTtech/openage
 cd openage
 ```
 
+## Python dependencies
+
+Install the Python packages into a virtual environment inside the repository:
+
+```
+uv sync
+```
+or, to create the venv manually:
+```
+python3 -m venv .venv
+.venv/bin/pip install --upgrade cython setuptools numpy mako lz4 pillow pygments tomli-w
+```
+
 ## Building
 
-We advise against using the clang version that comes with macOS (Apple Clang) as it notoriously out of date and often causes compilation errors. Use homebrew's clang if you don't want any trouble. You can pass the path of homebrew clang to the openage `configure` script which will generate the CMake files for building:
+openage needs C++26 with module support, which Apple Clang does not provide yet.
+Install Homebrew's LLVM and point `configure` at it:
 
 ```
-# on Intel macOS, llvm is by default in /usr/local/Cellar/llvm/bin/
-# on ARM macOS, llvm is by default in /opt/homebrew/Cellar/llvm/bin/
-./configure --compiler="$(brew --prefix llvm)/bin/clang++" --download-nyan
+brew install llvm
+./configure --compiler="$(brew --prefix llvm)/bin/clang++" --download-nyan -- -DCMAKE_OSX_SYSROOT=macosx -DPython3_EXECUTABLE="$PWD/.venv/bin/python"
 ```
 
-Afterwards, trigger the build using `make`:
+Select the SDK explicitly so CMake and the compiler use the same system headers.
+
+Afterwards, trigger the build using `just build`:
 
 ```
-make -j$(sysctl -n hw.ncpu)
+just build
 ```
 
 ## Testing
-`make test` runs the built-in tests.
+`just test` runs the built-in tests.
 
 
 ## Running
-`make run` or `cd bin && ./run` launches the game. Try `./run --help` if you don't know what to do!
+`just run` or `cd bin && ./run` launches the game. Try `./run --help` if you don't know what to do!
 
 
 ## To create the documentation
-`make doc`
-For more options and details, refer to [doc/README.md][/doc/README.md]
+`just doc`

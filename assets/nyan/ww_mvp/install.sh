@@ -174,6 +174,7 @@ if sys.argv[6] == "1" or sys.argv[10] == "1" or sys.argv[12]:
     nyan = nyan.replace("PlayerSetup(engine.util.setup.PlayerSetup):", "PlayerSetup(celts.Celts):")
     nyan = nyan.replace("    PlayerSetup.game_setup = o{}\n", "")
 if (sys.argv[10] == "1" or sys.argv[12]) and sys.argv[11]:
+    sys.path.insert(0, str(here))
     from shore_fishing import install_shore_fishing
 
     fishing_ir = install_shore_fishing(ir, Path(sys.argv[11]), dest / mission_dir)

@@ -3,23 +3,24 @@
 """
 Module for reading .dat files.
 """
+
 from __future__ import annotations
-import typing
 
 import os
 import pickle
+import typing
 from dataclasses import replace
 from tempfile import gettempdir
 from zlib import decompress
 
-from ....log import spam, dbg, info, warn
+from ....log import dbg, info, spam, warn
 from ...value_object.read.media.datfile.empiresdat import EmpiresDatWrapper
 from ...value_object.read.media_types import MediaType
 
 if typing.TYPE_CHECKING:
     from openage.convert.value_object.init.game_version import GameVersion
-    from openage.convert.value_object.read.read_members import ArrayMember
-    from openage.util.fslike.directory import Directory
+    from openage.convert.value_object.read.value_members import ArrayMember
+    from openage.util.fslike.path import Path
     from openage.util.fslike.wrapper import GuardedFile
 
 
@@ -38,7 +39,7 @@ def get_converter_backend() -> str:
     return os.environ.get("OPENAGE_CONVERTER_BACKEND", "legacy").strip().lower()
 
 
-def get_gamespec(srcdir: Directory, game_version: GameVersion, pickle_cache: bool) -> ArrayMember:
+def get_gamespec(srcdir: Path, game_version: GameVersion, pickle_cache: bool) -> ArrayMember:
     """
     Reads empires.dat file.
     """
@@ -53,26 +54,21 @@ def get_gamespec(srcdir: Directory, game_version: GameVersion, pickle_cache: boo
             filepath = srcdir.joinpath(game_version.edition.media_paths[MediaType.DATFILE][0])
 
     else:
-        raise RuntimeError("No service found for reading data file of "
-                           f"version {game_version.edition.game_id}")
+        raise RuntimeError(
+            f"No service found for reading data file of version {game_version.edition.game_id}"
+        )
 
     if get_converter_backend() == "lazy":
-        # BfG detection (VER 8.4) is done inside GenieSource.from_compressed
-        # on the decompressed bytes -- the raw .dat is zlib-wrapped, so its
-        # first bytes are a compression header, not the versionstr.
-        with filepath.open('rb') as empiresdat_file:
+        with filepath.open("rb") as empiresdat_file:
             compressed = empiresdat_file.read()
         from ...value_object.read.source import GenieSource
+
         return GenieSource.from_compressed(compressed, game_version, name=filepath.name)
 
-    cache_file = os.path.join(
-        gettempdir(), f"{game_version.edition.game_id}_{filepath.name}.pickle")
+    cache_file = os.path.join(gettempdir(), f"{game_version.edition.game_id}_{filepath.name}.pickle")
 
-    with filepath.open('rb') as empiresdat_file:
-        gamespec = load_gamespec(empiresdat_file,
-                                 game_version,
-                                 cache_file,
-                                 pickle_cache)
+    with filepath.open("rb") as empiresdat_file:
+        gamespec = load_gamespec(empiresdat_file, game_version, cache_file, pickle_cache)
 
     return gamespec
 
@@ -80,9 +76,9 @@ def get_gamespec(srcdir: Directory, game_version: GameVersion, pickle_cache: boo
 def load_gamespec(
     fileobj: GuardedFile,
     game_version: GameVersion,
-    cachefile_name: str = None,
+    cachefile_name: str | None = None,
     pickle_cache: bool = False,
-    dynamic_load = False
+    dynamic_load=False,
 ) -> ArrayMember:
     """
     Helper method that loads the contents of a 'empires.dat' gzipped wrapper
@@ -104,6 +100,7 @@ def load_gamespec(
                 except Exception:
                     warn("could not use cached wrapper:")
                     import traceback
+
                     traceback.print_exc()
                     warn("we will just skip the cache, no worries.")
 
@@ -129,9 +126,12 @@ def load_gamespec(
     # 'VER 8.4' is the 'Battle for Greece' DLC format which inserts extra
     # bytes into the projectile/living unit structs.
     versionstr = file_data[:8].rstrip(b"\x00").decode("ascii", errors="ignore")
-    if game_version.edition.game_id == "AOE2DE" and versionstr == "VER 8.4":
-        dbg("detected Battle for Greece dat format (versionstr='%s')", versionstr)
-        game_version = replace(game_version, update_number="BfG")
+    if game_version.edition.game_id == "AOE2DE":
+        from ...value_object.read.media.datfile.de2_profile import resolve_de2_dat_profile
+
+        de2_profile = resolve_de2_dat_profile(versionstr)
+        dbg("detected DE2 dat format (versionstr='%s', profile='%s')", versionstr, de2_profile.profile_id)
+        game_version = replace(game_version, update_number="BfG", de2_profile=de2_profile)
 
     wrapper = EmpiresDatWrapper()
     _, gamespec = wrapper.read(file_data, 0, game_version, dynamic_load=dynamic_load)

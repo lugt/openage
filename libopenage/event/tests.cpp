@@ -496,16 +496,17 @@ void eventtrigger() {
 			state->trace.clear();
 		}
 		{
-			// Expected: repeat_exec(10), once(10)
+			// Expected: once(10), repeat_exec(10)
+			// (P4.1.1 deterministic tie-breaker sorts equal-timestamp events by handler id: "once" < "repeat_exec")
 			loop->reach_time(11, gstate);
 			TESTEQUALS(state->trace.size(), 2);
 			auto it = state->trace.begin();
-			if (it->name != "repeat_exec")
-				TESTFAILMSG("Unexpected Event: " << it->name << " expected repeat_exec");
-			TESTEQUALS(it->time, 10);
-			it++;
 			if (it->name != "once")
 				TESTFAILMSG("Unexpected Event: " << it->name << " expected once");
+			TESTEQUALS(it->time, 10);
+			it++;
+			if (it->name != "repeat_exec")
+				TESTFAILMSG("Unexpected Event: " << it->name << " expected repeat_exec");
 			TESTEQUALS(it->time, 10);
 			state->trace.clear();
 		}

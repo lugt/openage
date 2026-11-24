@@ -27,6 +27,10 @@ double Attack::get_attack_range() const {
 	// ApplyDiscreteEffect (melee) has no range field, so fall back to the
 	// default engagement range.
 	if (ability.extends("engine.ability.type.RangedDiscreteEffect")) {
+		const auto &holder = ability.get_value("RangedDiscreteEffect.max_range");
+		if (const auto *flt = dynamic_cast<const nyan::Float *>(holder.get_ptr().get())) {
+			return flt->get();
+		}
 		return static_cast<double>(ability.get_int("RangedDiscreteEffect.max_range"));
 	}
 	return DEFAULT_MELEE_RANGE;

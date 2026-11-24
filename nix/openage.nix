@@ -37,7 +37,6 @@ let
     ps.lz4
     ps.pygments
     ps.cython
-    ps.pylint
     ps.toml
   ]);
 in
@@ -72,6 +71,8 @@ stdenv.mkDerivation {
     clang
     cmake
     gnumake
+    ninja
+    just
     qt6.full
 
     eigen

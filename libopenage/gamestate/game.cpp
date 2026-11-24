@@ -6,8 +6,6 @@
 #include <chrono>
 #include <algorithm>
 
-#include <nyan/nyan.h>
-
 #include "log/log.h"
 #include "log/message.h"
 
@@ -37,6 +35,8 @@
 
 #include "coord/phys.h"
 #include "coord/tile.h"
+
+import nyan;
 
 namespace openage::gamestate {
 
