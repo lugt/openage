@@ -78,6 +78,7 @@ void SendCommandHandler::invoke(openage::event::EventLoop &loop,
 	});
 	if (command_type == component::command::command_t::GATHER) {
 		for (auto id : ids) {
+			++gstate->get_game_entity(id)->heal_order;
 			openage::event::EventHandler::param_map::map_t order{
 				{"worker_id", id},
 				{"resource_id", params.get("target_id", entity_id_t{})},
@@ -86,9 +87,37 @@ void SendCommandHandler::invoke(openage::event::EventLoop &loop,
 		}
 		return;
 	}
+	if (command_type == component::command::command_t::HEAL) {
+		auto target_id = params.get("target_id", gamestate::entity_id_t{0});
+		for (auto id : ids) {
+			auto entity = gstate->get_game_entity(id);
+			++entity->heal_order;
+		++entity->construction_order;
+			if (entity->building_site != 0) {
+				loop.create_event("game.construction", target, state, time, {
+					{"entity_id", entity->building_site}, {"worker", id}, {"depart", true},
+				});
+				entity->building_site = 0;
+			}
+			if (auto attack = entity->try_get_component_as<component::Attack>(component::component_t::ATTACK)) {
+				attack->stop_attack();
+			}
+		}
+		loop.create_event("game.heal", target, state, time, {
+			{"entity_ids", ids}, {"target_id", target_id},
+		});
+		return;
+	}
 	for (auto id : ids) {
 		auto entity = gstate->get_game_entity(id);
+		++entity->heal_order;
 		++entity->construction_order;
+		if (entity->building_site != 0) {
+			loop.create_event("game.construction", target, state, time, {
+				{"entity_id", entity->building_site}, {"worker", id}, {"depart", true},
+			});
+			entity->building_site = 0;
+		}
 		auto command_queue = std::dynamic_pointer_cast<component::CommandQueue>(
 			entity->get_component(component::component_t::COMMANDQUEUE));
 
@@ -113,6 +142,12 @@ void SendCommandHandler::invoke(openage::event::EventLoop &loop,
 			break;
 		}
 		case component::command::command_t::MOVE: {
+			if (entity->is_transformable and entity->unpacked) {
+				if (const auto owner = entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP)) {
+					gstate->set_action_feedback(owner->get_owners().get(time), "Pack Trebuchet before moving.");
+				}
+				break;
+			}
 			auto dest = params.get("target", coord::phys3{0, 0, 0});
 			log::log(MSG(info) << "SendCommandHandler: MOVE for " << ids.size()
 			                   << " entities at t=" << time
@@ -124,6 +159,12 @@ void SendCommandHandler::invoke(openage::event::EventLoop &loop,
 		}
 
 		case component::command::command_t::ATTACK: {
+			if (entity->is_transformable and not entity->unpacked) {
+				if (const auto owner = entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP)) {
+					gstate->set_action_feedback(owner->get_owners().get(time), "Unpack Trebuchet before attacking.");
+				}
+				break;
+			}
 			auto target_id = params.get("target_id", gamestate::entity_id_t{0});
 			log::log(MSG(info) << "SendCommandHandler: ATTACK for " << ids.size()
 			                   << " entities at t=" << time

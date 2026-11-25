@@ -120,11 +120,11 @@ print_line
 # OPENAGE_RUN_BIN is a TEST hook only (scripts/tests/ use it to substitute a
 # fake engine); the default and the normal user command remain $REPO/bin/run.
 RUN_BIN="${OPENAGE_RUN_BIN:-$REPO/bin/run}"
-echo "Launching: $RUN_BIN --scenario --no-convert --no-prompts"
+echo "Launching: $RUN_BIN main --scenario --no-convert --no-prompts $*"
 echo "(FULL mode: Qt window + renderer + presenter. stdout/stderr -> $LOG)"
 print_line
 
-"$RUN_BIN" --scenario --no-convert --no-prompts 2>&1 | tee "$LOG"
+"$RUN_BIN" main --scenario --no-convert --no-prompts "$@" 2>&1 | tee "$LOG"
 rc=${PIPESTATUS[0]}
 
 # Crash-marker audit BEFORE passing: the engine's terminate/SIGSEGV handlers

@@ -137,6 +137,13 @@ To enable out-of-the-box play on **Linux, Windows, and macOS** without redistrib
 
 See **[README-PLUS.md §6](README-PLUS.md#6-cross-platform-release--packaging-roadmap-linux--windows--macos)** for the full packaging architecture.
 
+### UI portability toward WASM and mini-app hosts
+
+Keep Qt/QML on desktop while sharing Qt-free presentation state and semantic actions through the existing command/event interfaces.
+Keep platform-specific rendering, input, storage, and asset access in adapters; add implementations as concrete targets require them.
+Use preconverted, versioned assets and establish a portable minimap data boundary without introducing a universal UI toolkit.
+See [UI portability principles](doc/code/ui_portability.md) for the current implementation boundaries, minimap guidance, and a minimal target-validation plan.
+
 ---
 
 ## 6. Links & License

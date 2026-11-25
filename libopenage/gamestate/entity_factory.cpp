@@ -28,6 +28,7 @@
 #include "gamestate/api/activity.h"
 #include "gamestate/api/animation.h"
 #include "gamestate/api/patch.h"
+#include "gamestate/api/util.h"
 #include "gamestate/api/player_setup.h"
 #include "gamestate/component/api/attack.h"
 #include "gamestate/component/api/build.h"
@@ -60,18 +61,6 @@
 import nyan;
 
 namespace openage::gamestate {
-
-namespace {
-
-int64_t get_nyan_int_or_float(const nyan::Object &obj, const char *member) {
-	const auto &holder = obj.get_value(member);
-	if (const auto *flt = dynamic_cast<const nyan::Float *>(holder.get_ptr().get())) {
-		return std::llround(flt->get());
-	}
-	return obj.get_int(member);
-}
-
-} // namespace
 
 /**
  * Create a simple test activity for the game entity.
@@ -282,7 +271,7 @@ std::shared_ptr<Player> EntityFactory::add_player(const std::shared_ptr<openage:
 	// player.resources[ResourceAmount.type.fqon] += amount.
 	for (const auto &res : api::APIPlayerSetup::get_start_resources(setup_obj)) {
 		nyan::Object type_obj = res.get_object("ResourceAmount.type");
-		int64_t amount = get_nyan_int_or_float(res, "ResourceAmount.amount");
+		int64_t amount = api::get_nyan_int_or_float(res, "ResourceAmount.amount");
 		player->add_resource(type_obj.get_name(), amount);
 	}
 
@@ -346,7 +335,7 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 				auto setting_obj = owner_db_view->get_object(setting_obj_val->get_name());
 				auto attribute = setting_obj.get_object("AttributeSetting.attribute");
 				// attribute settings are floats so tech multipliers stay exact
-				auto start_value = get_nyan_int_or_float(setting_obj, "AttributeSetting.starting_value");
+				auto start_value = api::get_nyan_int_or_float(setting_obj, "AttributeSetting.starting_value");
 
 				live->add_attribute(time::TIME_MIN,
 				                    attribute.get_name(),
@@ -454,7 +443,7 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 				                     option.get_float(research ? "ResearchableTech.research_time" : "CreatableGameEntity.creation_time")};
 				for (const auto &value : cost.get_set("ResourceCost.amount")) {
 					const auto amount = owner_db_view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr())->get_name());
-					decoded.cost[amount.get_object("ResourceAmount.type").get_name()] += get_nyan_int_or_float(amount, "ResourceAmount.amount");
+					decoded.cost[amount.get_object("ResourceAmount.type").get_name()] += api::get_nyan_int_or_float(amount, "ResourceAmount.amount");
 				}
 				entity->action_options.push_back(std::move(decoded));
 			}
@@ -466,8 +455,12 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 		else if (ability_parent == "engine.ability.type.ApplyContinuousEffect" and ability_fqon.ends_with(".Construct")) {
 			entity->construct_ability = ability_obj;
 		}
+		else if (ability_parent == "engine.ability.type.RangedContinuousEffect" and ability_fqon.ends_with(".Heal")) {
+			entity->heal_ability = ability_obj;
+		}
 		else if (ability_parent == "engine.ability.type.ApplyDiscreteEffect"
-		      || ability_parent == "engine.ability.type.RangedDiscreteEffect") {
+		      || ability_parent == "engine.ability.type.RangedDiscreteEffect"
+		      || ability_parent == "engine.ability.type.ShootProjectile") {
 			// Phase 2 event-driven AttackSystem: mount the Attack component
 			// (ability data + runtime attack state). The converter emits
 			// Attack abilities as ApplyDiscreteEffect (melee, e.g. villager)
@@ -553,7 +546,7 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 			for (const auto &entry : ability_obj.get_set(provides ? "ProvideContingent.amount" : "UseContingent.amount")) {
 				const auto amount = owner_db_view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(entry.get_ptr())->get_name());
 				if (amount.get_object("ResourceAmount.type").get_name() == "de2_base.data.util.resource.types.PopulationSpace") {
-					population += get_nyan_int_or_float(amount, "ResourceAmount.amount");
+					population += api::get_nyan_int_or_float(amount, "ResourceAmount.amount");
 				}
 			}
 		}
@@ -567,6 +560,10 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 		}
 	}
 
+	if (nyan_entity.ends_with(".Trebuchet")) {
+		entity->is_transformable = true;
+		entity->action_options.push_back(ActionOption{ActionKind::Transform, "trebuchet.toggle_pack", nyan_entity, {}, 2.0});
+	}
 	std::ranges::sort(entity->action_options, {}, &ActionOption::subject);
 
 	if (foundation_ability and not entity->has_component(component::component_t::BUILD)) {

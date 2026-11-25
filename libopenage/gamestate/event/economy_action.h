@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <deque>
 #include <unordered_map>
 #include "event/eventhandler.h"
 #include "gamestate/action_option.h"
@@ -10,8 +11,12 @@
 namespace openage::gamestate {
 class EntityFactory;
 class GameState;
+class Player;
 
 namespace event {
+
+/** Query the same prerequisites used when executing a production order. */
+bool action_available(const ActionOption &option, const GameState &game, const Player &player, const time::time_t &at);
 
 bool force_scenario_research(GameState &game, player_id_t player, const nyan::fqon_t &technology, const time::time_t &at);
 
@@ -27,13 +32,18 @@ public:
 	                                const std::shared_ptr<openage::event::State> &,
 	                                const time::time_t &) override;
 
+	/** Committed production, including jobs in all producers owned by this player. */
+	int64_t queued_population(player_id_t player) const;
+	bool busy(entity_id_t actor) const;
+
 private:
 	struct Job {
 		player_id_t owner;
 		ActionOption option;
+		int64_t population = 0;
 	};
 	std::shared_ptr<EntityFactory> factory;
-	std::unordered_map<entity_id_t, Job> jobs;
+	std::unordered_map<entity_id_t, std::deque<Job>> jobs;
 };
 
 } // namespace event

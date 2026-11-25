@@ -70,9 +70,9 @@ void TerrainRenderStage::set_visibility(const std::shared_ptr<const gamestate::V
 		std::vector<uint8_t> rgba;
 		rgba.reserve(snapshot->tiles.size() * 4);
 		for (auto tile : snapshot->tiles) {
-			const uint8_t shade = tile == gamestate::TileVisibility::Visible ? 255
-			                    : tile == gamestate::TileVisibility::Explored ? 100 : 0;
-			rgba.insert(rgba.end(), {shade, shade, shade, 255});
+			const uint8_t explored = tile != gamestate::TileVisibility::Unexplored ? 255 : 0;
+			const uint8_t visible = tile == gamestate::TileVisibility::Visible ? 255 : 0;
+			rgba.insert(rgba.end(), {explored, visible, 0, 255});
 		}
 		resources::Texture2dInfo info(snapshot->width, snapshot->height, resources::pixel_format::rgba8);
 		resources::Texture2dData data(info, std::move(rgba));

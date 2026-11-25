@@ -1,0 +1,19 @@
+{
+  "seed": 42,
+  "map": {"width": 32, "height": 32},
+  "players": [{"id": 1, "food": 200, "wood": 100}],
+  "units": [
+    {"id": 2, "owner": 1, "type": "scout", "x": 8, "y": 8, "hp": 45},
+    {"id": 1, "owner": 1, "type": "villager", "x": 1, "y": 2, "hp": 25}
+  ],
+  "commands": [
+    {"tick": 1, "op": "move", "entity_id": 1, "x": 20, "y": 2, "speed": 0.10},
+    {"tick": 25, "op": "damage", "entity_id": 1, "amount": 2},
+    {"tick": 50, "op": "add_resource", "player_id": 1, "resource": "wood", "amount": 5.25},
+    {"tick": 51, "op": "damage", "entity_id": 1, "amount": 3},
+    {"tick": 65, "op": "spawn", "owner": 1, "type": "sheep", "x": 4, "y": 3, "hp": 7},
+    {"tick": 75, "op": "stop", "entity_id": 1},
+    {"tick": 80, "op": "damage", "entity_id": 3, "amount": 10},
+    {"tick": 100, "op": "add_resource", "player_id": 1, "resource": "food", "amount": 12.50}
+  ]
+}

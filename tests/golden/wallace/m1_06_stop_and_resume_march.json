@@ -1,0 +1,13 @@
+{
+  "mission": 1,
+  "tick_seconds": 1.0,
+  "total_ticks": 160,
+  "snapshot_ticks": [30, 45, 65, 160],
+  "track_instances": ["object_5462"],
+  "commands": [
+    {"tick": 1, "type": "select", "targets": ["object_5462"]},
+    {"tick": 30, "type": "move", "targets": ["object_5462"], "x": 54, "y": 38},
+    {"tick": 42, "type": "idle", "targets": ["object_5462"]},
+    {"tick": 65, "type": "move", "targets": ["object_5462"], "x": 54, "y": 38}
+  ]
+}

@@ -14,6 +14,7 @@ import zlib
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tech_tree.catalog import Catalog, base_age, eligible_technologies, visible_requirements, write_json
 from tech_tree.reader import CHUNK_SIZE, inflate, read_dat
 
@@ -144,3 +145,53 @@ def test_reader_indexes_without_retaining_civilizations(tmp_path, monkeypatch):
         assert data.civs[3].value == 3
         assert not alive
         assert provenance["parsed_bytes"] == 10
+
+
+def test_building_icon_does_not_use_unrelated_unit_icon(tmp_path):
+    from PIL import Image
+    from tech_tree.catalog import IconExporter
+
+    root = tmp_path / "original"
+    icons = root / "resources/_common/wpfg/resources/uniticons"
+    icons.mkdir(parents=True)
+    Image.new("RGBA", (4, 4), "red").save(icons / "001_50730.png")
+    exporter = IconExporter(root, tmp_path / "exported")
+    assert exporter.icon(1, "building") is None
+    assert exporter.icon(1, "unit") == "icons/001_50730.png"
+
+
+def test_original_dds_icon_cache_tracks_source_and_output(tmp_path):
+    from PIL import Image
+    from tech_tree.catalog import IconExporter
+
+    root = tmp_path / "original"
+    source = root / "widgetui/textures/ingame/buildings/001_house.DDS"
+    source.parent.mkdir(parents=True)
+    Image.new("RGBA", (4, 4), "red").save(source, format="DDS")
+    output = tmp_path / "exported"
+    name = IconExporter(root, output).icon(1, "building")
+    target = output / name
+    version = target.stat().st_mtime_ns
+    assert IconExporter(root, output).icon(1, "building") == name
+    assert target.stat().st_mtime_ns == version
+    Image.new("RGBA", (4, 4), "blue").save(source, format="DDS")
+    IconExporter(root, output).icon(1, "building")
+    with Image.open(target) as decoded:
+        assert decoded.getpixel((0, 0)) == (0, 0, 255, 255)
+    target.write_bytes(b"damaged")
+    IconExporter(root, output).icon(1, "building")
+    with Image.open(target) as decoded:
+        assert decoded.getpixel((0, 0)) == (0, 0, 255, 255)
+
+
+def test_catalog_uses_shared_icon_export_without_calling_catalog_export(tmp_path):
+    from PIL import Image
+    from tech_tree.catalog import IconExporter
+
+    root = tmp_path / "original"
+    source = root / "widgetui/textures/ingame/units/001_villager.dds"
+    source.parent.mkdir(parents=True)
+    Image.new("RGBA", (4, 4), "red").save(source, format="DDS")
+    catalog = Catalog.__new__(Catalog)
+    IconExporter.__init__(catalog, root, tmp_path / "exported")
+    assert catalog.icon(1, "unit") == "icons/unit-001.png"

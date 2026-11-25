@@ -5,6 +5,8 @@
 #include <exception>
 
 // pxd: from libcpp cimport bool
+#include <cstdarg>
+#include <cstdio>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -188,6 +190,39 @@ std::ostream &operator<<(std::ostream &os, const Error &e);
 #define OPENAGE_ENS_NUM(...) OPENAGE_ENS_NUM_IMPL((__VA_ARGS__, TWOORMORE, ONE, throwaway))
 #define OPENAGE_ENS_NUM_IMPL(args) OPENAGE_ENS_SELECT_2ND args
 #define OPENAGE_ENS_SELECT_2ND(a1, a2, a3, ...) a3
+
+inline std::string format_is_true_msg(const char *fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	va_list args_copy;
+	va_copy(args_copy, args);
+	const int len = std::vsnprintf(nullptr, 0, fmt, args);
+	va_end(args);
+	if (len <= 0) {
+		va_end(args_copy);
+		return fmt ? std::string{fmt} : std::string{};
+	}
+	std::string buf(static_cast<size_t>(len) + 1, '\0');
+	std::vsnprintf(buf.data(), buf.size(), fmt, args_copy);
+	va_end(args_copy);
+	buf.resize(static_cast<size_t>(len));
+	return buf;
+}
+
+/**
+ * Compiler-style assertion: fails hard with a formatted Error instead of
+ * allowing null dereference or out-of-bounds segfaults.
+ * Usage: Is_True(cond, ("format %s", arg));
+ */
+#define Is_True(Condition, MsgTuple) \
+	do { \
+		if (not (Condition)) [[unlikely]] { \
+			throw ::openage::error::Error( \
+				MSG(err) << "Assertion failed (" #Condition "): " \
+				         << ::openage::error::format_is_true_msg MsgTuple); \
+		} \
+	} \
+	while (0)
 
 } // namespace error
 

@@ -1,0 +1,18 @@
+=== TICK 295 (t=295.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=4/0
+tracked_counts: p0_g38=1 p0_g74=3
+unit[object_5462]: owner=0 hp=40/40 pos=(63.50,63.50) dead=0
+unit[object_13430]: owner=1 hp=500/500 pos=(92.50,53.50) dead=0
+=== TICK 360 (t=360.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=4/0
+tracked_counts: p0_g38=1 p0_g74=3
+unit[object_5462]: owner=0 hp=40/40 pos=(65.10,65.10) dead=0
+unit[object_13430]: owner=1 hp=500/500 pos=(92.50,53.50) dead=0
+=== TICK 420 (t=420.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=4/0
+tracked_counts: p0_g38=1 p0_g74=3
+unit[object_5462]: owner=0 hp=40/40 pos=(65.10,65.10) dead=0
+unit[object_13430]: owner=1 hp=500/500 pos=(92.50,53.50) dead=0

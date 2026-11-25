@@ -92,6 +92,9 @@ CLEAN_LOG = (
 FAKE_RUN = r'''#!/usr/bin/env bash
 # Fake engine binary for the Mission 1 harness tests. Only ever invoked when
 # OPENAGE_RUN_BIN points at it; never the real $REPO/bin/run.
+if [ "${1:-}" = "main" ]; then
+	shift
+fi
 if [ "${1:-}" = "--scenario" ]; then
 	case "${FAKE_MODE:-clean}" in
 	clean)

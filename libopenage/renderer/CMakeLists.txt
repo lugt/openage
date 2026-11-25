@@ -32,3 +32,7 @@ endif()
 if(VULKAN_FOUND)
     add_subdirectory(vulkan/)
 endif()
+
+add_sources(libopenage MODULE
+	recording.cpp
+)

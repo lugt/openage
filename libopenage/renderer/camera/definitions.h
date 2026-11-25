@@ -52,15 +52,15 @@ static constexpr float DEFAULT_ZOOM = 1.0f;
  * camera cannot zoom in past the point where a single sprite fills the screen
  * and the map becomes unusable. 0.5f == 2x zoom-in from the default view.
  */
-static constexpr float DEFAULT_MIN_ZOOM = 0.5f;
+static constexpr float DEFAULT_MIN_ZOOM = 0.75f;
 
 /**
  * Maximum zoom out level of the camera.
  *
- * 2.0f == zoom out until map content is half its default size (viewport covers
- * twice the area). Keeps the map readable rather than shrinking it to a dot.
+ * 1.5f == zoom out until viewport covers 1.5x the default span.
+ * Keeps the map readable rather than shrinking it too far.
  */
-static constexpr float DEFAULT_MAX_ZOOM_OUT = 2.0f;
+static constexpr float DEFAULT_MAX_ZOOM_OUT = 1.5f;
 
 /**
  * Default zoom ratio.

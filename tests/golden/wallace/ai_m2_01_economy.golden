@@ -1,0 +1,73 @@
+=== TICK 1 (t=1.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=250 Wood=250 Stone=0 Gold=250 pop=1/5
+tracked_counts: p0_g83=1 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(56.50,59.50) dead=0
+AI_STATE player=0 wood=250 food=250 gold=250 stone=0 pop=1/5
+AI_UNIT id=10127 type=de2_base.data.game_entity.generic.town_center.town_center.TownCenter ne=3932160 se=3866624 hp=2400
+AI_UNIT id=10128 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3702784 se=3899392 hp=25
+AI_UNIT id=10129 type=ww_mvp.campaign.william_wallace.original_entities.Unit600 ne=3375104 se=3899392 hp=-1
+=== TICK 50 (t=50.00s) ===
+mission: VICTORY | victory=1 | defeat=0
+resources[0]: Food=150 Wood=225 Stone=0 Gold=250 pop=6/5
+tracked_counts: p0_g83=4 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(55.50,52.50) dead=0
+AI_STATE player=0 wood=225 food=150 gold=250 stone=0 pop=6/5
+AI_UNIT id=10127 type=de2_base.data.game_entity.generic.town_center.town_center.TownCenter ne=3932160 se=3866624 hp=2400
+AI_UNIT id=10128 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3637248 se=3440640 hp=25
+AI_UNIT id=10129 type=ww_mvp.campaign.william_wallace.original_entities.Unit600 ne=3375104 se=3899392 hp=-1
+AI_UNIT id=10130 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3571712 se=3768320 hp=25
+AI_UNIT id=10131 type=de2_base.data.game_entity.generic.house.house.House ne=3735552 se=3342336 hp=137
+AI_UNIT id=10132 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3538944 se=3604480 hp=25
+AI_UNIT id=10133 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3735552 se=4128768 hp=25
+AI_UNIT id=10134 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=4096000 se=3964928 hp=25
+AI_UNIT id=10135 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=4128768 se=3932160 hp=25
+=== TICK 100 (t=100.00s) ===
+mission: VICTORY | victory=1 | defeat=0
+resources[0]: Food=110 Wood=315 Stone=0 Gold=250 pop=7/8
+tracked_counts: p0_g83=4 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(54.50,58.50) dead=0
+AI_STATE player=0 wood=315 food=110 gold=250 stone=0 pop=7/8
+AI_UNIT id=10127 type=de2_base.data.game_entity.generic.town_center.town_center.TownCenter ne=3932160 se=3866624 hp=2400
+AI_UNIT id=10128 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3571712 se=3833856 hp=25
+AI_UNIT id=10129 type=ww_mvp.campaign.william_wallace.original_entities.Unit600 ne=3375104 se=3899392 hp=-1
+AI_UNIT id=10130 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3571712 se=3768320 hp=25
+AI_UNIT id=10131 type=de2_base.data.game_entity.generic.house.house.House ne=3735552 se=3342336 hp=550
+AI_UNIT id=10132 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3737520 se=3671984 hp=25
+AI_UNIT id=10133 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3744934 se=4053850 hp=25
+AI_UNIT id=10134 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=4096000 se=3964928 hp=25
+AI_UNIT id=10135 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=4128768 se=3932160 hp=25
+AI_UNIT id=10137 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3571712 se=3899392 hp=25
+=== TICK 160 (t=160.00s) ===
+mission: VICTORY | victory=1 | defeat=0
+resources[0]: Food=160 Wood=385 Stone=0 Gold=250 pop=8/8
+tracked_counts: p0_g83=4 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(54.80,58.50) dead=0
+AI_STATE player=0 wood=385 food=160 gold=250 stone=0 pop=8/8
+AI_UNIT id=10127 type=de2_base.data.game_entity.generic.town_center.town_center.TownCenter ne=3932160 se=3866624 hp=2400
+AI_UNIT id=10128 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3591423 se=3833856 hp=25
+AI_UNIT id=10129 type=ww_mvp.campaign.william_wallace.original_entities.Unit600 ne=3375104 se=3899392 hp=-1
+AI_UNIT id=10130 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3571712 se=3768320 hp=25
+AI_UNIT id=10131 type=de2_base.data.game_entity.generic.house.house.House ne=3735552 se=3342336 hp=550
+AI_UNIT id=10132 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3702784 se=3637248 hp=25
+AI_UNIT id=10133 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3702784 se=4146044 hp=25
+AI_UNIT id=10134 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=4096000 se=3964928 hp=25
+AI_UNIT id=10135 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=4128768 se=3932160 hp=25
+AI_UNIT id=10137 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3571712 se=3899392 hp=25
+AI_UNIT id=10138 type=de2_base.data.game_entity.generic.villager.villager.Villager ne=3593022 se=3964928 hp=25
+AI_OPERATIONS
+AI_PROFILE version=1 player=0 seed=9 apm=48 aps=2 reaction_ms=1200 economy=1 construction=1 research=0 scouting=0 defense=1 attacks=0 retreat=1 workers=8 army=12 dropped=0
+AI ms=1199 player=0 seq=1 time=78643 GATHER actor=10128 target=3287 option= ne=0 se=0
+AI ms=2649 player=0 seq=2 time=173670 PRODUCE actor=10127 target=0 option=de2_base.data.game_entity.generic.town_center.town_center.TownCenter.VillagerCreatable ne=0 se=0
+AI ms=29099 player=0 seq=3 time=1907097 PRODUCE actor=10127 target=0 option=de2_base.data.game_entity.generic.town_center.town_center.TownCenter.VillagerCreatable ne=0 se=0
+AI ms=30549 player=0 seq=4 time=2002124 BUILD actor=10128 target=0 option=de2_base.data.game_entity.generic.villager.villager.Villager.HouseCreatable ne=3735552 se=3342336
+AI ms=31999 player=0 seq=5 time=2097151 GATHER actor=10130 target=3 option= ne=0 se=0
+AI ms=37949 player=0 seq=6 time=2487090 GATHER actor=10132 target=8998 option= ne=0 se=0
+AI ms=39399 player=0 seq=7 time=2582117 GATHER actor=10133 target=8984 option= ne=0 se=0
+AI ms=40849 player=0 seq=8 time=2677144 GATHER actor=10134 target=3341 option= ne=0 se=0
+AI ms=42299 player=0 seq=9 time=2772171 GATHER actor=10135 target=3341 option= ne=0 se=0
+AI ms=64749 player=0 seq=10 time=4243454 PRODUCE actor=10127 target=0 option=de2_base.data.game_entity.generic.town_center.town_center.TownCenter.VillagerCreatable ne=0 se=0
+AI ms=66199 player=0 seq=11 time=4338481 GATHER actor=10128 target=2 option= ne=0 se=0
+AI ms=91149 player=0 seq=12 time=5973604 PRODUCE actor=10127 target=0 option=de2_base.data.game_entity.generic.town_center.town_center.TownCenter.VillagerCreatable ne=0 se=0
+AI ms=92599 player=0 seq=13 time=6068631 GATHER actor=10137 target=3 option= ne=0 se=0
+AI ms=117549 player=0 seq=14 time=7703754 GATHER actor=10138 target=3 option= ne=0 se=0

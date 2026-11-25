@@ -2,6 +2,8 @@
 
 #include "chunk.h"
 
+#include <algorithm>
+
 #include "renderer/resources/assets/asset_manager.h"
 #include "renderer/resources/mesh_data.h"
 #include "renderer/stages/terrain/mesh.h"
@@ -34,7 +36,9 @@ void TerrainChunk::fetch_updates(const time::time_t & /* time */) {
 
 	// Get the terrain data from the render entity
 	auto terrain_size = this->render_entity->get_size();
-	auto terrain_paths = this->render_entity->get_terrain_paths();
+	const auto paths = this->render_entity->get_terrain_paths();
+	std::vector<std::string> terrain_paths{paths.begin(), paths.end()};
+	std::ranges::sort(terrain_paths);
 	auto tiles = this->render_entity->get_tiles();
 	auto heightmap_verts = this->render_entity->get_vertices();
 
@@ -74,74 +78,79 @@ std::shared_ptr<TerrainRenderMesh> TerrainChunk::create_mesh(const util::Vector2
 	auto v_width = vert_size[0];
 	auto v_height = vert_size[1];
 
-	// vertex data for the mesh
-	std::vector<float> mesh_verts{};
+	std::vector<float> mesh_verts;
+	std::vector<uint32_t> idxs;
 
-	// vertex indices for the mesh
-	std::vector<uint16_t> idxs{};
+	const auto halo = this->render_entity->get_terrain_halo();
 
-	// maps indices of verts in the heightmap to indices in the vertex data vector
-	std::unordered_map<size_t, size_t> index_map;
-
-	for (size_t i = 0; i < v_width - 1; ++i) {
-		for (size_t j = 0; j < v_height - 1; ++j) {
-			const auto &tile = tiles.at(i + j * (v_width - 1));
-			if (tile.second != texture_path) {
-				// Skip tiles with different textures
+	// All terrain layers use the same triangulation. Corner weights share
+	// adjoining tiles while the center retains the tile's original texture.
+	auto weights = [&](size_t x, size_t y) {
+		float own = 0;
+		float accumulated = 0;
+		float count = 0;
+		for (int dy = -1; dy <= 0; ++dy) {
+			for (int dx = -1; dx <= 0; ++dx) {
+				const auto col = static_cast<int64_t>(x) + dx;
+				const auto row = static_cast<int64_t>(y) + dy;
+				std::string path;
+				if (not halo.empty()) {
+					path = halo.at((col + 1) + (row + 1) * (v_width + 1));
+				}
+				else if (col >= 0 and row >= 0 and col < static_cast<int64_t>(v_width - 1)
+				         and row < static_cast<int64_t>(v_height - 1)) {
+					path = tiles.at(col + row * (v_width - 1)).second;
+				}
+				if (path.empty()) {
+					continue;
+				}
+				own += path == texture_path ? 1.0f : 0.0f;
+				accumulated += path <= texture_path ? 1.0f : 0.0f;
+				++count;
+			}
+		}
+		return std::array<float, 2>{own / count, accumulated / count};
+	};
+	auto vertex = [&](const coord::scene3 &v, const std::array<float, 2> &weight) {
+		const auto world = v.to_world_space();
+		mesh_verts.insert(mesh_verts.end(), {world[0], world[1], world[2], ((v.ne + this->offset.ne) / 10).to_float(), ((v.se + this->offset.se) / 10).to_float(), weight[0], weight[1]});
+	};
+	for (size_t y = 0; y < v_height - 1; ++y) {
+		for (size_t x = 0; x < v_width - 1; ++x) {
+			const std::array<std::array<float, 2>, 4> corners{
+				weights(x, y), weights(x + 1, y), weights(x + 1, y + 1), weights(x, y + 1)};
+			const auto &path = tiles.at(x + y * (v_width - 1)).second;
+			if (path != texture_path and std::ranges::all_of(corners, [](auto w) { return w[0] == 0; })) {
 				continue;
 			}
-
-			// indices of the vertices of the current tile
-			// in the hightmap
-			std::array<size_t, 4> tile_verts{
-				i + j * v_width,
-				i + 1 + j * v_width,
-				i + 1 + (j + 1) * v_width,
-				i + (j + 1) * v_width,
-			};
-
-			// add the vertices of the current tile to the vertex data vector
-			for (size_t v_idx : tile_verts) {
-				// skip if the vertex is already in the vertex data vector
-				if (not index_map.contains(v_idx)) {
-					auto v = heightmap_verts[v_idx];
-					auto v_vec = v.to_world_space();
-					mesh_verts.push_back(v_vec[0]);
-					mesh_verts.push_back(v_vec[1]);
-					mesh_verts.push_back(v_vec[2]);
-					mesh_verts.push_back(((v.ne + this->offset.ne) / 10).to_float());
-					mesh_verts.push_back(((v.se + this->offset.se) / 10).to_float());
-
-					// update the index map
-					// since new verts are added to the end of the vertex data vector
-					// the mapped index is the current size of the index map
-					index_map[v_idx] = index_map.size();
-				}
+			const std::array<size_t, 4> indices{
+				x + y * v_width, x + 1 + y * v_width, x + 1 + (y + 1) * v_width, x + (y + 1) * v_width};
+			const auto base = static_cast<uint32_t>(mesh_verts.size() / 7);
+			for (size_t i = 0; i < 4; ++i) {
+				vertex(heightmap_verts[indices[i]], corners[i]);
 			}
-
-			// first triangle
-			idxs.push_back(index_map[tile_verts[0]]); // top left
-			idxs.push_back(index_map[tile_verts[1]]); // bottom left
-			idxs.push_back(index_map[tile_verts[2]]); // bottom right
-
-			// second triangle
-			idxs.push_back(index_map[tile_verts[0]]); // top left
-			idxs.push_back(index_map[tile_verts[2]]); // bottom right
-			idxs.push_back(index_map[tile_verts[3]]); // top right
+			// Keep the center on the original diagonal so layers share its depth.
+			const auto &a = heightmap_verts[indices[0]];
+			const auto &b = heightmap_verts[indices[2]];
+			vertex(coord::scene3{(a.ne + b.ne) / 2, (a.se + b.se) / 2, (a.up + b.up) / 2},
+			       {path == texture_path ? 1.0f : 0.0f, path <= texture_path ? 1.0f : 0.0f});
+			for (uint32_t i = 0; i < 4; ++i) {
+				idxs.insert(idxs.end(), {base + i, base + (i + 1) % 4, base + 4});
+			}
 		}
 	}
 
 	resources::VertexInputInfo info{
-		{resources::vertex_input_t::V3F32, resources::vertex_input_t::V2F32},
+		{resources::vertex_input_t::V3F32, resources::vertex_input_t::V2F32, resources::vertex_input_t::V2F32},
 		resources::vertex_layout_t::AOS,
 		resources::vertex_primitive_t::TRIANGLES,
-		resources::index_t::U16};
+		resources::index_t::U32};
 
 	auto const vert_data_size_new = mesh_verts.size() * sizeof(float);
 	std::vector<uint8_t> vert_data_new(vert_data_size_new);
 	std::memcpy(vert_data_new.data(), mesh_verts.data(), vert_data_size_new);
 
-	auto const idx_data_size = idxs.size() * sizeof(uint16_t);
+	auto const idx_data_size = idxs.size() * sizeof(uint32_t);
 	std::vector<uint8_t> idx_data(idx_data_size);
 	std::memcpy(idx_data.data(), idxs.data(), idx_data_size);
 

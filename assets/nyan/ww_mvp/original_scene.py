@@ -21,13 +21,23 @@ def _sprite(original, graphic, destination):
     from openage.convert.entity_object.export.texture import Texture
     from openage.convert.processor.export.texture_merge import merge_frames
     from openage.convert.value_object.read.media.sld import SLD
+    from openage.util.export_cache import ExportCache
+    from inspect import getfile, getmodule
 
     stem = f"graphic_{graphic['id']}"
     output = destination / f'{stem}.sprite'
-    if output.is_file():
-        return f'./original_entity_graphics/{stem}.sprite'
     source = original / 'resources/_common/drs/graphics' / (graphic['file_name'] + '.sld')
-    texture = Texture(SLD(source.read_bytes()))
+    data = source.read_bytes()
+    version = Path(__file__).read_bytes()
+    for implementation in (getfile(SpriteMetadata), getfile(TextureMetadata),
+                           getmodule(merge_frames).__file__, getmodule(SLD).__file__):
+        version += Path(implementation).read_bytes()
+    # Frame counts and angle metadata can change independently of the SLD.
+    version += json.dumps(graphic, sort_keys=True).encode('utf-8')
+    cache = ExportCache(data, [output, output.with_suffix('.png'), output.with_suffix('.texture')], version)
+    if cache.valid():
+        return f'./original_entity_graphics/{stem}.sprite'
+    texture = Texture(SLD(data))
     frames = max(1, graphic['frame_count'])
     angles = max(1, graphic['angle_count'])
     expected = frames * angles
@@ -60,6 +70,7 @@ def _sprite(original, graphic, destination):
         for index in range(frames):
             sprite.add_frame(index, angle, 0, 0, direction * frames + index)
     output.write_text(sprite.dump())
+    cache.commit()
     return f'./original_entity_graphics/{stem}.sprite'
 
 
@@ -129,9 +140,78 @@ def _definitions(scene, original, destination, catalog):
     return result
 
 
+def _hud_icons(original: Path, destination: Path, catalog: Path, definitions: dict[str, dict]) -> None:
+    """Prepare original portraits and action subjects without a runtime DAT reader."""
+    from scripts.tech_tree.catalog import IconExporter
+
+    exporter = IconExporter(original, destination / "hud")
+    actions = original / "widgetui/textures/ingame/actions"
+    for command, identifier in (("stop", 3), ("cancel", 0), ("pack", 16), ("unpack", 17)):
+        source = actions / f"{identifier:03d}_.png"
+        target = exporter.output / f"command.{command}.png"
+        if source.is_file():
+            exporter.export_image(source, target)
+        else:
+            target.unlink(missing_ok=True)
+    units = json.loads(gzip.decompress((catalog / "raw/civilizations/00-gaia.json.gz").read_bytes()))["units"]
+    technologies = json.loads(gzip.decompress((catalog / "raw/technologies.json.gz").read_bytes()))
+    subjects = {}
+    for identifier, (name, folder) in (names.UNIT_LINE_LOOKUPS | names.BUILDING_LINE_LOOKUPS).items():
+        subjects[f"de2_base.data.game_entity.generic.{folder}.{folder}.{name}"] = (
+            units[identifier]["icon_id"],
+            "building" if units[identifier]["type"] == 80 else "unit",
+        )
+    subjects["de2_base.data.game_entity.generic.villager.villager.Villager"] = (units[83]["icon_id"], "unit")
+    for identifier, definition in definitions.items():
+        unit = units[int(identifier)]
+        subjects[definition["fqon"]] = (unit["icon_id"], "building" if unit["type"] == 80 else "unit")
+    for identifier, (name, folder) in names.TECH_GROUP_LOOKUPS.items():
+        subjects[f"de2_base.data.tech.generic.{folder}.{folder}.{name}"] = (
+            technologies[identifier]["icon_id"],
+            "technology",
+        )
+    for subject, (icon_id, kind) in sorted(subjects.items()):
+        target = exporter.output / f"{subject}.png"
+        if icon_id < 0:
+            target.unlink(missing_ok=True)
+            continue
+        if icon := exporter.icon(icon_id, kind):
+            image = (exporter.output / icon).read_bytes()
+            if not target.is_file() or target.read_bytes() != image:
+                target.write_bytes(image)
+        else:
+            target.unlink(missing_ok=True)
+
+
+def _civilization_actions(catalog, civilization):
+    metadata = json.loads(gzip.decompress((catalog / 'raw/civilization_metadata.json.gz').read_bytes()))
+    record = next((item for item in metadata if item['data_name'] == civilization), None)
+    if record is None:
+        raise ValueError(f'Unknown source civilization: {civilization}')
+    slug = record['internal_name'].lower().replace(' ', '-')
+    matches = list((catalog / 'civilizations').glob(f'*-{slug}.json'))
+    if len(matches) != 1:
+        raise ValueError(f'Missing exported civilization availability: {civilization}')
+    nodes = json.loads(matches[0].read_text())['nodes']
+    units = ({83: ('Villager', 'villager'), 293: ('Villager', 'villager')}
+             | names.UNIT_LINE_LOOKUPS | names.BUILDING_LINE_LOOKUPS)
+    allowed = set()
+    for node in nodes:
+        if not node['available']:
+            continue
+        technology = node['kind'] == 'technology'
+        definition = (names.TECH_GROUP_LOOKUPS if technology else units).get(node['genie_id'])
+        if definition:
+            name, folder = definition
+            namespace = 'tech' if technology else 'game_entity'
+            allowed.add(f'de2_base.data.{namespace}.generic.{folder}.{folder}.{name}')
+    return sorted(allowed)
+
+
 def original_scene(template, mission, original, destination, catalog):
     scene = json.loads(mission.read_text())
     definitions = _definitions(scene, original, destination, catalog)
+    _hud_icons(original, destination, catalog, definitions)
     # Reserve player 2 for Gaia, preserving other slots if a later scene uses them.
     remap = {0: 2, 1: 0, 2: 1, **{index: index for index in range(3, 9)}}
     active = {0, 1} | {unit['player'] for unit in scene['units']}
@@ -154,7 +234,10 @@ def original_scene(template, mission, original, destination, catalog):
             if entry:
                 name, folder = entry
                 disabled.append(f'de2_base.data.game_entity.generic.{folder}.{folder}.{name}')
-        source_players.append(dict(player, runtime_id=owner, disabled_subjects=disabled))
+        record = dict(player, runtime_id=owner, disabled_subjects=disabled)
+        if index != 0:
+            record['allowed_subjects'] = _civilization_actions(catalog, player['civilization'])
+        source_players.append(record)
     placements = [EntityPlacement(f"object_{unit['reference_id']}", definitions[str(unit['unit_const'])]['fqon'],
                                  remap[unit['player']], (unit['x'], unit['y']), unit['rotation'],
                                  {'genie_id': unit['unit_const'], 'height': unit['z'], 'source_id': unit['reference_id']})
@@ -178,17 +261,23 @@ def original_scene(template, mission, original, destination, catalog):
                 continue
             stance = 'neutral' if 0 in (a, b) else {0: 'ally', 1: 'neutral', 3: 'enemy'}.get(scene['players'][a]['diplomacy'][b - 1], 'neutral')
             diplomacy.append((remap[a], remap[b], stance))
-    number = 1 if '_1.' in scene['source_file'] else 2
+    match = __import__('re').search(r'_(\d+)\.', scene['source_file'])
+    number = int(match.group(1)) if match else 1
     metadata = {'mission': number, 'source_sha256': scene['source_sha256'], 'players': source_players,
+                'ai_test_variant': scene.get('ai_test_variant', 'original'),
                 'definitions': definitions,
                 'technologies': {str(identifier): f'de2_base.data.tech.generic.{folder}.{folder}.{name}'
                                  for identifier, (name, folder) in names.TECH_GROUP_LOOKUPS.items()},
                 'player_map': {str(key): value for key, value in remap.items()},
+                'variables': scene.get('variables', []),
                 'triggers': [{key: value for key, value in trigger.items() if key not in ('conditions', 'effects', 'new_effect', 'new_condition')} for trigger in scene['triggers']],
                 'objects': {str(unit['reference_id']): unit['unit_const'] for unit in scene['units']}}
     metadata['technologies']['90'] = f'{PREFIX}.Tracking'
+    raw_terrain = catalog / 'raw/globals.json.gz'
+    terrain_definitions = json.loads(gzip.decompress(raw_terrain.read_bytes()))['terrain_block']['terrains']
     return replace(template, id=f'ww_mission{number}_original', source='original-aoe2scenario', source_file=scene['source_file'],
-                   map=convert_terrain(terrain, original / 'resources/_common/terrain/textures/2x', destination),
+                   map=convert_terrain(terrain, original / 'resources/_common/terrain/textures/2x',
+                                       destination, terrain_definitions),
                    players=players, placements=placements, areas=[], triggers=triggers,
                    victory=VictoryDefinition('original-triggers'), diplomacy=tuple(diplomacy), fog_of_war=True,
                    original_scenario=metadata)

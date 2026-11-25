@@ -29,16 +29,16 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
                     const std::shared_ptr<renderer::camera::CameraManager> &cam_manager) {
 	// arrow movements
 	binding_func_t move_left{[&](const event_arguments & /*args*/) {
-		cam_manager->move_frame(renderer::camera::MoveDirection::LEFT, 0.5f);
+		cam_manager->move_frame(renderer::camera::MoveDirection::LEFT, 0.2f);
 	}};
 	binding_func_t move_right{[&](const event_arguments & /*args*/) {
-		cam_manager->move_frame(renderer::camera::MoveDirection::RIGHT, 0.5f);
+		cam_manager->move_frame(renderer::camera::MoveDirection::RIGHT, 0.2f);
 	}};
 	binding_func_t move_forward{[&](const event_arguments & /*args*/) {
-		cam_manager->move_frame(renderer::camera::MoveDirection::FORWARD, 0.5f);
+		cam_manager->move_frame(renderer::camera::MoveDirection::FORWARD, 0.2f);
 	}};
 	binding_func_t move_backward{[&](const event_arguments & /*args*/) {
-		cam_manager->move_frame(renderer::camera::MoveDirection::BACKWARD, 0.5f);
+		cam_manager->move_frame(renderer::camera::MoveDirection::BACKWARD, 0.2f);
 	}};
 
 	binding_action move_left_action{move_left};
@@ -59,11 +59,11 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	// zoom
 	binding_func_t zoom_in{[&](const event_arguments & /* args */) {
 		// TODO: Use delta from QWheelEvent?
-		cam_manager->zoom_frame(renderer::camera::ZoomDirection::IN, 0.05f);
+		cam_manager->zoom_frame(renderer::camera::ZoomDirection::IN, 0.03f);
 	}};
 	binding_func_t zoom_out{[&](const event_arguments & /* args */) {
 		// TODO: Use delta from QWheelEvent?
-		cam_manager->zoom_frame(renderer::camera::ZoomDirection::OUT, 0.05f);
+		cam_manager->zoom_frame(renderer::camera::ZoomDirection::OUT, 0.03f);
 	}};
 
 	binding_action zoom_in_action{zoom_in};

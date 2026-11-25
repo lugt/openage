@@ -51,3 +51,7 @@ pxdgen(
 add_subdirectory(compress)
 add_subdirectory(filelike)
 add_subdirectory(fslike)
+
+add_sources(libopenage MODULE
+	snapshot_text.cpp
+)

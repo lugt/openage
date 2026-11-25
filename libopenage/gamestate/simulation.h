@@ -3,9 +3,11 @@
 #pragma once
 
 #include <atomic>
+#include <vector>
 #include <shared_mutex>
 
 #include "util/path.h"
+#include "time/time.h"
 
 #include "gamestate/event/removal.h"
 
@@ -21,6 +23,7 @@ class CVarManager;
 
 namespace event {
 class EventLoop;
+class EventHandler;
 } // namespace event
 
 namespace renderer {
@@ -42,6 +45,7 @@ class TerrainFactory;
 
 namespace event {
 class Commander;
+class EconomyActionHandler;
 class Spawner;
 } // namespace event
 
@@ -135,6 +139,13 @@ public:
 	 * `engine::Engine::loop()` after `initialize()` has fully returned.
 	 */
 	void run();
+	/** Configure explicitly selected computer players after initialization. */
+	void configure_ai(const std::string &json);
+	/** Canonical submitted AI operations, for headless regression tests. */
+	std::string ai_trace() const;
+	std::string ai_snapshot(time::time_t at) const;
+	bool has_ai() const { return not this->computer_players.empty(); }
+
 
 	/**
 	 * Start the simulation loop. **Deprecated** as a public verb -- the
@@ -231,10 +242,16 @@ public:
 	 * trigger instances). Used by the ViewModel layer
 	 * (MissionView, future SelectionView) to read the single
 	 * source of truth for objective lifecycle and victory.
+	 * Returns nullptr before initialization or if both scenario and player setup are absent.
 	 */
 	const std::shared_ptr<::openage::scenario::trigger::TriggerRuntime> &
 	get_trigger_runtime() const {
 		return this->trigger_runtime;
+	}
+
+	const std::shared_ptr<openage::time::TimeLoop> &
+	get_time_loop() const {
+		return this->time_loop;
 	}
 
 	/**
@@ -287,6 +304,8 @@ public:
 	std::atomic<bool> running;
 
 private:
+	std::shared_ptr<event::EconomyActionHandler> economy_handler;
+	std::vector<std::shared_ptr<openage::event::EventHandler>> computer_players;
 	/**
 	 * Initialize event handlers.
 	 */

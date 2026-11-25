@@ -120,7 +120,7 @@ run_regression() {
 	# 50 is the regression test for selecting an entity without optional
 	# components (a TownCenter has no Attack component). 51 exercises the
 	# production RMB binding, including real entity picking.
-	for ID in 7 9 10 11 12 13 14 15 16 17 18 19 20 22 23 24 25 26 27 28 29 30 31 32 35 36 37 38 42 46 47 48 49 50 51; do
+	for ID in 7 9 10 11 12 13 14 15 16 17 18 19 20 22 23 24 25 26 27 28 29 30 31 32 35 36 37 38 42 46 47 48 49 50 51 55; do
 		# Run once, capture the output for the per-demo verdict, and
 		# append the same output to the log. (Running each demo twice
 		# doubled the wall clock for no extra coverage.)

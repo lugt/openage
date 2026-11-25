@@ -2,13 +2,9 @@
 //
 // P4.4C: WaypointReachedEvent + MovementArrivedEvent handlers.
 //
-// Both are OnceEventHandler loggers: they observe the dispatch
-// of the corresponding event name so any system that wants to
-// react to movement progress (HUD waypoint counter, audio
-// footsteps, AI perception, future replay log) can register an
-// observer via the EventLoop. The handlers themselves do NOT
-// mutate game state; they only log the arrival so a regression
-// is visible in the diagnostic stream.
+// The handlers notify movement observers. MovementArrivedHandler also
+// resumes temporarily blocked player orders through scheduled replans;
+// generation checks discard retries superseded by movement or stop.
 //
 // Event names:
 //   "game.waypoint_reached"  -- fired by Move::move_default at

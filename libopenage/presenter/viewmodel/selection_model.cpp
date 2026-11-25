@@ -111,14 +111,15 @@ SelectionModel::SelectionModel(
 				}
 			});
 
-		// Wire the mission-state victory listener.
-		auto &ms = this->sim_->get_trigger_runtime()->mission_state();
-		ms.set_victory_listener(
-			[this](const std::string &reason) {
-				for (auto &cb : this->ms_cbs_) {
-					cb(reason);
-				}
-			});
+		// Ordinary games have no mission runtime to subscribe to.
+		if (const auto &runtime = this->sim_->get_trigger_runtime()) {
+			runtime->mission_state().set_victory_listener(
+				[this](const std::string &reason) {
+					for (auto &cb : this->ms_cbs_) {
+						cb(reason);
+					}
+				});
+		}
 	}
 }
 

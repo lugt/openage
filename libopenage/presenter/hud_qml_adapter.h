@@ -24,6 +24,7 @@
 
 
 namespace openage::gamestate {
+class ChatConsole;
 class GameSimulation;
 }
 
@@ -65,18 +66,21 @@ class HudQmlAdapter : public QObject {
 		NOTIFY mission_changed)
 	Q_PROPERTY(QVariantList selectionCards READ selection_cards NOTIFY selection_details_changed)
 	Q_PROPERTY(QVariantList actionOptions READ action_options NOTIFY selection_details_changed)
+	Q_PROPERTY(QVariantMap commandIcons READ command_icons NOTIFY selection_details_changed)
 	Q_PROPERTY(QString actionStatus READ action_status NOTIFY action_status_changed)
 	Q_PROPERTY(int constructionProgress READ construction_progress NOTIFY selection_details_changed)
 	Q_PROPERTY(bool canStop READ can_stop NOTIFY selection_details_changed)
 	Q_PROPERTY(int commandBarHeight READ command_bar_height CONSTANT)
 	Q_PROPERTY(int economyBarWidth READ economy_bar_width CONSTANT)
 	Q_PROPERTY(int economyBarHeight READ economy_bar_height CONSTANT)
+	Q_PROPERTY(QVariantList leaderboard READ leaderboard NOTIFY leaderboard_changed)
 	Q_PROPERTY(qint64 wood READ wood NOTIFY economy_changed)
 	Q_PROPERTY(qint64 food READ food NOTIFY economy_changed)
 	Q_PROPERTY(qint64 gold READ gold NOTIFY economy_changed)
 	Q_PROPERTY(qint64 stone READ stone NOTIFY economy_changed)
 	Q_PROPERTY(qint64 population READ population NOTIFY economy_changed)
 	Q_PROPERTY(qint64 populationCapacity READ population_capacity NOTIFY economy_changed)
+	Q_PROPERTY(int idleVillagers READ idle_villagers NOTIFY idle_villagers_changed)
 	Q_PROPERTY(bool mapUnits READ map_units NOTIFY map_options_changed)
 	Q_PROPERTY(bool mapViewport READ map_viewport NOTIFY map_options_changed)
 	Q_PROPERTY(QString minimap READ minimap NOTIFY map_changed)
@@ -85,6 +89,14 @@ class HudQmlAdapter : public QObject {
 	Q_PROPERTY(QString missionStockpile READ mission_stockpile NOTIFY mission_changed)
 	Q_PROPERTY(QString missionDefeatEnemyState READ mission_defeat_enemy_state
 		NOTIFY mission_changed)
+	Q_PROPERTY(bool chatOpen READ chat_open NOTIFY chat_open_changed)
+	Q_PROPERTY(QVariantList chatMessages READ chat_messages NOTIFY chat_messages_changed)
+	Q_PROPERTY(bool menuOpen READ menu_open NOTIFY menu_open_changed)
+	Q_PROPERTY(QString menuPage READ menu_page NOTIFY menu_page_changed)
+	Q_PROPERTY(QString menuStatus READ menu_status NOTIFY menu_status_changed)
+	Q_PROPERTY(QVariantList saveSlots READ save_slots NOTIFY save_slots_changed)
+	Q_PROPERTY(qreal gameSpeed READ game_speed NOTIFY settings_changed)
+	Q_PROPERTY(bool fogEnabled READ fog_enabled NOTIFY settings_changed)
 
 public:
 	explicit HudQmlAdapter(QObject *parent = nullptr);
@@ -118,6 +130,7 @@ public:
 	bool mission_is_victory() const { return this->ms_victory_; }
 	QString mission_victory_reason() const { return this->ms_reason_; }
 	QVariantList selection_cards() const { return this->cards; }
+	QVariantMap command_icons() const { return this->command_images; }
 	QVariantList action_options() const { return this->actions; }
 	QString action_status() const { return this->status; }
 	void set_action_status(QString status);
@@ -125,18 +138,23 @@ public:
 	int construction_progress() const { return this->construction; }
 	bool can_stop() const { return this->stop_enabled; }
 	int command_bar_height() const { return 146; }
-	int economy_bar_width() const { return 360; }
+	int economy_bar_width() const { return 430; }
 	int economy_bar_height() const { return 42; }
+	QVariantList leaderboard() const { return this->ranking; }
 	qint64 wood() const { return this->economy.wood; }
 	qint64 food() const { return this->economy.food; }
 	qint64 gold() const { return this->economy.gold; }
 	qint64 stone() const { return this->economy.stone; }
 	qint64 population() const { return this->economy.population; }
 	qint64 population_capacity() const { return this->economy.population_capacity; }
+	int idle_villagers() const { return this->idle_villagers_; }
+	void set_idle_villagers(int count);
+	Q_INVOKABLE void jumpIdleVillager() { emit idle_villager_requested(); }
 	void refresh_economy(gamestate::player_id_t player);
 	bool map_units() const { return this->show_units; }
 	bool map_viewport() const { return this->show_viewport; }
-	void set_selection_details(QVariantList cards, QVariantList actions, int construction, bool can_stop);
+	void set_selection_details(QVariantList cards, QVariantList actions, int construction, bool can_stop,
+	                           QVariantMap command_icons);
 	Q_INVOKABLE void selectCard(int index) { emit card_requested(index); }
 	Q_INVOKABLE void stopSelected() { emit stop_requested(); }
 	Q_INVOKABLE void clearSelection() { emit clear_requested(); }
@@ -152,6 +170,29 @@ public:
 	QString mission_route() const { return this->ms_route_; }
 	QString mission_stockpile() const { return this->ms_stockpile_; }
 	QString mission_defeat_enemy_state() const { return this->ms_defeat_state_; }
+	bool chat_open() const { return this->chat_open_; }
+	QVariantList chat_messages() const { return this->chat_messages_; }
+	Q_INVOKABLE void openChat();
+	Q_INVOKABLE void closeChat();
+	Q_INVOKABLE void submitChat(const QString &text);
+	Q_INVOKABLE void pasteToChat();
+	bool menu_open() const { return this->menu_open_; }
+	QString menu_page() const { return this->menu_page_; }
+	QString menu_status() const { return this->menu_status_; }
+	QVariantList save_slots() const { return this->save_slots_; }
+	qreal game_speed() const { return this->game_speed_; }
+	bool fog_enabled() const;
+	void set_saves_dir(std::string dir) { this->saves_dir_ = std::move(dir); }
+	Q_INVOKABLE void openMenu();
+	Q_INVOKABLE void closeMenu();
+	Q_INVOKABLE void toggleMenu();
+	Q_INVOKABLE void setMenuPage(const QString &page);
+	Q_INVOKABLE void refreshSaves();
+	Q_INVOKABLE void saveGame(const QString &slotName);
+	Q_INVOKABLE void loadGame(const QString &slotName);
+	Q_INVOKABLE void setGameSpeed(qreal speed);
+	Q_INVOKABLE void toggleFogSetting();
+	Q_INVOKABLE void quitGame() { emit quit_requested(); }
 
 signals:
 	void selection_details_changed();
@@ -169,6 +210,19 @@ signals:
 	void health_changed();
 	void mission_changed();
 	void economy_changed();
+	void idle_villagers_changed();
+	void idle_villager_requested();
+	void leaderboard_changed();
+	void chat_open_changed();
+	void chat_messages_changed();
+	void chat_paste_requested(const QString &text);
+	void menu_open_changed();
+	void menu_page_changed();
+	void menu_status_changed();
+	void save_slots_changed();
+	void settings_changed();
+	void game_loaded();
+	void quit_requested();
 
 private:
 	void refresh_selection(std::optional<gamestate::entity_id_t> entity_id);
@@ -191,6 +245,7 @@ private:
 	QImage minimap_image;
 	QVariantList relations;
 	QVariantList cards;
+	QVariantMap command_images;
 	QVariantList actions;
 	QString status;
 	int construction = -1;
@@ -201,8 +256,20 @@ private:
 	QString ms_stockpile_;
 	QString ms_defeat_state_{"INACTIVE"};
 	gamestate::PlayerEconomy economy;
+	int idle_villagers_{0};
+	QVariantList ranking;
+	bool chat_open_{false};
+	QVariantList chat_messages_;
+	bool menu_open_{false};
+	QString menu_page_{"main"};
+	QString menu_status_;
+	QVariantList save_slots_;
+	qreal game_speed_{1.0};
+	qreal pre_menu_speed_{1.0};
+	std::string saves_dir_{"saves"};
 
 	std::shared_ptr<openage::gamestate::GameSimulation> sim_;
+	std::unique_ptr<openage::gamestate::ChatConsole> chat_console_;
 };
 
 

@@ -10,6 +10,7 @@
 #include "event/event_loop.h"
 #include "coord/tile.h"
 #include "gamestate/component/api/attack.h"
+#include "gamestate/component/api/build.h"
 #include "gamestate/component/internal/activity.h"
 #include "gamestate/component/internal/commands/attack.h"
 #include "gamestate/component/internal/commands/move.h"
@@ -115,14 +116,14 @@ OriginalScenario::OriginalScenario(TriggerRuntime &runtime, std::shared_ptr<game
 
 std::shared_ptr<TriggerCondition> OriginalScenario::condition(const gamestate::MissionTriggerCondition &ir) {
     const auto type = number(ir.args, "condition_type");
-    // All variants present in the two source scenes. Unknown records must fail before play.
-    const std::set<int64_t> supported{1, 4, 5, 6, 8, 10, 11, 13, 15, 22};
+    // All variants present in the source scenes. Unknown records must fail before play.
+    const std::set<int64_t> supported{1, 3, 4, 5, 6, 8, 10, 11, 13, 15, 22};
     if (not supported.contains(type)) throw std::invalid_argument{"Unsupported original condition " + std::to_string(type)};
     return std::make_shared<OriginalCondition>(shared_from_this(), ir.args);
 }
 std::shared_ptr<TriggerEffect> OriginalScenario::effect(const gamestate::MissionTriggerEffect &ir) {
     const auto type = number(ir.args, "effect_type");
-    const std::set<int64_t> supported{2, 8, 9, 11, 12, 13, 15, 16, 20, 56};
+    const std::set<int64_t> supported{2, 4, 8, 9, 11, 12, 13, 15, 16, 20, 21, 56};
     if (not supported.contains(type)) throw std::invalid_argument{"Unsupported original effect " + std::to_string(type)};
     return std::make_shared<OriginalEffect>(ir.args);
 }
@@ -142,8 +143,23 @@ const Value *OriginalScenario::definition(const gamestate::GameEntity &entity) c
 void OriginalScenario::initialize() {
     state_->get_event_loop()->add_event_handler(std::make_shared<OriginalEffectHandler>(weak_from_this()));
     state_->get_event_loop()->add_event_handler(std::make_shared<OriginalSelectionHandler>(weak_from_this()));
+    if (config_.has("variables") and config_.at("variables").is_array()) {
+        for (const auto &var : config_.at("variables").as_array()) {
+            const auto name = text(var, "name");
+            const auto id = number(var, "variable_id", -1);
+            if (not name.empty() and id >= 0) {
+                variable_ids_[name] = id;
+            }
+        }
+    }
     for (const auto &record : config_.at("players").as_array()) {
         const auto slot = state_->get_player(static_cast<gamestate::player_id_t>(number(record, "runtime_id")));
+        slot->is_gaia = slot->get_id() == player(0);
+        if (record.has("allowed_subjects")) {
+            std::unordered_set<nyan::fqon_t> allowed;
+            for (const auto &subject : record.at("allowed_subjects").as_array()) allowed.insert(subject.as_string());
+            slot->set_allowed_actions(std::move(allowed));
+        }
         for (const auto *resource : {"Food", "Wood", "Stone", "Gold"}) {
             std::string key = resource;
             std::ranges::transform(key, key.begin(), [](unsigned char c) { return std::tolower(c); });
@@ -166,7 +182,8 @@ void OriginalScenario::initialize() {
         }
         if (number(record, "enabled", 0)) activate(index, true, time::time_t::zero());
     }
-    runtime_.mission_state().set_instruction(objective_text_);
+    current_instruction_ = objective_text_;
+    runtime_.mission_state().set_instruction(substitute_variables(current_instruction_));
     changed(time::time_t::zero());
 }
 
@@ -215,6 +232,12 @@ std::vector<std::shared_ptr<gamestate::GameEntity>> OriginalScenario::matching(c
         }
         if (number(record, "object_type") > 0 and (not data or number(*data, "object_type") != number(record, "object_type"))) continue;
         if (number(record, "object_group") >= 0 and (not data or number(*data, "class") != number(record, "object_group"))) continue;
+        if (not effects and number(record, "condition_type") == 3) {
+            if (const auto build = entity->try_get_component_as<gamestate::component::Build>(component_t::BUILD);
+                build and build->is_under_construction()) {
+                continue;
+            }
+        }
         if (not in_area(record, position(*entity, at))) continue;
         result.push_back(entity);
     }
@@ -289,7 +312,15 @@ void OriginalScenario::execute(const Value &effect, time::time_t at) {
     const auto type = number(effect, "effect_type");
     const auto loop = state_->get_event_loop();
     if (type == 20) {
-        runtime_.mission_state().set_instruction(text(effect, "message"));
+        current_instruction_ = text(effect, "message");
+        runtime_.mission_state().set_instruction(substitute_variables(current_instruction_));
+    }
+    else if (type == 21) {
+        current_instruction_ = objective_text_;
+        runtime_.mission_state().set_instruction(substitute_variables(current_instruction_));
+    }
+    else if (type == 4) {
+        // Sound effect playback is currently silent in headless/campaign runtime.
     }
     else if (type == 8 or type == 9) activate(number(effect, "trigger_id"), type == 8, at);
     else if (type == 13) {
@@ -304,6 +335,7 @@ void OriginalScenario::execute(const Value &effect, time::time_t at) {
             case 3: variables_[variable] -= amount; break;
             default: throw std::invalid_argument{"Unsupported original variable operation"};
         }
+        runtime_.mission_state().set_instruction(substitute_variables(current_instruction_));
     }
     else if (type == 16) {
         std::lock_guard lock{input_mutex_};
@@ -401,5 +433,36 @@ void OriginalScenario::select(const std::vector<gamestate::entity_id_t> &ids, ti
 std::optional<coord::scene3> OriginalScenario::take_camera() {
     std::lock_guard lock{input_mutex_};
     return std::exchange(camera_, std::nullopt);
+}
+std::string OriginalScenario::substitute_variables(const std::string &tmpl) const {
+    if (tmpl.find('<') == std::string::npos) {
+        return tmpl;
+    }
+    std::string out;
+    out.reserve(tmpl.size());
+    size_t pos = 0;
+    while (pos < tmpl.size()) {
+        const auto open = tmpl.find('<', pos);
+        if (open == std::string::npos) {
+            out.append(tmpl, pos, std::string::npos);
+            break;
+        }
+        const auto close = tmpl.find('>', open + 1);
+        if (close == std::string::npos) {
+            out.append(tmpl, pos, std::string::npos);
+            break;
+        }
+        out.append(tmpl, pos, open - pos);
+        const auto name = tmpl.substr(open + 1, close - open - 1);
+        if (const auto id_it = variable_ids_.find(name); id_it != variable_ids_.end()) {
+            const auto val_it = variables_.find(id_it->second);
+            out.append(std::to_string(val_it != variables_.end() ? val_it->second : 0));
+        }
+        else {
+            out.append(tmpl, open, close - open + 1);
+        }
+        pos = close + 1;
+    }
+    return out;
 }
 }

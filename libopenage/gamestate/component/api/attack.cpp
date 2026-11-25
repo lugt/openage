@@ -18,7 +18,11 @@ component_t Attack::get_type() const {
 }
 
 double Attack::get_cooldown() const {
-	return this->get_ability().get_float("ApplyDiscreteEffect.reload_time");
+	const auto &ability = this->get_ability();
+	if (ability.extends("engine.ability.type.ShootProjectile")) {
+		return ability.get_float("ShootProjectile.reload_time");
+	}
+	return ability.get_float("ApplyDiscreteEffect.reload_time");
 }
 
 double Attack::get_attack_range() const {
@@ -26,6 +30,9 @@ double Attack::get_attack_range() const {
 	// RangedDiscreteEffect (subclass) carries min/max_range. The base
 	// ApplyDiscreteEffect (melee) has no range field, so fall back to the
 	// default engagement range.
+	if (ability.extends("engine.ability.type.ShootProjectile")) {
+		return ability.get_float("ShootProjectile.max_range");
+	}
 	if (ability.extends("engine.ability.type.RangedDiscreteEffect")) {
 		const auto &holder = ability.get_value("RangedDiscreteEffect.max_range");
 		if (const auto *flt = dynamic_cast<const nyan::Float *>(holder.get_ptr().get())) {
@@ -155,6 +162,9 @@ bool visit_first_decrease_effect(const nyan::Object &ability, Visitor &&visit) {
 
 
 int64_t Attack::get_damage() const {
+	if (this->get_ability().extends("engine.ability.type.ShootProjectile")) {
+		return 200;
+	}
 	int64_t damage = 0;
 	visit_first_decrease_effect(
 		this->get_ability(),
@@ -170,6 +180,9 @@ int64_t Attack::get_damage() const {
 }
 
 int64_t Attack::get_damage_against(const nyan::Object &resistance) const {
+	if (this->get_ability().extends("engine.ability.type.ShootProjectile")) {
+		return 200;
+	}
 	std::unordered_map<nyan::fqon_t, int64_t> armor;
 	auto target_view = resistance.get_view();
 	for (const auto &fqon : stable_object_fqons(resistance.get_set("Resistance.resistances"))) {
@@ -214,6 +227,9 @@ int64_t Attack::get_damage_against(const nyan::Object &resistance) const {
 }
 
 nyan::fqon_t Attack::get_health_attribute_fqon() const {
+	if (this->get_ability().extends("engine.ability.type.ShootProjectile")) {
+		return "de2_base.data.util.attribute.types.Health";
+	}
 	nyan::fqon_t fqon;
 	visit_first_decrease_effect(
 		this->get_ability(),
@@ -250,6 +266,7 @@ void Attack::start_attack(entity_id_t target, const time::time_t &now) {
 	this->target_id = target;
 	this->next_attack_time = now;
 	this->approaching = false;
+	this->convert_rounds = 0;
 }
 
 void Attack::stop_attack() {

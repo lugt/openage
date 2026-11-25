@@ -2,7 +2,10 @@
 
 #include "window_event_handler.h"
 
+#include <QCloseEvent>
 #include <QEvent>
+#include <QInputEvent>
+#include <QKeyEvent>
 
 #include "log/log.h"
 
@@ -11,6 +14,21 @@ namespace openage::renderer {
 
 
 bool WindowEventHandler::eventFilter(QObject * /* obj */, QEvent *event) {
+	const auto type = event->type();
+	if (this->ignore_user_input
+	    and (dynamic_cast<QInputEvent *>(event) or type == QEvent::InputMethod
+	         or type == QEvent::ContextMenu or type == QEvent::Gesture
+	         or type == QEvent::GestureOverride or type == QEvent::DragEnter
+	         or type == QEvent::DragMove or type == QEvent::DragLeave or type == QEvent::Drop)) {
+		if (type == QEvent::KeyPress and static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
+			this->event_queue.push_back(std::make_shared<QCloseEvent>());
+		}
+		// Consume input before either QML or gameplay callbacks can see it.
+		event->accept();
+		return true;
+	}
+
+
 	auto add_to_queue = [this, event]() {
 		this->event_queue.push_back(std::shared_ptr<QEvent>(event->clone()));
 	};

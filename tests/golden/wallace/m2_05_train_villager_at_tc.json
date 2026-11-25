@@ -1,0 +1,12 @@
+{
+  "mission": 2,
+  "tick_seconds": 1.0,
+  "total_ticks": 80,
+  "snapshot_ticks": [1, 10, 80],
+  "track_instances": ["object_8536"],
+  "commands": [
+    {"tick": 1, "type": "select", "targets": ["object_8536"]},
+    {"tick": 10, "type": "add_resource", "player": 0, "resource": "Food", "amount": 100},
+    {"tick": 12, "type": "train", "actor": "genie:109:0", "unit": "Villager"}
+  ]
+}

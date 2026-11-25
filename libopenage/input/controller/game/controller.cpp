@@ -27,6 +27,7 @@
 #include "event/state.h"
 #include "gamestate/component/api/attack.h"
 #include "gamestate/component/api/build.h"
+#include "gamestate/component/api/live.h"
 #include "gamestate/component/api/move.h"
 #include "gamestate/component/internal/commands/types.h"
 #include "gamestate/component/internal/ownership.h"
@@ -326,17 +327,47 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 		const auto resource_id = pick.entity;
 		if (pick.has_entity) {
 			const auto resource = state->get_game_entity(resource_id);
-			if (pick.entity_owner == viewer and selected_ids.size() == 1
-			    and state->has_game_entity(selected_ids.front())
-			    and state->get_game_entity(selected_ids.front())->construct_ability) {
+			if (pick.entity_owner == viewer) {
 				const auto build = resource->try_get_component_as<gamestate::component::Build>(
 					gamestate::component::component_t::BUILD);
 				if (build and build->ordered_by_player and build->is_under_construction()) {
-					return simulation->get_event_loop()->create_event(
-						"game.economy_action", simulation->get_commander(), state, now, {
-							{"actor", selected_ids.front()}, {"site", resource_id},
-							{"issuer", gamestate::player_id_t{viewer}},
-						});
+					std::shared_ptr<event::Event> last;
+					for (auto id : selected_ids) {
+						if (state->has_game_entity(id) and state->get_game_entity(id)->construct_ability) {
+							last = simulation->get_event_loop()->create_event(
+								"game.economy_action", simulation->get_commander(), state, now, {
+									{"actor", id}, {"site", resource_id},
+									{"issuer", gamestate::player_id_t{viewer}},
+								});
+						}
+					}
+					if (last) {
+						return last;
+					}
+				}
+				if (not build and not resource->is_dead()) {
+					const auto live = resource->try_get_component_as<gamestate::component::Live>(
+						gamestate::component::component_t::LIVE);
+					const nyan::fqon_t health = "de2_base.data.util.attribute.types.Health";
+					const auto hp = live ? live->get_attribute_value(now, health) : std::nullopt;
+					const auto max_hp = live ? live->get_attribute_max(health) : std::nullopt;
+					if (hp and max_hp and *hp < *max_hp) {
+						std::vector<gamestate::entity_id_t> healers;
+						for (auto id : selected_ids) {
+							if (state->has_game_entity(id) and state->get_game_entity(id)->heal_ability) {
+								healers.push_back(id);
+							}
+						}
+						if (not healers.empty()) {
+							return simulation->get_event_loop()->create_event(
+								"game.send_command", simulation->get_commander(), state, now, {
+									{"type", gamestate::component::command::command_t::HEAL},
+									{"target_id", resource_id},
+									{"entity_ids", healers},
+									{"issuer", gamestate::player_id_t{viewer}},
+								});
+						}
+					}
 				}
 			}
 			if (resource->resource_spot.has_value()) {

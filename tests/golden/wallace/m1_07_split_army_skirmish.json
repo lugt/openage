@@ -1,0 +1,16 @@
+{
+  "mission": 1,
+  "tick_seconds": 1.0,
+  "total_ticks": 420,
+  "snapshot_ticks": [295, 360, 420],
+  "track_instances": ["object_5462", "object_13430"],
+  "commands": [
+    {"tick": 1, "type": "select", "targets": ["object_5462"]},
+    {"tick": 30, "type": "move", "targets": ["object_5462"], "x": 54, "y": 38},
+    {"tick": 95, "type": "move", "targets": ["object_5462"], "x": 62, "y": 36},
+    {"tick": 160, "type": "move", "targets": ["object_5462"], "x": 66, "y": 49},
+    {"tick": 225, "type": "move", "targets": ["object_5462"], "x": 63, "y": 63},
+    {"tick": 295, "type": "move", "targets": ["genie:38"], "x": 73, "y": 72},
+    {"tick": 295, "type": "move", "targets": ["genie:74"], "x": 65, "y": 65}
+  ]
+}

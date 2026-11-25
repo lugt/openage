@@ -16,6 +16,8 @@ You can build the project like a regular `CMake` project.
 
 For more build system internals, see [doc/buildsystem.md](/doc/buildsystem.md).
 
+For a desktop window that runs builds, games, Wallace campaign entries, tests and conversion, see the [desktop launcher](launcher.md).
+
 ## Dependencies
 
 Dependencies are needed for:

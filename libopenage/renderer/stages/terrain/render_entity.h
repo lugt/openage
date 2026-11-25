@@ -55,11 +55,15 @@ public:
 	 * @param size Size of the terrain in tiles (width x length)
 	 * @param tiles Animation data for each tile (elevation, terrain path).
 	 * @param time Simulation time of the update.
+	 * @param corner_heights Optional shared corner heights, in row-major order.
+	 * @param terrain_halo Optional row-major (width+2)*(height+2) texture paths,
+	 *                     including a one-tile border; empty paths mark map edges.
 	 */
 	void update(const util::Vector2s size,
 	            const tiles_t tiles,
 	            const time::time_t time = 0.0,
-	            std::span<const float> corner_heights = {});
+	            std::span<const float> corner_heights = {},
+	            std::span<const std::string> terrain_halo = {});
 
 	/**
 	 * Get the vertices of the terrain.
@@ -97,7 +101,12 @@ public:
 	 */
 	const util::Vector2s get_size();
 
+	/** Texture paths for a one-tile border around the chunk, including its interior. */
+	std::vector<std::string> get_terrain_halo();
+
 private:
+	std::vector<std::string> terrain_halo;
+
 	/**
 	 * Chunk dimensions (width x height).
 	 */

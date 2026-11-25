@@ -4,6 +4,7 @@
 
 #include <QCoreApplication>
 #include <QEvent>
+#include <QFocusEvent>
 #include <QQuickWindow>
 
 #include "renderer/gui/guisys/public/gui_renderer.h"
@@ -17,6 +18,12 @@ GuiInputImpl::GuiInputImpl(const std::shared_ptr<GuiRenderer> &renderer) :
 
 
 bool GuiInputImpl::process(const std::shared_ptr<QEvent> &event) {
+	if (this->window and not this->window->isActive()
+	    and (event->type() == QEvent::MouseButtonPress
+	         or event->type() == QEvent::KeyPress)) {
+		QFocusEvent focus_in{QEvent::FocusIn, Qt::ActiveWindowFocusReason};
+		QCoreApplication::instance()->sendEvent(this->window.get(), &focus_in);
+	}
 	switch (event->type()) {
 	case QEvent::MouseButtonPress:
 	case QEvent::MouseButtonRelease:

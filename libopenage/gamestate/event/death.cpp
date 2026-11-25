@@ -64,6 +64,7 @@ void DeathEventHandler::invoke(
 		return;
 	}
 
+	gstate->record_enemy_loss(target_id, params.get("killer", player_id_t{UINT64_MAX}), time);
 	entity->render_death(time);
 	log::log(MSG(info) << "DeathEventHandler: target " << target_id
 	                   << " HP transition fired at t=" << time

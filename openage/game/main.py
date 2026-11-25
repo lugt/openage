@@ -25,6 +25,11 @@ def init_subparser(cli: ArgumentParser) -> None:
     )
 
     cli.add_argument("--headless", action="store_true", help="run without displaying graphics")
+    cli.add_argument(
+        "--ignore-user-input",
+        action="store_true",
+        help="ignore game-window mouse/keyboard input during automation; Escape still exits",
+    )
 
     cli.add_argument(
         "--no-convert",

@@ -4,8 +4,10 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "gamestate/types.h"
 #include "nyan/nyan.h"
@@ -124,9 +126,21 @@ public:
 	const std::unordered_map<nyan::fqon_t, int64_t> &get_resources() const;
 
     void disable_action(const nyan::fqon_t &subject) { this->disabled_actions.insert(subject); }
-    bool allows_action(const nyan::fqon_t &subject) const { return not this->disabled_actions.contains(subject); }
+    bool allows_action(const nyan::fqon_t &subject) const {
+		return not this->disabled_actions.contains(subject)
+		    and (not this->allowed_actions or this->allowed_actions->contains(subject));
+	}
+	/** Civilization availability is shared by AI, UI and production validation. */
+	void set_allowed_actions(std::unordered_set<nyan::fqon_t> subjects) { this->allowed_actions = std::move(subjects); }
 	bool has_researched(const nyan::fqon_t &tech) const { return this->researched.contains(tech); }
 	void record_research(const nyan::fqon_t &tech) { this->researched.insert(tech); }
+	/** Event handlers update these counters only after successful completion. */
+	ScoreLedger score_ledger;
+	bool is_gaia = false;
+	const std::unordered_set<nyan::fqon_t> &get_researched() const { return this->researched; }
+	void set_resource(const nyan::fqon_t &resource_fqon, int64_t amount) {
+		this->resources[resource_fqon] = amount;
+	}
 
 protected:
 	/**
@@ -171,6 +185,7 @@ private:
 	std::unordered_map<nyan::fqon_t, int64_t> resources;
 	std::unordered_set<nyan::fqon_t> researched;
     std::unordered_set<nyan::fqon_t> disabled_actions;
+	std::optional<std::unordered_set<nyan::fqon_t>> allowed_actions;
 };
 
 } // namespace openage::gamestate

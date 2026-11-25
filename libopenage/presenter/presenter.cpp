@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <QGuiApplication>
 #include <QImage>
 #include <QCursor>
 #include <QPixmap>
@@ -20,11 +21,16 @@
 #include <QPolygonF>
 #include <QMouseEvent>
 #include <QTimer>
+#include <QUrl>
 
+#include "error/error.h"
 #include "gamestate/game.h"
+#include "gamestate/component/api/attack.h"
 #include "gamestate/component/api/build.h"
 #include "gamestate/component/api/live.h"
+#include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/internal/commands/types.h"
+#include "time/clock.h"
 #include "gamestate/game_state.h"
 #include "gamestate/player.h"
 #include "scenario/trigger/original_scenario.h"
@@ -34,8 +40,10 @@
 #include "coord/tile.h"
 #include "renderer/gui/guisys/public/gui_input.h"
 #include "gamestate/component/internal/ownership.h"
+#include "gamestate/event/economy_action.h"
 #include "gamestate/event/send_command.h"
 #include "gamestate/simulation.h"
+#include "gamestate/save_load.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
 #include "gamestate/game_entity.h"
@@ -353,10 +361,53 @@ void Presenter::init_gui() {
 
 void Presenter::init_input() {
 	log::log(INFO << "Presenter: Initializing input subsystem...");
+	Is_True(this->window != nullptr, ("Presenter::init_input: window is null"));
 
 	this->input_manager = std::make_shared<input::InputManager>();
 
 	this->window->add_key_callback([&](const QKeyEvent &ev) {
+		if (this->mission_hud) {
+			if (this->mission_hud->chat_open()) {
+				if (ev.type() == QEvent::KeyPress) {
+					if (ev.key() == Qt::Key_Escape) {
+						this->mission_hud->closeChat();
+						return;
+					}
+					if ((ev.modifiers() & (Qt::ControlModifier | Qt::MetaModifier)) != 0
+					    and ev.key() == Qt::Key_V) {
+						this->mission_hud->pasteToChat();
+						return;
+					}
+				}
+				this->gui->get_input_handler()->process(std::shared_ptr<QEvent>(ev.clone()));
+				return;
+			}
+			if (this->mission_hud->menu_open()) {
+				if (ev.type() == QEvent::KeyPress and ev.key() == Qt::Key_Escape) {
+					this->mission_hud->closeMenu();
+					return;
+				}
+				this->gui->get_input_handler()->process(std::shared_ptr<QEvent>(ev.clone()));
+				return;
+			}
+			if (ev.type() == QEvent::KeyPress and ev.key() == Qt::Key_Escape) {
+				if (this->pending_build) {
+					this->pending_build.reset();
+				}
+				else {
+					this->mission_hud->toggleMenu();
+				}
+				return;
+			}
+			if (ev.type() == QEvent::KeyPress
+			    and (ev.key() == Qt::Key_Return or ev.key() == Qt::Key_Enter)) {
+				this->mission_hud->openChat();
+				return;
+			}
+		}
+		if (ev.type() == QEvent::KeyPress and this->handle_gameplay_hotkey(ev)) {
+			return;
+		}
 		this->input_manager->process(ev);
 	});
 	this->window->add_mouse_button_callback([this](const QMouseEvent &ev) {
@@ -410,8 +461,11 @@ void Presenter::init_input() {
 		                   and this->mission_hud->is_interactive(point.x(), point.y(), size[0], size[1]);
 		const coord::input mouse{static_cast<int>(point.x()), static_cast<int>(point.y())};
 		bool attacking = false;
-		if (not over_hud and ev.buttons() == Qt::NoButton and this->game_controller) {
+		if (not over_hud and ev.buttons() == Qt::NoButton and this->game_controller
+		    and this->simulation and this->simulation->get_game()
+		    and this->world_renderer and this->time_loop and this->camera) {
 			const auto state = this->simulation->get_game()->get_state();
+			Is_True(state != nullptr, ("Presenter::mouse_move: game state is null"));
 			attacking = input::game::is_attack_target(state, mouse.to_phys3(this->camera),
 			                                        this->world_renderer->pick(mouse.x, mouse.y),
 			                                        this->game_controller->get_controlled(),
@@ -422,9 +476,11 @@ void Presenter::init_input() {
 			static const auto sword = attack_cursor();
 			this->window->get_qt_window()->setCursor(attacking ? sword : QCursor(Qt::ArrowCursor));
 		}
-		if (this->mission_ui_pressed) {
+		if (this->mission_ui_pressed or over_hud) {
 			this->gui->get_input_handler()->process(std::shared_ptr<QEvent>(ev.clone()));
-			return;
+			if (this->mission_ui_pressed) {
+				return;
+			}
 		}
 		this->input_manager->set_mouse(mouse.x, mouse.y);
 		this->input_manager->process(ev);
@@ -478,6 +534,19 @@ void Presenter::init_input() {
 		// the overlay renderer.
 		this->setup_selection_viewmodel();
 		if (this->mission_hud) {
+			this->mission_hud->set_saves_dir(gamestate::GameSaveManager::directory(this->root_dir));
+			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::game_loaded, [this] {
+				this->pending_build.reset();
+				this->game_controller->set_selected({});
+			});
+			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::quit_requested, [this] {
+				if (this->simulation) {
+					this->simulation->stop();
+				}
+				if (this->window) {
+					this->window->close();
+				}
+			});
 			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::action_requested,
 			                 [this](const QString &option, bool build) {
 				const auto selected = this->game_controller->get_selected();
@@ -487,7 +556,20 @@ void Presenter::init_input() {
 					}
 					else {
 						this->pending_build.reset();
-						this->send_economy_action(selected.front(), option.toStdString());
+						const bool shift_held = (QGuiApplication::keyboardModifiers() & Qt::ShiftModifier) != 0;
+						bool is_train = false;
+						for (const auto &item : this->mission_hud->action_options()) {
+							const auto map = item.toMap();
+							if (map.value(QStringLiteral("id")).toString() == option) {
+								is_train = not map.value(QStringLiteral("research")).toBool()
+								       and not map.value(QStringLiteral("transform")).toBool();
+								break;
+							}
+						}
+						const int count = (shift_held and is_train) ? 5 : 1;
+						for (int i = 0; i < count; ++i) {
+							this->send_economy_action(selected.front(), option.toStdString());
+						}
 					}
 				}
 			});
@@ -503,6 +585,19 @@ void Presenter::init_input() {
 			});
 			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::clear_requested, [this] {
 				this->game_controller->set_selected({});
+			});
+			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::idle_villager_requested, [this] {
+				this->jump_to_next_matching("idle_villager", [](gamestate::GameEntity &e, time::time_t t) {
+					if (e.definition.find("villager") == std::string::npos) {
+						return false;
+					}
+					if (e.construction_order != 0 or e.heal_order != 0) {
+						return false;
+					}
+					auto cmdq = e.try_get_component_as<gamestate::component::CommandQueue>(
+						gamestate::component::component_t::COMMANDQUEUE);
+					return not cmdq or cmdq->get_queue().empty(t);
+				});
 			});
 			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::stop_requested, [this] {
 				event::EventHandler::param_map::map_t params{
@@ -633,10 +728,13 @@ void Presenter::setup_selection_viewmodel() {
 		this->game_controller->set_selection_callback(
 			[this, model](const std::vector<gamestate::entity_id_t> &ids) {
 				model->set_multi_selection(ids);
-                if (this->simulation->get_trigger_runtime()->original_scenario() and this->time_loop) {
-                    this->simulation->get_event_loop()->create_event("scenario.original_selection", this->simulation->get_commander(),
-                        this->simulation->get_game()->get_state(), this->time_loop->get_clock()->get_time(), {{"selection", ids}});
-                }
+				const auto &runtime = this->simulation->get_trigger_runtime();
+				if (runtime and runtime->original_scenario() and this->time_loop) {
+					this->simulation->get_event_loop()->create_event(
+						"scenario.original_selection", this->simulation->get_commander(),
+						this->simulation->get_game()->get_state(),
+						this->time_loop->get_clock()->get_time(), {{"selection", ids}});
+				}
 			});
 	}
 }
@@ -682,10 +780,15 @@ void Presenter::send_economy_action(gamestate::entity_id_t actor, const nyan::fq
 }
 
 void Presenter::update_campaign_map() {
-	if (not this->simulation or not this->game_controller) {
+	if (not this->simulation or not this->simulation->get_game() or not this->game_controller) {
 		return;
 	}
 	const auto &state = this->simulation->get_game()->get_state();
+	Is_True(state != nullptr, ("Presenter::update_campaign_map: game state is null"));
+	if (not this->terrain_renderer or not this->world_renderer or not this->time_loop
+	    or not this->window or not this->camera or not state->get_map() or not state->get_map()->get_terrain()) {
+		return;
+	}
 	const auto viewer = this->game_controller->get_controlled();
 	const auto view = state->visibility(viewer);
 	if (view) {
@@ -705,6 +808,27 @@ void Presenter::update_campaign_map() {
 	}
 	this->next_minimap_update = now + time::time_t::from_double(0.15);
 	this->mission_hud->refresh_economy(viewer);
+	const auto sim_now = this->time_loop->get_clock()->get_time();
+	int idle_villager_count = 0;
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		if (not entity or entity->is_dead() or entity->definition.find("villager") == std::string::npos) {
+			continue;
+		}
+		auto ownership = entity->try_get_component_as<gamestate::component::Ownership>(
+			gamestate::component::component_t::OWNERSHIP);
+		if (not ownership or ownership->get_owners().get(sim_now) != viewer) {
+			continue;
+		}
+		if (entity->construction_order != 0 or entity->heal_order != 0) {
+			continue;
+		}
+		auto cmdq = entity->try_get_component_as<gamestate::component::CommandQueue>(
+			gamestate::component::component_t::COMMANDQUEUE);
+		if (not cmdq or cmdq->get_queue().empty(sim_now)) {
+			++idle_villager_count;
+		}
+	}
+	this->mission_hud->set_idle_villagers(idle_villager_count);
 	this->mission_hud->set_action_status(this->pending_build
 		? QObject::tr("Left-click to place the building. Right-click to cancel.")
 		: QString::fromStdString(state->action_feedback(viewer)));
@@ -783,11 +907,18 @@ void Presenter::update_campaign_map() {
 }
 
 void Presenter::render() {
-    if (this->simulation and this->camera) {
-        if (auto original = this->simulation->get_trigger_runtime()->original_scenario()) {
-            if (auto point = original->take_camera()) this->camera->look_at_coord(*point);
-        }
-    }
+	Is_True(this->hud_renderer != nullptr, ("Presenter::render: hud_renderer is null"));
+	Is_True(this->gui != nullptr, ("Presenter::render: gui is null"));
+	if (this->simulation and this->camera) {
+		const auto &runtime = this->simulation->get_trigger_runtime();
+		if (runtime) {
+			if (auto original = runtime->original_scenario()) {
+				if (auto point = original->take_camera()) {
+					this->camera->look_at_coord(*point);
+				}
+			}
+		}
+	}
 	// TODO: Pass current time to update() instead of fetching it in renderer
 	this->camera_manager->update();
 	this->update_campaign_map();
@@ -795,12 +926,19 @@ void Presenter::render() {
 	this->world_renderer->update();
 
 	std::vector<renderer::hud::SelectionOverlayQuad> quads;
-	if (this->game_controller and this->simulation) {
+	if (this->game_controller and this->simulation and this->simulation->get_game()
+	    and this->time_loop and this->world_renderer) {
 		const auto state = this->simulation->get_game()->get_state();
+		Is_True(state != nullptr, ("Presenter::render: game state is null"));
 		const auto simulation_time = this->time_loop->get_clock()->get_time();
 		const auto render_time = this->time_loop->get_clock()->get_real_time();
 		const auto player = this->game_controller->get_controlled();
 		const auto selected = this->game_controller->get_selected();
+		auto icon_url = [this](const nyan::fqon_t &subject) {
+			const auto path = this->root_dir / "assets" / "converted" / "ww_mvp" / "campaign"
+			                  / "william_wallace" / "hud" / (subject + ".png");
+			return path.is_file() ? QUrl::fromLocalFile(QString::fromStdString(path.resolve_native_path())).toString() : QString{};
+		};
 		QVariantList cards;
 		QVariantList actions;
 		bool can_stop = false;
@@ -838,9 +976,14 @@ void Presenter::render() {
 			}
 			const auto build = entity->try_get_component_as<gamestate::component::Build>(
 				gamestate::component::component_t::BUILD);
+			const QString civ_name = owner == 0 ? QStringLiteral("Celts")
+			                       : owner == 2 ? QStringLiteral("Gaia")
+			                       : QStringLiteral("Britons");
 			cards.emplaceBack(QVariantMap{
 				{"id", QVariant::fromValue<qulonglong>(id)}, {"name", object_label(entity->definition)},
+				{"icon", icon_url(entity->definition)},
 				{"owner", QString::fromStdString(state->get_player_name(owner))},
+				{"civ", civ_name},
 				{"hp", QVariant::fromValue<qlonglong>(hp)}, {"maxHp", QVariant::fromValue<qlonglong>(max_hp)},
 				{"color", color}, {"building", bool(build)},
 			});
@@ -852,20 +995,48 @@ void Presenter::render() {
 						construction = static_cast<int>(build->get_progress());
 					}
 					if (not build or not build->is_under_construction()) {
+						const auto owner_player = state->get_player(owner);
 						for (const auto &option : entity->action_options) {
-                                if (not state->get_player(0)->allows_action(option.subject)) continue;
+							if (owner_player and not owner_player->allows_action(option.subject)) {
+								continue;
+							}
+							if (option.kind == gamestate::ActionKind::Research
+							    and owner_player and owner_player->has_researched(option.subject)) {
+								continue;
+							}
+							const bool available = not owner_player
+							                    or gamestate::event::action_available(option, *state, *owner_player, simulation_time);
+							bool affordable = true;
 							QStringList cost;
+							QVariantList cost_items;
 							for (const auto &[resource, amount] : option.cost) {
 								if (amount > 0) {
-									cost.append(QStringLiteral("%1 %2").arg(amount).arg(object_label(resource)));
+									const bool enough = not owner_player or owner_player->has_enough(resource, amount);
+									affordable = affordable and enough;
+									const QString res_label = object_label(resource);
+									cost.append(QStringLiteral("%1 %2").arg(amount).arg(res_label));
+									cost_items.append(QVariantMap{
+										{"label", res_label},
+										{"amount", static_cast<qlonglong>(amount)},
+										{"enough", enough},
+									});
 								}
 							}
 							actions.append(QVariantMap{
 								{"id", QString::fromStdString(option.id)},
-								{"name", object_label(option.subject)},
+								{"icon", icon_url(option.kind == gamestate::ActionKind::Transform
+								                  ? (entity->unpacked ? "command.pack" : "command.unpack") : option.subject)},
+								{"name", option.kind == gamestate::ActionKind::Transform
+									? (entity->unpacked ? QStringLiteral("Pack") : QStringLiteral("Unpack"))
+									: object_label(option.subject)},
 								{"build", option.kind == gamestate::ActionKind::Build},
 								{"research", option.kind == gamestate::ActionKind::Research},
+								{"transform", option.kind == gamestate::ActionKind::Transform},
 								{"detail", cost.join(QStringLiteral(" · "))},
+								{"costs", cost_items},
+								{"available", available},
+								{"affordable", affordable},
+								{"enabled", available and affordable},
 							});
 						}
 					}
@@ -873,7 +1044,8 @@ void Presenter::render() {
 			}
 		}
 		if (this->mission_hud) {
-			this->mission_hud->set_selection_details(std::move(cards), std::move(actions), construction, can_stop);
+			this->mission_hud->set_selection_details(std::move(cards), std::move(actions), construction, can_stop,
+				{{"stop", icon_url("command.stop")}, {"cancel", icon_url("command.cancel")}});
 		}
 	}
 	this->hud_renderer->set_selection_overlays(std::move(quads));
@@ -893,8 +1065,7 @@ void Presenter::render() {
 	// instead of renderer->display_into_data(): the latter calls glReadnPixels
 	// which requires GL 4.5 and aborts on macOS (GL caps at 4.1). into_data()
 	// is bottom-origin so flip_y(). The PNG is written via QImage::save with a
-	// native path, bypassing util::Path (fslike::Directory::writable() has an
-	// access()-return-value bug that blocks native writes).
+	// native path used by the screenshot acceptance flow.
 	if (const char *shot_env = std::getenv("OPENAGE_DEBUG_SCREENSHOT")) {
 		if (shot_env[0] != '\0') {
 			static int m1_frame = 0;
@@ -908,6 +1079,242 @@ void Presenter::render() {
 			}
 		}
 	}
+}
+
+
+bool Presenter::jump_to_next_matching(
+	const std::string &cycle_key,
+	const std::function<bool(gamestate::GameEntity &, time::time_t)> &pred) {
+	if (not this->simulation or not this->simulation->get_game() or not this->game_controller) {
+		return false;
+	}
+	const auto state = this->simulation->get_game()->get_state();
+	if (not state) {
+		return false;
+	}
+	const time::time_t now = this->time_loop ? this->time_loop->get_clock()->get_time() : time::time_t{0};
+	const auto controlled = static_cast<gamestate::player_id_t>(this->game_controller->get_controlled());
+
+	std::vector<gamestate::entity_id_t> matches;
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		if (not entity or entity->is_dead()) {
+			continue;
+		}
+		auto ownership = entity->try_get_component_as<gamestate::component::Ownership>(
+			gamestate::component::component_t::OWNERSHIP);
+		if (not ownership or ownership->get_owners().get(now) != controlled) {
+			continue;
+		}
+		if (pred(*entity, now)) {
+			matches.push_back(id);
+		}
+	}
+	if (matches.empty()) {
+		if (this->mission_hud) {
+			this->mission_hud->set_action_status(QStringLiteral("No matching unit or building found."));
+		}
+		return true;
+	}
+	std::ranges::sort(matches);
+	auto &idx = this->hotkey_cycle_index_[cycle_key];
+	const auto target_id = matches[idx % matches.size()];
+	idx = (idx + 1) % matches.size();
+
+	this->game_controller->set_selected({target_id});
+	const auto &target = state->get_game_entity(target_id);
+	if (this->camera) {
+		if (auto pos = target->try_get_component_as<gamestate::component::Position>(
+			    gamestate::component::component_t::POSITION)) {
+			const auto p = pos->get_positions().get(now);
+			this->camera->look_at_coord(coord::scene3{p.ne.to_double(), p.se.to_double(), p.up.to_double()});
+		}
+	}
+	return true;
+}
+
+
+bool Presenter::handle_gameplay_hotkey(const QKeyEvent &ev) {
+	if (not this->simulation or not this->simulation->get_game() or not this->game_controller) {
+		return false;
+	}
+	const auto mods = ev.modifiers();
+	const bool ctrl = (mods & (Qt::ControlModifier
+#ifdef __APPLE__
+	                           | Qt::MetaModifier
+#endif
+	                           )) != 0;
+	const bool shift = (mods & Qt::ShiftModifier) != 0;
+	const bool alt = (mods & Qt::AltModifier) != 0;
+	if (alt) {
+		return false;
+	}
+	const int key = ev.key();
+	const auto state = this->simulation->get_game()->get_state();
+	const time::time_t now = this->time_loop ? this->time_loop->get_clock()->get_time() : time::time_t{0};
+
+	// 1. Control groups: Ctrl+1..9 assign, Shift+1..9 append, 1..9 recall (and center if already selected)
+	if (key >= Qt::Key_1 and key <= Qt::Key_9) {
+		const size_t group_idx = static_cast<size_t>(key - Qt::Key_0);
+		if (ctrl) {
+			this->control_groups_[group_idx] = this->game_controller->get_selected();
+			if (this->mission_hud) {
+				this->mission_hud->set_action_status(
+					QStringLiteral("Assigned group %1 (%2 units).")
+						.arg(group_idx)
+						.arg(this->control_groups_[group_idx].size()));
+			}
+			return true;
+		}
+		std::vector<gamestate::entity_id_t> alive;
+		for (auto id : this->control_groups_[group_idx]) {
+			if (state and state->has_game_entity(id) and not state->get_game_entity(id)->is_dead()) {
+				alive.push_back(id);
+			}
+		}
+		if (shift) {
+			auto current = this->game_controller->get_selected();
+			for (auto id : alive) {
+				if (std::ranges::find(current, id) == current.end()) {
+					current.push_back(id);
+				}
+			}
+			this->game_controller->set_selected(current);
+			return true;
+		}
+		const auto prev = this->game_controller->get_selected();
+		this->game_controller->set_selected(alive);
+		if (not alive.empty() and prev == alive and this->camera) {
+			const auto &e = state->get_game_entity(alive.front());
+			if (auto pos = e->try_get_component_as<gamestate::component::Position>(
+				    gamestate::component::component_t::POSITION)) {
+				const auto p = pos->get_positions().get(now);
+				this->camera->look_at_coord(coord::scene3{p.ne.to_double(), p.se.to_double(), p.up.to_double()});
+			}
+		}
+		return true;
+	}
+
+	// 2. Building jump hotkeys: Ctrl+<Letter> (and bare H for Town Center)
+	if (ctrl) {
+		static const std::unordered_map<int, std::pair<const char *, const char *>> building_keys{
+			{Qt::Key_H, {"town_center", "Town Center"}},
+			{Qt::Key_B, {"barracks", "Barracks"}},
+			{Qt::Key_A, {"archery_range", "Archery Range"}},
+			{Qt::Key_S, {"stable", "Stable"}},
+			{Qt::Key_K, {"siege_workshop", "Siege Workshop"}},
+			{Qt::Key_V, {"castle", "Castle"}},
+			{Qt::Key_M, {"market", "Market"}},
+			{Qt::Key_U, {"university", "University"}},
+			{Qt::Key_F, {"blacksmith", "Blacksmith"}},
+			{Qt::Key_I, {"mill", "Mill"}},
+			{Qt::Key_L, {"lumber_camp", "Lumber Camp"}},
+			{Qt::Key_G, {"mining_camp", "Mining Camp"}},
+			{Qt::Key_Y, {"monastery", "Monastery"}},
+			{Qt::Key_D, {"dock", "Dock"}},
+		};
+		if (const auto it = building_keys.find(key); it != building_keys.end()) {
+			const std::string sub = it->second.first;
+			return this->jump_to_next_matching("bld_" + sub, [sub](gamestate::GameEntity &e, time::time_t) {
+				auto build = e.try_get_component_as<gamestate::component::Build>(
+					gamestate::component::component_t::BUILD);
+				const bool finished = not build or not build->is_under_construction();
+				return finished and e.definition.find(sub) != std::string::npos;
+			});
+		}
+		return false;
+	}
+
+	// 3. Global navigation & speed hotkeys
+	if (key == Qt::Key_Period) {
+		return this->jump_to_next_matching("idle_villager", [](gamestate::GameEntity &e, time::time_t t) {
+			if (e.definition.find("villager") == std::string::npos) {
+				return false;
+			}
+			if (e.construction_order != 0 or e.heal_order != 0) {
+				return false;
+			}
+			auto cmdq = e.try_get_component_as<gamestate::component::CommandQueue>(
+				gamestate::component::component_t::COMMANDQUEUE);
+			return not cmdq or cmdq->get_queue().empty(t);
+		});
+	}
+	if (key == Qt::Key_Comma) {
+		return this->jump_to_next_matching("idle_military", [](gamestate::GameEntity &e, time::time_t t) {
+			if (e.definition.find("villager") != std::string::npos) {
+				return false;
+			}
+			if (not e.has_component(gamestate::component::component_t::MOVE)
+			    or not e.has_component(gamestate::component::component_t::ATTACK)) {
+				return false;
+			}
+			auto cmdq = e.try_get_component_as<gamestate::component::CommandQueue>(
+				gamestate::component::component_t::COMMANDQUEUE);
+			auto atk = e.try_get_component_as<gamestate::component::Attack>(
+				gamestate::component::component_t::ATTACK);
+			const bool atk_active = atk and atk->is_active();
+			return (not cmdq or cmdq->get_queue().empty(t)) and not atk_active;
+		});
+	}
+	if (key == Qt::Key_H) {
+		return this->jump_to_next_matching("bld_town_center", [](gamestate::GameEntity &e, time::time_t) {
+			auto build = e.try_get_component_as<gamestate::component::Build>(
+				gamestate::component::component_t::BUILD);
+			const bool finished = not build or not build->is_under_construction();
+			return finished and e.definition.find("town_center") != std::string::npos;
+		});
+	}
+	if (key == Qt::Key_Space and this->camera and state) {
+		const auto selected = this->game_controller->get_selected();
+		if (not selected.empty() and state->has_game_entity(selected.front())) {
+			const auto &e = state->get_game_entity(selected.front());
+			if (auto pos = e->try_get_component_as<gamestate::component::Position>(
+				    gamestate::component::component_t::POSITION)) {
+				const auto p = pos->get_positions().get(now);
+				this->camera->look_at_coord(coord::scene3{p.ne.to_double(), p.se.to_double(), p.up.to_double()});
+				return true;
+			}
+		}
+		return false;
+	}
+	if ((key == Qt::Key_Plus or key == Qt::Key_Equal or key == Qt::Key_Minus) and this->time_loop) {
+		auto clock = this->time_loop->get_clock();
+		const double cur = clock->get_speed().to_double();
+		const double next = std::clamp(cur + (key == Qt::Key_Minus ? -0.5 : 0.5), 0.5, 4.0);
+		clock->set_speed(time::speed_t::from_double(next));
+		if (this->mission_hud) {
+			this->mission_hud->set_action_status(QStringLiteral("Speed: %1x").arg(next, 0, 'f', 1));
+		}
+		return true;
+	}
+
+	// 4. 5x3 Grid Hotkeys for selected unit/building actions
+	static const std::array<int, 15> grid_keys{
+		Qt::Key_Q, Qt::Key_W, Qt::Key_E, Qt::Key_R, Qt::Key_T,
+		Qt::Key_A, Qt::Key_S, Qt::Key_D, Qt::Key_F, Qt::Key_G,
+		Qt::Key_Z, Qt::Key_X, Qt::Key_C, Qt::Key_V, Qt::Key_B,
+	};
+	for (size_t idx = 0; idx < grid_keys.size(); ++idx) {
+		if (key != grid_keys[idx]) {
+			continue;
+		}
+		if (this->mission_hud) {
+			const auto actions = this->mission_hud->action_options();
+			if (static_cast<int>(idx) < actions.size()) {
+				const auto map = actions[static_cast<int>(idx)].toMap();
+				const auto opt_id = map.value(QStringLiteral("id")).toString();
+				const bool build = map.value(QStringLiteral("build")).toBool();
+				this->mission_hud->requestAction(opt_id, build);
+				return true;
+			}
+			if (key == Qt::Key_S and this->mission_hud->can_stop()) {
+				this->mission_hud->stopSelected();
+				return true;
+			}
+		}
+		return false;
+	}
+
+	return false;
 }
 
 } // namespace openage::presenter

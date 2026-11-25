@@ -35,3 +35,13 @@ Level 2 rendering involves several stages that each handle a slightly different 
 - `openage::renderer::screen` - final compositing of all level 2 rendering results for display on screen
 
 Every namespace is an actual directory and all its classes are contained there.
+
+## Terrain transitions and fog
+
+Terrain meshes share texture weights at tile corners and retain the tile's texture at its center.
+Layers blend in sorted texture-path order using cumulative weights, including a one-tile neighbor border supplied through render entities so chunk boundaries agree.
+This provides geometric texture transitions without requiring original-game blend masks.
+
+Fog keeps separate explored and currently visible channels and interpolates their cell-center samples into contours that cross tile interiors.
+This changes presentation only; entity visibility and selection still use the simulation's visibility snapshot.
+The result approximates rounded sight boundaries and does not reproduce the original game's exact fog algorithm.

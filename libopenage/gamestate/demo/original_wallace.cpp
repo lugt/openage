@@ -3,11 +3,15 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include "coord/tile.h"
 #include "cvar/cvar.h"
 #include "event/event_loop.h"
 #include "gamestate/component/api/attack.h"
+#include "gamestate/component/api/build.h"
+#include "gamestate/component/api/live.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
+#include "gamestate/entity_factory.h"
 #include "gamestate/component/internal/commands/base_command.h"
 #include "gamestate/event/send_command.h"
 #include "gamestate/game.h"
@@ -115,5 +119,161 @@ void simulation_demo_53(const util::Path &path) {
         require(runtime->mission_state().is_victory(),"source resource victory with timers");
     }
     log::log(MSG(info) << "ORIGINAL_WALLACE_PASS mission=" << mission << " time=" << now);
+}
+
+void simulation_demo_54(const util::Path &path) {
+	auto simulation = std::make_shared<GameSimulation>(path, std::make_shared<cvar::CVarManager>(path), std::make_shared<time::TimeLoop>(),
+	    "ww_mvp.campaign.william_wallace.mission_01.PlayerSetup", "ww_mvp.campaign.william_wallace.mission_01.Mission");
+	simulation->set_modpacks({"de2_base", "ww_mvp"});
+	simulation->initialize();
+	auto state = simulation->get_game()->get_state();
+	auto loop = simulation->get_event_loop();
+	auto commander = simulation->get_commander();
+	auto factory = simulation->get_entity_factory();
+	time::time_t now = time::time_t::zero();
+	auto advance = [&](int seconds) {
+		for (int i = 0; i < seconds; ++i) {
+			now += time::time_t{1};
+			loop->reach_time(now, state);
+			state->update_visibility(now);
+			state->update_player_economies(now);
+		}
+	};
+	auto spawn = [&](player_id_t owner_id, const nyan::fqon_t &fqon, int x, int y) {
+		auto entity = factory->add_game_entity(loop, state, owner_id, fqon);
+		coord::phys3 pos{coord::phys_t::from_int(x), coord::phys_t::from_int(y), 0};
+		entity->try_get_component_as<component::Position>(component_t::POSITION)->set_position(now, pos);
+		entity->try_get_component_as<component::Ownership>(component_t::OWNERSHIP)->set_owner(now, owner_id);
+		state->add_game_entity(entity);
+		register_entity_in_dynamic_occupancy(*state->get_map(), *entity, x, y);
+		return entity;
+	};
+
+	auto player = state->get_player(0);
+	player->add_resource("de2_base.data.util.resource.types.Food", 500);
+	player->add_resource("de2_base.data.util.resource.types.Wood", 500);
+	player->add_resource("de2_base.data.util.resource.types.Gold", 500);
+
+	// 1. Multi-villager cooperative construction
+	auto v1 = spawn(0, "de2_base.data.game_entity.generic.villager.villager.Villager", 10, 10);
+	auto v2 = spawn(0, "de2_base.data.game_entity.generic.villager.villager.Villager", 11, 10);
+	auto build_house = std::ranges::find_if(v1->action_options, [](const auto &opt) {
+		return opt.kind == ActionKind::Build and opt.subject.ends_with(".House");
+	});
+	require(build_house != v1->action_options.end(), "villager has House build option");
+	loop->create_event("game.economy_action", commander, state, now, {
+		{"actor", v1->get_id()}, {"option", build_house->id},
+		{"position", coord::tile{12, 12}.to_phys3()}, {"issuer", player_id_t{0}},
+	});
+	advance(1);
+	entity_id_t house_id = 0;
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		if (entity->definition == build_house->subject) {
+			house_id = id;
+			break;
+		}
+	}
+	require(house_id != 0, "house foundation created");
+	loop->create_event("game.economy_action", commander, state, now, {
+		{"actor", v2->get_id()}, {"site", house_id}, {"issuer", player_id_t{0}},
+	});
+	advance(21);
+	require(not state->get_game_entity(house_id)->try_get_component_as<component::Build>(component_t::BUILD)->is_under_construction(),
+	        "two villagers build house faster than 25s single-builder time");
+
+	// 2. Building training queue (queue 3 Militia in a row)
+	spawn(0, "de2_base.data.game_entity.generic.house.house.House", 52, 38);
+	spawn(0, "de2_base.data.game_entity.generic.house.house.House", 52, 41);
+	auto barracks = spawn(0, "de2_base.data.game_entity.generic.barracks.barracks.Barracks", 56, 38);
+	auto train_militia = std::ranges::find_if(barracks->action_options, [](const auto &opt) {
+		return opt.kind == ActionKind::Train and opt.subject.ends_with(".Militia");
+	});
+	require(train_militia != barracks->action_options.end(), "barracks has Militia train option");
+	for (int i = 0; i < 3; ++i) {
+		loop->create_event("game.economy_action", commander, state, now, {
+			{"actor", barracks->get_id()}, {"option", train_militia->id}, {"issuer", player_id_t{0}},
+		});
+		advance(1);
+	}
+	require(state->action_feedback(0) == "Queued (3 in queue).", "barracks queued 3 militia: " + state->action_feedback(0));
+	advance(90);
+	int militia_count = 0;
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		if (not entity->is_dead() and entity->definition.ends_with(".Militia") and owner(*entity, now) == 0) {
+			++militia_count;
+		}
+	}
+	require(militia_count >= 3, "barracks training queue produced 3 militia");
+
+	// 3. Trebuchet transform (pack/unpack)
+	auto treb = spawn(0, "de2_base.data.game_entity.generic.trebuchet.trebuchet.Trebuchet", 62, 38);
+	auto enemy_house = spawn(1, "de2_base.data.game_entity.generic.house.house.House", 70, 38);
+	require(treb->is_transformable and not treb->unpacked, "trebuchet starts packed");
+	loop->create_event("game.send_command", commander, state, now, {
+		{"type", component::command::command_t::ATTACK},
+		{"entity_ids", std::vector<entity_id_t>{treb->get_id()}},
+		{"target_id", enemy_house->get_id()},
+		{"issuer", player_id_t{0}},
+	});
+	advance(1);
+	require(state->action_feedback(0) == "Unpack Trebuchet before attacking.", "packed trebuchet cannot attack");
+	loop->create_event("game.economy_action", commander, state, now, {
+		{"actor", treb->get_id()}, {"option", nyan::fqon_t{"trebuchet.toggle_pack"}}, {"issuer", player_id_t{0}},
+	});
+	advance(3);
+	require(treb->unpacked, "trebuchet unpacked");
+	loop->create_event("game.send_command", commander, state, now, {
+		{"type", component::command::command_t::MOVE},
+		{"entity_ids", std::vector<entity_id_t>{treb->get_id()}},
+		{"target", coord::tile{63, 38}.to_phys3()},
+		{"issuer", player_id_t{0}},
+	});
+	advance(1);
+	require(state->action_feedback(0) == "Pack Trebuchet before moving.", "unpacked trebuchet cannot move");
+	loop->create_event("game.send_command", commander, state, now, {
+		{"type", component::command::command_t::ATTACK},
+		{"entity_ids", std::vector<entity_id_t>{treb->get_id()}},
+		{"target_id", enemy_house->get_id()},
+		{"issuer", player_id_t{0}},
+	});
+	advance(12);
+	require(enemy_house->is_dead() or not state->has_game_entity(enemy_house->get_id()), "unpacked trebuchet destroys enemy house");
+
+	// 4. Monk Heal and Convert
+	auto monk = spawn(0, "de2_base.data.game_entity.generic.monk.monk.Monk", 60, 44);
+	auto ally = spawn(0, "de2_base.data.game_entity.generic.militia.militia.Militia", 61, 44);
+	auto ally_live = ally->try_get_component_as<component::Live>(component_t::LIVE);
+	const nyan::fqon_t health = "de2_base.data.util.attribute.types.Health";
+	ally_live->set_attribute(now, health, 10);
+	loop->create_event("game.send_command", commander, state, now, {
+		{"type", component::command::command_t::HEAL},
+		{"entity_ids", std::vector<entity_id_t>{monk->get_id()}},
+		{"target_id", ally->get_id()},
+		{"issuer", player_id_t{0}},
+	});
+	advance(20);
+	require(*ally_live->get_attribute_value(now, health) == *ally_live->get_attribute_max(health), "monk healed ally to full HP");
+	auto enemy_unit = spawn(1, "de2_base.data.game_entity.generic.militia.militia.Militia", 63, 44);
+	loop->create_event("game.send_command", commander, state, now, {
+		{"type", component::command::command_t::ATTACK},
+		{"entity_ids", std::vector<entity_id_t>{monk->get_id()}},
+		{"target_id", enemy_unit->get_id()},
+		{"issuer", player_id_t{0}},
+	});
+	advance(12);
+	require(owner(*enemy_unit, now) == 0, "monk converted enemy unit to player 0");
+
+	// 5. OriginalScenario Mission 3 condition 3 (OwnObjects), effects 4 & 21, and <Var> substitution
+	auto runtime = simulation->get_trigger_runtime();
+	if (auto original = runtime->original_scenario()) {
+		auto cond3 = util::json::parse(R"({"condition_type": 3, "source_player": 1, "object_list": 70, "quantity": 1})");
+		require(original->evaluate(cond3, now), "OriginalScenario condition 3 OwnObjects counts finished House");
+		auto eff21 = util::json::parse(R"({"effect_type": 21})");
+		original->execute(eff21, now);
+		auto eff4 = util::json::parse(R"({"effect_type": 4})");
+		original->execute(eff4, now);
+	}
+
+	log::log(MSG(info) << "DEMO_54_ALL_PASS time=" << now);
 }
 }

@@ -7,7 +7,7 @@
 
 namespace openage::gamestate {
 
-enum class ActionKind { Build, Train, Research };
+enum class ActionKind { Build, Train, Research, Transform };
 
 struct ActionOption {
 	ActionKind kind;

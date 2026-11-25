@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 
-from openage.convert.processor.export.dds_terrain import export_dds_terrain
+from openage.convert.processor.export.dds_terrain import export_dds_terrain_cached
 from openage.scenario.de2_save_map import read_wallace_map
 from openage.scenario.ir import MapDefinition
 
@@ -26,19 +26,29 @@ def original_map(template, source, textures, destination):
                    victory=replace(template.victory, required_removals=()))
 
 
-def convert_terrain(data, textures, destination):
+def convert_terrain(data, textures, destination, terrain_definitions=None):
     """Reuse the original terrain export for scenario grids and saved grids."""
     tiles = data["terrain_ids"]
     used = sorted(set(tiles))
-    if unknown := set(used) - TERRAIN_DDS.keys():
-        raise ValueError(f"Unmapped Mission 1 terrain IDs: {sorted(unknown)}")
+    filenames = dict(TERRAIN_DDS)
+    water = set(WATER)
+    for tile in sorted(set(used) - filenames.keys()):
+        if terrain_definitions is None or tile < 0 or tile >= len(terrain_definitions):
+            raise ValueError(f"Terrain {tile} requires the exported original DAT terrain catalog")
+        record = terrain_definitions[tile]
+        filename = record['name_2']
+        if not filename or '/' in filename or '\\' in filename or record['is_water'] not in (1, 2, 4, 16, 32):
+            raise ValueError(f"Unsupported DAT terrain definition {tile}")
+        filenames[tile] = filename
+        if record['is_water'] in (1, 2, 4):
+            water.add(tile)
 
     originals = {name: (textures / f"{name}.dds").read_bytes()
-                 for name in sorted({TERRAIN_DDS[tile] for tile in used})}
+                 for name in sorted({filenames[tile] for tile in used})}
     graphics = destination / "original_terrain_graphics"
     graphics.mkdir(parents=True, exist_ok=True)
     for name, image in originals.items():
-        export_dds_terrain(image, graphics / f"{name}.png")
+        export_dds_terrain_cached(image, graphics / f"{name}.png")
 
     lines = [
         "!version 0.2.0",
@@ -47,14 +57,14 @@ def convert_terrain(data, textures, destination):
         "import engine.util.graphics as graphics",
     ]
     for tile in used:
-        parent = "water.Water" if tile in WATER else "grass.Grass"
+        parent = "water.Water" if tile in water else "grass.Grass"
         lines.extend((
             "",
             f"Tile{tile}({parent}):",
             "    Terrain.terrain_graphic = TileTexture",
             "",
             "    TileTexture(graphics.Terrain):",
-            f'        Terrain.sprite = "./original_terrain_graphics/{TERRAIN_DDS[tile]}.terrain"',
+            f'        Terrain.sprite = "./original_terrain_graphics/{filenames[tile]}.terrain"',
         ))
     (destination / "original_terrain.nyan").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

@@ -2,6 +2,7 @@
 
 #include "util.h"
 
+#include <cmath>
 #include <regex>
 #include <vector>
 
@@ -12,6 +13,31 @@ import nyan;
 
 
 namespace openage::gamestate::api {
+
+int64_t get_nyan_int_or_float(const nyan::Object &obj, const char *member) {
+	const auto &holder = obj.get_value(member);
+	if (const auto *flt = dynamic_cast<const nyan::Float *>(holder.get_ptr().get())) {
+		return std::llround(flt->get());
+	}
+	return obj.get_int(member);
+}
+
+int64_t population_cost(const std::shared_ptr<nyan::View> &view, const std::string &subject) {
+	int64_t population = 0;
+	for (const auto &entry : view->get_object(subject).get_set("GameEntity.abilities")) {
+		const auto ability = view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(entry.get_ptr())->get_name());
+		if (not ability.extends("engine.ability.type.UseContingent")) {
+			continue;
+		}
+		for (const auto &value : ability.get_set("UseContingent.amount")) {
+			const auto amount = view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr())->get_name());
+			if (amount.get_object("ResourceAmount.type").get_name() == "de2_base.data.util.resource.types.PopulationSpace") {
+				population += get_nyan_int_or_float(amount, "ResourceAmount.amount");
+			}
+		}
+	}
+	return population;
+}
 
 const std::string resolve_file_path(const nyan::Object &obj, const std::string &path) {
 	if (path.empty()) {

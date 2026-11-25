@@ -32,6 +32,8 @@
 #include "scenario/trigger/trigger_runtime.h"
 #include "scenario/trigger/original_scenario.h"
 
+import openage.gamestate.ai;
+
 namespace openage::gamestate {
 namespace {
 
@@ -251,6 +253,12 @@ bool GameSimulation::initialize() {
 		// if there is no map (defensive), it no-ops.
 		this->register_dynamic_occupancy_removal_observer();
 		this->game->get_state()->update_player_economies(time::time_t::zero());
+
+		// A renderer supplied before game creation must attach during initialization,
+		// while the calling thread still owns the graphics context.
+		if (this->render_factory) {
+			this->game->attach_renderer(this->render_factory);
+		}
 	}
 	catch (...) {
 		this->lifecycle = SimulationLifecycle::Failed;
@@ -285,13 +293,24 @@ void GameSimulation::start() {
 		           << "surfaces as a hard error rather than a silent no-op."};
 	}
 
-	// the presenter may have attached its renderer while the game was not created yet
-	if (this->render_factory) {
-		this->game->attach_renderer(this->render_factory);
-	}
-
 	this->lifecycle = SimulationLifecycle::Running;
 	this->running = true;
+}
+
+void GameSimulation::configure_ai(const std::string &json) {
+	if (this->lifecycle != SimulationLifecycle::Initialized or this->has_ai()) {
+		throw Error{ERR << "Configure computer players once, after initialization and before running"};
+	}
+	this->computer_players = ai::configure(json, this->event_loop, this->commander,
+	                                      this->game->get_state(), this->economy_handler);
+}
+
+std::string GameSimulation::ai_snapshot(time::time_t at) const {
+	return ai::snapshot(this->computer_players, *this->game->get_state(), at);
+}
+
+std::string GameSimulation::ai_trace() const {
+	return ai::trace(this->computer_players);
 }
 
 void GameSimulation::run() {
@@ -453,10 +472,12 @@ void GameSimulation::init_event_handlers() {
 	this->event_loop->add_event_handler(std::make_shared<DiplomacyHandler>());
 	this->event_loop->add_event_handler(manager_handler);
 	this->event_loop->add_event_handler(attack_handler);
+	this->event_loop->add_event_handler(std::make_shared<gamestate::event::HealHandler>());
 	this->event_loop->add_event_handler(apply_discrete_effect_handler);
 	this->event_loop->add_event_handler(death_handler);
 	this->event_loop->add_event_handler(std::make_shared<gamestate::event::ConstructionHandler>());
-	this->event_loop->add_event_handler(std::make_shared<gamestate::event::EconomyActionHandler>(this->entity_factory));
+	this->economy_handler = std::make_shared<gamestate::event::EconomyActionHandler>(this->entity_factory);
+	this->event_loop->add_event_handler(this->economy_handler);
 	this->event_loop->add_event_handler(std::make_shared<gamestate::event::GatherHandler>(
 		[this](GameState &state, player_id_t owner, time::time_t at) {
             if (this->trigger_runtime and this->trigger_runtime->original_scenario()) {

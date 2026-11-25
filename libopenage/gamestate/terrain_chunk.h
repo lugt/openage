@@ -80,7 +80,8 @@ public:
 	 *
 	 * @param time Simulation time of the update.
 	 */
-	void render_update(const time::time_t &time, std::span<const float> corner_heights = {});
+	void render_update(const time::time_t &time, std::span<const float> corner_heights = {},
+	                   std::span<const std::string> terrain_halo = {});
 
 private:
 	/**

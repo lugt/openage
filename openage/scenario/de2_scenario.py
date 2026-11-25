@@ -51,7 +51,8 @@ def read_scenario(path, strings=None):
             'height': scenario.map_manager.map_size,
             'terrain': _record(scenario.map_manager.terrain), 'players': players,
             'units': [dict(_record(unit), player=int(unit.player)) for unit in scenario.unit_manager.get_all_units()],
-            'triggers': triggers, 'options': _record(scenario.option_manager),
+            'triggers': triggers, 'variables': _record(scenario.trigger_manager.variables),
+            'options': _record(scenario.option_manager),
             'messages': _record(scenario.message_manager),
         }
     finally:

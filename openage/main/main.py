@@ -24,7 +24,13 @@ def init_subparser(cli: ArgumentParser):
         "--gl-debug", action="store_true", help="throw exceptions directly from the OpenGL calls"
     )
 
+    cli.add_argument("--ai-config", help="JSON computer-player profiles; AI is disabled by default")
     cli.add_argument("--headless", action="store_true", help="run without displaying graphics")
+    cli.add_argument(
+        "--ignore-user-input",
+        action="store_true",
+        help="ignore game-window mouse/keyboard input during automation; Escape still exits",
+    )
 
     cli.add_argument("--modpacks", nargs="+", type=str, help="list of modpacks to load")
 
@@ -384,4 +390,8 @@ def main(args, error):
         info("Initial entities: 3 (PlayerVillager, PlayerTownCenter, EnemyVillager)")
 
     # start the game, continue in main_cpp.pyx!
+    if args.ai_config:
+        from pathlib import Path
+
+        args.ai_config_json = Path(args.ai_config).read_text(encoding="utf-8")
     return run_game(args, root)

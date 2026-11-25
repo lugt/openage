@@ -376,7 +376,7 @@ fi
 # clean exit = PASS ONLY after evidence; 134/139 = crash = FAIL with
 # mandatory backtrace via gdb before declaring an Engine SIGSEGV race. The
 # de2_base nyan load alone is ~33s on macOS, so the budget is 60s.
-run_with_timeout 60 "${qt_env[@]}" bash "$REPO/scripts/run_ww_mission1.sh" >"$LOG4" 2>&1
+run_with_timeout 60 "${qt_env[@]}" bash "$REPO/scripts/run_ww_mission1.sh" --ignore-user-input >"$LOG4" 2>&1
 rc4=$RUN_RC
 echo "  rc=$rc4 (0=clean, 124/137=killed while alive, 134=SIGABRT, 139=SIGSEGV)"
 echo "  startup log: $LOG4"

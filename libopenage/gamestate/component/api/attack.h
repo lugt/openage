@@ -97,6 +97,8 @@ public:
 	time::time_t get_next_attack_time() const;
 	bool is_approaching() const;
 	uint64_t get_order_id() const { return this->order_id; }
+	bool is_convert() const { return this->get_ability().get_name().ends_with(".Convert"); }
+	uint64_t convert_rounds{0};
 
 	/**
 	 * Begin attacking \p target at \p now. Sets active, target, and the

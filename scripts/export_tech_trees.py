@@ -9,6 +9,7 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 from tech_tree.catalog import Catalog, write_json
 from tech_tree.reader import read_dat

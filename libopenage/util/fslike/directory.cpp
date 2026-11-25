@@ -110,7 +110,7 @@ bool Directory::writable(const Path::subpath_t &subpath) {
 	}
 	const std::string path = this->resolve(subpath_test);
 
-	return access(path.c_str(), W_OK);
+	return access(path.c_str(), W_OK) == 0;
 }
 
 

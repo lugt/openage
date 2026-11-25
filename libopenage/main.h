@@ -25,12 +25,14 @@ namespace openage {
  *     int width
  *     int height
  *     bool vsync
+ *     bool ignore_user_input
  *     string mode
  */
 struct window_arguments {
 	int width;
 	int height;
 	bool vsync;
+	bool ignore_user_input{false};
 	std::string mode;
 };
 
@@ -46,6 +48,7 @@ struct window_arguments {
  *     bool scenario_mode
  *     string scenario_player_setup_fqon
  *     string scenario_fqon
+ *     string ai_config
  *     vector[string] mods
  *     window_arguments window_args
  */
@@ -56,6 +59,7 @@ struct main_arguments {
 	bool scenario_mode;
 	std::string scenario_player_setup_fqon;
 	std::string scenario_fqon;
+	std::string ai_config;
 	std::vector<std::string> mods;
 	window_arguments window_args;
 };

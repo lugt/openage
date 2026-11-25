@@ -1,0 +1,4 @@
+DRAW_SPRITE id=villager_1 pos=(8.40,2.00) z=2 tint=#FFFFFF
+DRAW_SPRITE id=scout_2 pos=(8.00,8.00) z=2 tint=#FFFFFF
+DRAW_UI id=hp_1 rect=(3,-12,20,4) fill=0.80
+DRAW_UI id=hp_2 rect=(3,-6,20,4) fill=1.00

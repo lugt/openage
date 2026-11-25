@@ -1,0 +1,39 @@
+=== TICK 1 (t=1.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=1/0
+tracked_counts: p0_g74=1 p1_g74=2
+unit[object_5462]: owner=0 hp=40/40 pos=(35.50,43.50) dead=0
+AI_STATE player=1 wood=0 food=0 gold=0 stone=0 pop=2/0
+AI_UNIT id=5696 type=de2_base.data.game_entity.generic.outpost.outpost.Outpost ne=6062080 se=3506176 hp=500
+AI_UNIT id=5697 type=ww_mvp.campaign.william_wallace.original_entities.Unit1291 ne=2260992 se=5079040 hp=-1
+AI_UNIT id=5698 type=de2_base.data.game_entity.generic.militia.militia.Militia ne=2490368 se=2818048 hp=40
+AI_UNIT id=5699 type=de2_base.data.game_entity.generic.militia.militia.Militia ne=2555904 se=2883584 hp=40
+=== TICK 30 (t=30.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=1/0
+tracked_counts: p0_g74=1 p1_g74=2
+unit[object_5462]: owner=0 hp=13/40 pos=(46.50,40.50) dead=0
+AI_STATE player=1 wood=0 food=0 gold=0 stone=0 pop=2/0
+AI_UNIT id=5696 type=de2_base.data.game_entity.generic.outpost.outpost.Outpost ne=6062080 se=3506176 hp=500
+AI_UNIT id=5697 type=ww_mvp.campaign.william_wallace.original_entities.Unit1291 ne=2260992 se=5079040 hp=-1
+AI_UNIT id=5698 type=de2_base.data.game_entity.generic.militia.militia.Militia ne=2959832 se=2523136 hp=40
+AI_UNIT id=5699 type=de2_base.data.game_entity.generic.militia.militia.Militia ne=2981888 se=2654208 hp=40
+=== TICK 60 (t=60.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=0/0
+tracked_counts: p1_g74=2
+unit[object_5462]: missing=1
+AI_STATE player=1 wood=0 food=0 gold=0 stone=0 pop=2/0
+AI_UNIT id=5696 type=de2_base.data.game_entity.generic.outpost.outpost.Outpost ne=6062080 se=3506176 hp=500
+AI_UNIT id=5697 type=ww_mvp.campaign.william_wallace.original_entities.Unit1291 ne=2260992 se=5079040 hp=-1
+AI_UNIT id=5698 type=de2_base.data.game_entity.generic.militia.militia.Militia ne=3329226 se=2372406 hp=40
+AI_UNIT id=5699 type=de2_base.data.game_entity.generic.militia.militia.Militia ne=2916352 se=3112960 hp=40
+AI_OPERATIONS
+AI_PROFILE version=1 player=1 seed=7 apm=48 aps=2 reaction_ms=1200 economy=1 construction=1 research=1 scouting=1 defense=1 attacks=1 retreat=1 workers=20 army=12 dropped=0
+AI ms=1199 player=1 seq=1 time=78643 ATTACK actor=5698 target=5694 option= ne=0 se=0
+AI ms=2649 player=1 seq=2 time=173670 ATTACK actor=5699 target=5694 option= ne=0 se=0
+AI ms=36099 player=1 seq=3 time=2365849 MOVE actor=5698 target=0 option= ne=3145728 se=2359296
+AI ms=37799 player=1 seq=4 time=2477260 MOVE actor=5699 target=0 option= ne=2555904 se=3080192
+AI ms=47499 player=1 seq=5 time=3112959 MOVE actor=5698 target=0 option= ne=3342336 se=2293760
+AI ms=49199 player=1 seq=6 time=3224370 MOVE actor=5699 target=0 option= ne=2883584 se=3080192
+AI ms=58899 player=1 seq=7 time=3860069 MOVE actor=5698 target=0 option= ne=3145728 se=2752512

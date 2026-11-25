@@ -1,6 +1,7 @@
 // Copyright 2023-2023 the openage authors. See copying.md for legal info.
 
 #include "tests.h"
+#include "gamestate/demo/chat_console_demo.h"
 #include "original_wallace.h"
 #include "gamestate/demo/tech_tree_export.h"
 
@@ -249,6 +250,14 @@ void simulation_demo(int demo_id, const util::Path &path) {
 	case 53:
         simulation_demo_53(path);
         break;
+
+	case 54:
+		simulation_demo_54(path);
+		break;
+
+	case 55:
+		simulation_demo_55(path);
+		break;
 
 	case 52:
 		simulation_demo_52(path);

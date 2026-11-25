@@ -82,6 +82,10 @@ Engine::Engine(mode mode,
 	}
 }
 
+void Engine::configure_ai(const std::string &json) {
+	this->simulation->configure_ai(json);
+}
+
 void Engine::initialize_runtime() {
 	if (this->runtime_initialized) {
 		log::log(MSG(err) << "Engine::initialize_runtime called twice; "

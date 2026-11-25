@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -37,13 +38,17 @@ public:
 	 * @param state Game state.
 	 * @param destination Destination coordinates.
 	 * @param start_time Start time of change.
+	 * @param retry_on_block Replan player movement after a temporary obstruction.
+	 * @param attempt Number of replans already attempted for this order.
 	 *
 	 * @return Runtime of the change in simulation time.
 	 */
 	static const time::time_t move_default(const std::shared_ptr<gamestate::GameEntity> &entity,
 	                                       const std::shared_ptr<openage::gamestate::GameState> &state,
 	                                       const coord::phys3 &destination,
-	                                       const time::time_t &start_time);
+	                                       const time::time_t &start_time,
+	                                       bool retry_on_block = false,
+	                                       uint32_t attempt = 0);
 
 	/**
 	 * Follow a planned route through the same collision and animation logic

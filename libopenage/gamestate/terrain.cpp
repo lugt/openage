@@ -135,7 +135,25 @@ void Terrain::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &re
 		auto render_entity = render_factory->add_terrain_render_entity(extent, offset);
 		chunk->set_render_entity(render_entity);
 
-		chunk->render_update(time::TIME_ZERO, corners);
+		std::vector<std::string> halo;
+		const auto step = this->chunks.front()->get_size();
+		for (int64_t y = -1; y <= static_cast<int64_t>(extent[1]); ++y) {
+			for (int64_t x = -1; x <= static_cast<int64_t>(extent[0]); ++x) {
+				const auto col = offset.ne + x;
+				const auto row = offset.se + y;
+				if (col < 0 or row < 0 or col >= static_cast<int64_t>(this->size[0])
+				    or row >= static_cast<int64_t>(this->size[1])) {
+					halo.emplace_back();
+					continue;
+				}
+				const auto &neighbor = this->get_chunk(coord::chunk{
+					static_cast<int>(col / step[0]), static_cast<int>(row / step[1])});
+				const coord::tile local{
+					static_cast<coord::tile_t>(col % step[0]), static_cast<coord::tile_t>(row % step[1])};
+				halo.push_back(neighbor->get_tile(local).terrain_asset_path);
+			}
+		}
+		chunk->render_update(time::TIME_ZERO, corners, halo);
 	}
 }
 

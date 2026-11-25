@@ -108,6 +108,8 @@ public:
 	 * Run the main loop.
 	 */
 	void loop();
+	/** Enable explicitly configured computer players before starting worker threads. */
+	void configure_ai(const std::string &json);
 
 	/**
 	 * Phase G1 explicit-runtime entry: synchronously prepare the runtime

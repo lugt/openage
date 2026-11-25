@@ -1,5 +1,6 @@
 add_py_modules(
 	__init__.py
+	export_cache.py
 	bytequeue.py
 	context.py
 	decorators.py

@@ -1,0 +1,60 @@
+{
+  "mission": 2,
+  "tick_seconds": 1.0,
+  "total_ticks": 160,
+  "snapshot_ticks": [
+    1,
+    50,
+    100,
+    160
+  ],
+  "track_instances": [
+    "object_8536"
+  ],
+  "commands": [
+    {
+      "tick": 1,
+      "type": "add_resource",
+      "player": 0,
+      "resource": "Food",
+      "amount": 250
+    },
+    {
+      "tick": 1,
+      "type": "add_resource",
+      "player": 0,
+      "resource": "Wood",
+      "amount": 250
+    },
+    {
+      "tick": 1,
+      "type": "add_resource",
+      "player": 0,
+      "resource": "Gold",
+      "amount": 250
+    }
+  ],
+  "ai": {
+    "population_limit": 8,
+    "players": [
+      {
+        "player": 0,
+        "difficulty": "moderate",
+        "seed": 9,
+        "workers": 8,
+        "research": false,
+        "scouting": false,
+        "attacks": false
+      }
+    ]
+  },
+  "ai_expect": {
+    "required_kinds": [
+      "GATHER",
+      "PRODUCE",
+      "BUILD"
+    ],
+    "min_operations": 2,
+    "min_final_population": 8
+  }
+}

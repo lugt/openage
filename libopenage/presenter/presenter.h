@@ -6,7 +6,10 @@
 #include "coord/phys.h"
 #include "gamestate/types.h"
 
+#include <array>
+#include <functional>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include "renderer/window.h"
@@ -20,6 +23,7 @@ class GuiApplication;
 namespace openage {
 
 namespace gamestate {
+class GameEntity;
 class GameSimulation;
 }
 
@@ -226,6 +230,12 @@ protected:
 	std::shared_ptr<HudQmlAdapter> mission_hud;
 	void send_economy_action(gamestate::entity_id_t actor, const nyan::fqon_t &option,
 	                         std::optional<coord::phys3> position = std::nullopt);
+	bool handle_gameplay_hotkey(const QKeyEvent &ev);
+	bool jump_to_next_matching(
+		const std::string &cycle_key,
+		const std::function<bool(gamestate::GameEntity &, time::time_t)> &pred);
+	std::array<std::vector<gamestate::entity_id_t>, 10> control_groups_;
+	std::unordered_map<std::string, size_t> hotkey_cycle_index_;
 	std::optional<std::pair<gamestate::entity_id_t, nyan::fqon_t>> pending_build;
 	bool placement_pressed = false;
 	bool mission_ui_pressed = false;

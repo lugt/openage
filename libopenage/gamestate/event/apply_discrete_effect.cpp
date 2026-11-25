@@ -113,6 +113,7 @@ void ApplyDiscreteEffectHandler::invoke(
 		openage::event::EventHandler::param_map::map_t death_params{
 			{"target_id", target_id},
 			{"time", time},
+			{"killer", params.get("killer", player_id_t{UINT64_MAX})},
 		};
 		loop.create_event("game.death", target, state, time, death_params);
 	}

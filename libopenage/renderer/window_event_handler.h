@@ -19,8 +19,10 @@ public:
 	 * Create a new event handler for filtering window events. After creation,
 	 * it has to be attached to a QWindow with the installEventFilter() method.
 	 *
+	 * @param ignore_user_input Block mouse/keyboard input, allowing Escape to close.
 	 */
-	WindowEventHandler() = default;
+	explicit WindowEventHandler(bool ignore_user_input) :
+		ignore_user_input{ignore_user_input} {}
 	~WindowEventHandler() = default;
 
 	/**
@@ -47,6 +49,9 @@ public:
 	 * @return List of filtered events.
 	 */
 	std::vector<std::shared_ptr<QEvent>> pop_events();
+
+private:
+	bool ignore_user_input;
 
 protected:
 	/**

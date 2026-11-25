@@ -127,14 +127,16 @@ const time::time_t Move::move_command(const std::shared_ptr<gamestate::GameEntit
 		}
 		attack->stop_attack();
 	}
-	return Move::move_default(entity, state, command->get_target(), start_time);
+	return Move::move_default(entity, state, command->get_target(), start_time, true);
 }
 
 
 const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntity> &entity,
                                       const std::shared_ptr<openage::gamestate::GameState> &state,
                                       const coord::phys3 &destination,
-                                      const time::time_t &start_time) {
+	                                      const time::time_t &start_time,
+	                                      bool retry_on_block,
+	                                      uint32_t attempt) {
 	if (not entity->has_component(component::component_t::MOVE)) [[unlikely]] {
 		log::log(WARN << "Entity " << entity->get_id() << " has no move component.");
 		return time::time_t::from_int(0);
@@ -142,6 +144,7 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 
 	auto move_component = std::dynamic_pointer_cast<component::Move>(
 		entity->get_component(component::component_t::MOVE));
+	++move_component->generation;
 	auto move_ability = move_component->get_ability();
 	auto move_path_grid = move_ability.get<nyan::ObjectValue>("Move.path_type");
 	auto pos_component = entity->try_get_component_as<component::Position>(component::component_t::POSITION);
@@ -177,9 +180,28 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 		             << " nav_service=yes start=(" << start_cell.x << "," << start_cell.y << ")"
 		             << " dest=(" << target_cell.x << "," << target_cell.y << ")"
 		             << " mover_rx=" << mover_rx << " mover_ry=" << mover_ry);
-		auto path_result = nav_service->request_path(start_cell,
-			target_cell,
-			mover);
+		const auto occupancy = map->get_dynamic_occupancy();
+		const component::FootprintBounds target_bounds{
+			target_cell.x + 0.5 - mover_rx, target_cell.y + 0.5 - mover_ry, target_cell.x + 0.5 + mover_rx, target_cell.y + 0.5 + mover_ry};
+		pathfinding::NavigationService::Path path_result;
+		// Searching the whole map cannot resolve an occupied destination.
+		if (not occupancy or occupancy->can_occupy(entity->get_id(), target_bounds)) {
+			path_result = nav_service->request_path(start_cell, target_cell, mover, [&](auto from, auto to) {
+				if (not occupancy) {
+					return true;
+				}
+				const auto a = from == start_cell ? current_pos : coord::tile{from.x, from.y}.to_phys3_center();
+				const auto b = coord::tile{to.x, to.y}.to_phys3_center();
+				const component::FootprintBounds begin{a.ne.to_double() - mover_rx, a.se.to_double() - mover_ry, a.ne.to_double() + mover_rx, a.se.to_double() + mover_ry};
+				const component::FootprintBounds end{b.ne.to_double() - mover_rx, b.se.to_double() - mover_ry, b.ne.to_double() + mover_rx, b.se.to_double() + mover_ry};
+				return occupancy->can_occupy(entity->get_id(), ::openage::scenario::swept_aabb(begin, end));
+			});
+		}
+		if (path_result.result != pathfinding::GridAStarPathfinder::Result::PATH_FOUND) {
+			// A temporary occupant must not make a reachable destination disappear.
+			// The movement clamp preserves clearance while the order waits to replan.
+			path_result = nav_service->request_path(start_cell, target_cell, mover);
+		}
 		if (path_result.result
 		    != openage::pathfinding::GridAStarPathfinder::Result::PATH_FOUND) {
 			// Explicit failure: dispatch MovementArrivedEvent(FAILED)
@@ -234,10 +256,27 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 		auto grid_id = map->get_grid_id(move_path_grid->get_name());
 		waypoints = find_path(pathfinder, grid_id, current_pos, destination, start_time);
 		log::log(MSG(info) << "Move::move_default: grid_id=" << grid_id
-		             << " waypoints=" << waypoints.size() << " total_time_so_far=0");
+		                   << " waypoints=" << waypoints.size() << " total_time_so_far=0");
 	}
 
-	return Move::move_along_path(entity, state, std::move(waypoints), start_time);
+	const auto planned_goal = waypoints.size() > 1 ? waypoints.back() : current_pos;
+	const auto duration = Move::move_along_path(entity, state, std::move(waypoints), start_time);
+	const auto reached = pos_component->get_positions().get(start_time + duration);
+	const bool obstructed = reached.ne != planned_goal.ne or reached.se != planned_goal.se;
+	// Bound persistent obstructions so an unreachable order cannot queue forever.
+	if (retry_on_block and obstructed and attempt < 120
+	    and state->get_event_loop() and entity->get_manager()) {
+		state->get_event_loop()->create_event("game.movement_arrived", entity->get_manager(), state, start_time + duration + time::time_t::from_double(0.25), {
+																																								  {"entity_id", entity->get_id()},
+																																								  {"retry_target", destination},
+																																								  {"generation", move_component->generation},
+																																								  {"attempt", attempt + 1},
+																																							  });
+	}
+	else if (retry_on_block and obstructed and attempt == 120) {
+		log::log(WARN << "Movement replan limit reached for entity " << entity->get_id());
+	}
+	return duration;
 }
 
 
@@ -250,6 +289,7 @@ const time::time_t Move::move_along_path(const std::shared_ptr<GameEntity> &enti
 	if (not move or not pos_component or waypoints.empty()) {
 		return time::time_t::zero();
 	}
+	++move->generation;
 	auto move_ability = move->get_ability();
 	auto move_speed = move_ability.get<nyan::Float>("Move.speed");
 	auto &positions = pos_component->get_positions();
@@ -323,10 +363,8 @@ const time::time_t Move::move_along_path(const std::shared_ptr<GameEntity> &enti
 					for (int step = 0; step < 8; ++step) {
 						double mid = (lo + hi) * 0.5;
 						auto test_point = prev_waypoint
-							+ path_vector.normalize(seg_len * mid);
-						if (dyn_occ->can_occupy(
-								entity->get_id(),
-								occ_bounds_at(test_point))) {
+						                  + path_vector.normalize(seg_len * mid);
+						if (dyn_occ->can_occupy(entity->get_id(), ::openage::scenario::swept_aabb(occ_bounds_at(prev_waypoint), occ_bounds_at(test_point)))) {
 							t_safe = mid;
 							lo = mid;
 						}
@@ -484,6 +522,9 @@ const time::time_t Move::move_along_path(const std::shared_ptr<GameEntity> &enti
 void Move::halt(const std::shared_ptr<GameEntity> &entity,
                 const std::shared_ptr<GameState> &state,
                 const time::time_t &time) {
+	if (auto move = entity->try_get_component_as<component::Move>(component::component_t::MOVE)) {
+		++move->generation;
+	}
 	if (auto position = entity->try_get_component_as<component::Position>(component::component_t::POSITION)) {
 		const auto point = position->get_positions().get(time);
 		position->set_position(time, point);

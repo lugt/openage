@@ -168,3 +168,9 @@ All tests are run for each pull requests, so we can detect your change broke som
 Please try to write tests for everything you do.
 
 This is our only way of automated regression detection.
+
+## Text snapshots
+
+See [text snapshot regression tests](snapshots.md) for the asset-free CPU scenario, render recording backend, save/restore check and `--update-golden` workflow.
+
+Windowed automation can pass `main --ignore-user-input` to discard game-window mouse and keyboard events while retaining Escape to exit.

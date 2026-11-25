@@ -53,12 +53,14 @@ void RenderEntity::update_tile(const util::Vector2s size,
 void RenderEntity::update(const util::Vector2s size,
                           const tiles_t tiles,
                           const time::time_t time,
-                          std::span<const float> corner_heights) {
+                          std::span<const float> corner_heights,
+                          std::span<const std::string> terrain_halo) {
 	std::unique_lock lock{this->mutex};
 
 	if (size[0] == 0 or size[1] == 0 or tiles.size() != size[0] * size[1]
 	    or (not corner_heights.empty()
-	        and corner_heights.size() != (size[0] + 1) * (size[1] + 1))) {
+	        and corner_heights.size() != (size[0] + 1) * (size[1] + 1))
+	    or (not terrain_halo.empty() and terrain_halo.size() != (size[0] + 2) * (size[1] + 2))) {
 		throw Error{ERR << "Terrain data does not match chunk size " << size};
 	}
 	this->size = util::Vector2s{size[0] + 1, size[1] + 1};
@@ -81,6 +83,9 @@ void RenderEntity::update(const util::Vector2s size,
 		}
 	}
 
+	// Keep neighbor textures so independently meshed chunks share edge weights.
+	this->terrain_halo.assign(terrain_halo.begin(), terrain_halo.end());
+
 	// update tiles
 	this->tiles = tiles;
 
@@ -93,7 +98,17 @@ void RenderEntity::update(const util::Vector2s size,
 		this->terrain_paths.insert(tile.second);
 	}
 
+	for (const auto &path : this->terrain_halo) {
+		if (not path.empty()) {
+			this->terrain_paths.insert(path);
+		}
+	}
 	this->changed = true;
+}
+
+std::vector<std::string> RenderEntity::get_terrain_halo() {
+	std::shared_lock lock{this->mutex};
+	return this->terrain_halo;
 }
 
 const std::vector<coord::scene3> RenderEntity::get_vertices() {

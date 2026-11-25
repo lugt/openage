@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include <nyan/nyan.h>
 
@@ -17,6 +18,24 @@ using entity_id_t = uint64_t;
  * Player IDs.
  */
 using player_id_t = uint64_t;
+
+/** Cumulative resource values; live assets and exploration are derived from the world. */
+struct ScoreLedger {
+	int64_t destroyed_value = 0;
+	int64_t research_value = 0;
+	bool operator==(const ScoreLedger &) const = default;
+};
+
+/** Immutable score row published by the simulation for presentation. */
+struct PlayerScore {
+	player_id_t player = 0;
+	std::string name;
+	int64_t military = 0;
+	int64_t economy = 0;
+	int64_t technology = 0;
+	int64_t total = 0;
+	bool operator==(const PlayerScore &) const = default;
+};
 
 struct PlayerEconomy {
 	int64_t wood = 0;

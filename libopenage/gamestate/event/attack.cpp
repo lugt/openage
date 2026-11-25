@@ -10,6 +10,7 @@
 #include "coord/tile.h"
 #include "event/event_loop.h"
 #include "gamestate/component/api/attack.h"
+#include "gamestate/component/api/build.h"
 #include "gamestate/component/api/live.h"
 #include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/internal/commands/attack.h"
@@ -68,9 +69,9 @@ void AttackHandler::invoke(openage::event::EventLoop &loop,
 			attack_comp = std::dynamic_pointer_cast<component::Attack>(
 				entity->get_component(component::component_t::ATTACK));
 		}
-		if (not attack_comp) {
+		if (not attack_comp or (entity->is_transformable and not entity->unpacked)) {
 			log::log(MSG(warn) << "AttackHandler: attacker " << attacker_id
-			                   << " has no Attack component (ability not mounted?");
+			                   << " has no Attack component or is packed");
 			continue;
 		}
 
@@ -207,6 +208,34 @@ void AttackHandler::invoke(openage::event::EventLoop &loop,
 					attacker_pos_comp->set_angle(time, (target_pos - attacker_pos).to_angle());
 				}
 				entity->play_animation(attack_comp->get_ability(), time);
+				if (attack_comp->is_convert()) {
+					auto attacker_owner = entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
+					auto target_owner = target_entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
+					if (not attacker_owner or not target_owner
+					    or target_entity->has_component(component::component_t::BUILD)
+					    or target_entity->definition.ends_with(".Monk")
+					    or target_owner->get_owners().get(time) == attacker_owner->get_owners().get(time)) {
+						attack_comp->stop_attack();
+						continue;
+					}
+					++attack_comp->convert_rounds;
+					if (attack_comp->convert_rounds >= 4) {
+						gstate->record_enemy_loss(resolved_target, attacker_owner->get_owners().get(time), time);
+						target_owner->set_owner(time, attacker_owner->get_owners().get(time));
+						if (auto target_attack = target_entity->try_get_component_as<component::Attack>(component::component_t::ATTACK)) {
+							target_attack->stop_attack();
+						}
+						attack_comp->stop_attack();
+						if (entity->has_component(component::component_t::IDLE)) {
+							system::Idle::idle(entity, time);
+						}
+						continue;
+					}
+					auto next_hit = time + time::time_t::from_double(attack_comp->get_cooldown());
+					attack_comp->set_next_attack_time(next_hit);
+					schedule_followup(next_hit);
+					continue;
+				}
 				const auto live = target_entity->try_get_component_as<component::Live>(
 					component::component_t::LIVE);
 				int64_t damage = live and live->get_resistance()
@@ -224,6 +253,7 @@ void AttackHandler::invoke(openage::event::EventLoop &loop,
 					openage::event::EventHandler::param_map::map_t effect_params{
 						{"target_id", resolved_target},
 						{"amount", damage},
+						{"killer", source_owner ? source_owner->get_owners().get(time) : player_id_t{UINT64_MAX}},
 						{"attribute_fqon", health_fqon},
 					};
 					loop.create_event("game.apply_discrete_effect",
@@ -301,6 +331,92 @@ void AttackHandler::invoke(openage::event::EventLoop &loop,
 time::time_t AttackHandler::predict_invoke_time(const std::shared_ptr<openage::event::EventEntity> & /* target */,
                                                 const std::shared_ptr<openage::event::State> & /* state */,
                                                 const time::time_t &at) {
+	return at;
+}
+
+HealHandler::HealHandler() :
+	openage::event::OnceEventHandler{"game.heal"} {}
+
+void HealHandler::setup_event(const std::shared_ptr<openage::event::Event> &,
+                              const std::shared_ptr<openage::event::State> &) {}
+
+void HealHandler::invoke(openage::event::EventLoop &loop,
+                         const std::shared_ptr<openage::event::EventEntity> &target,
+                         const std::shared_ptr<openage::event::State> &state,
+                         const time::time_t &time,
+                         const param_map &params) {
+	auto gstate = std::dynamic_pointer_cast<openage::gamestate::GameState>(state);
+	const auto target_id = params.get("target_id", entity_id_t{0});
+	if (not gstate->has_game_entity(target_id)) {
+		return;
+	}
+	auto patient = gstate->get_game_entity(target_id);
+	auto patient_live = patient->try_get_component_as<component::Live>(component::component_t::LIVE);
+	auto patient_pos_comp = patient->try_get_component_as<component::Position>(component::component_t::POSITION);
+	auto patient_owner = patient->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
+	if (patient->is_dead() or not patient_live or not patient_pos_comp or not patient_owner) {
+		return;
+	}
+	const nyan::fqon_t health = "de2_base.data.util.attribute.types.Health";
+	const auto current_hp = patient_live->get_attribute_value(time, health);
+	const auto max_hp = patient_live->get_attribute_max(health);
+	if (not current_hp or not max_hp or *current_hp >= *max_hp) {
+		return;
+	}
+	const auto patient_pos = patient_pos_comp->get_positions().get(time);
+	const bool followup = params.get("followup", false);
+	for (const auto healer_id : params.get("entity_ids", std::vector<entity_id_t>{})) {
+		if (not gstate->has_game_entity(healer_id)) {
+			continue;
+		}
+		auto healer = gstate->get_game_entity(healer_id);
+		auto healer_pos_comp = healer->try_get_component_as<component::Position>(component::component_t::POSITION);
+		auto healer_owner = healer->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
+		if (healer->is_dead() or not healer->heal_ability or not healer_pos_comp or not healer_owner
+		    or healer_owner->get_owners().get(time) != patient_owner->get_owners().get(time)
+		    or patient->has_component(component::component_t::BUILD)) {
+			continue;
+		}
+		const auto order = followup ? params.get("order_id", uint64_t{0}) : ++healer->heal_order;
+		if (followup and order != healer->heal_order) {
+			continue;
+		}
+		const auto healer_pos = healer_pos_comp->get_positions().get(time);
+		const double dist = (patient_pos - healer_pos).length();
+		const double max_range = healer->heal_ability->get_float("RangedContinuousEffect.max_range");
+		if (dist <= max_range + 0.5) {
+			healer->play_animation(*healer->heal_ability, time);
+			const auto next_hp = std::min(*max_hp, *current_hp + 2);
+			patient_live->set_attribute(time, health, next_hp);
+			if (next_hp < *max_hp) {
+				loop.create_event("game.heal", target, state, time + time::time_t::from_double(0.5), {
+					{"entity_ids", std::vector<entity_id_t>{healer_id}},
+					{"target_id", target_id},
+					{"followup", true},
+					{"order_id", order},
+				});
+			}
+			else if (healer->has_component(component::component_t::IDLE)) {
+				system::Idle::idle(healer, time);
+			}
+		}
+		else if (healer->has_component(component::component_t::MOVE)) {
+			const auto move_time = system::Move::move_default(healer, gstate, patient_pos, time);
+			if (move_time > time::time_t::zero()) {
+				loop.create_event("game.heal", target, state, time + move_time, {
+					{"entity_ids", std::vector<entity_id_t>{healer_id}},
+					{"target_id", target_id},
+					{"followup", true},
+					{"order_id", order},
+				});
+			}
+		}
+	}
+}
+
+time::time_t HealHandler::predict_invoke_time(const std::shared_ptr<openage::event::EventEntity> &,
+                                              const std::shared_ptr<openage::event::State> &,
+                                              const time::time_t &at) {
 	return at;
 }
 

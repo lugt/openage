@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <limits>
 #include <memory>
 #include <map>
 #include <shared_mutex>
@@ -118,11 +119,30 @@ public:
 		this->fog_of_war = true;
 		this->share_allied_vision = share_allied_vision;
 	}
+	void set_fog_enabled(bool enabled) { this->fog_of_war = enabled; }
+	bool is_fog_enabled() const { return this->fog_of_war; }
+	void set_reveal_map_cheat(bool enabled) { this->reveal_map_cheat = enabled; }
+	bool is_reveal_map_cheat() const { return this->reveal_map_cheat; }
+	void set_no_fog_cheat(bool enabled) { this->no_fog_cheat = enabled; }
+	bool is_no_fog_cheat() const { return this->no_fog_cheat; }
+	void set_fast_actions_cheat(bool enabled) { this->fast_actions_cheat = enabled; }
+	bool fast_actions() const { return this->fast_actions_cheat; }
+	/** Replace explored history on load; current visibility is recomputed afterwards. */
+	void restore_exploration(std::map<player_id_t, VisibilitySnapshot> snapshots);
 	void update_visibility(time::time_t at);
 	std::shared_ptr<const VisibilitySnapshot> visibility(player_id_t player) const;
 	bool can_see(player_id_t player, entity_id_t entity) const;
+	/** Match-wide limit is applied to every producer, including human players. */
+	void set_population_limit(int64_t limit);
+	int64_t get_population_limit() const { return this->population_limit; }
 	void update_player_economies(time::time_t at);
 	PlayerEconomy player_economy(player_id_t player) const;
+	/** Sorted, thread-safe leaderboard snapshot, highest score first. */
+	std::vector<PlayerScore> player_scores() const;
+	/** Resource value of an entity in its owner's current technology view. */
+	int64_t entity_score_value(const GameEntity &entity, player_id_t owner);
+	/** Credit a destroyed or converted enemy; the caller gates duplicate events. */
+	void record_enemy_loss(entity_id_t target, player_id_t killer, time::time_t at);
 	std::string action_feedback(player_id_t player) const;
 	void set_action_feedback(player_id_t player, std::string message);
 
@@ -270,11 +290,18 @@ private:
 	 * Map of the current game.
 	 */
 	std::shared_ptr<Map> map;
+	int64_t population_limit = std::numeric_limits<int64_t>::max();
 	bool fog_of_war = false;
 	bool share_allied_vision = false;
+	bool reveal_map_cheat = false;
+	bool no_fog_cheat = false;
+	bool fast_actions_cheat = false;
 	std::unordered_map<player_id_t, std::shared_ptr<const VisibilitySnapshot>> visibility_by_player;
 	mutable std::shared_mutex visibility_mutex;
 	std::unordered_map<player_id_t, PlayerEconomy> player_economies;
+	std::vector<PlayerScore> scores;
+	std::unordered_map<nyan::fqon_t, nyan::fqon_t> score_costs;
+	bool score_costs_initialized = false;
 	std::unordered_map<player_id_t, std::string> economy_feedback;
 	mutable std::shared_mutex economy_mutex;
 

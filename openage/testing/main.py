@@ -11,6 +11,7 @@ import typing
 from ..util.strings import format_progress
 from .benchmark import benchmark
 from .list_processor import get_all_targets
+from .snapshot import SnapshotMismatchError
 from .testing import TestError
 
 if typing.TYPE_CHECKING:
@@ -39,6 +40,9 @@ def init_subparser(cli):
     """Initializes the subparser for the testing command."""
     cli.set_defaults(entrypoint=main)
 
+    cli.add_argument("--update-golden", action="store_true", help="replace text snapshot baselines")
+    cli.add_argument("--golden-jobs", type=int, default=1, help="independent Wallace case processes")
+    cli.add_argument("--golden-timings", action="store_true", help="report Wallace case stage timings")
     cli.add_argument("--list", "-l", action="store_true", help="list all tests and demos")
     cli.add_argument("--run-all-tests", "-a", action="store_true", help="run all tests")
     cli.add_argument(
@@ -116,7 +120,17 @@ def process_args(args: Namespace, error):
 
 def main(args, error):
     """CLI main method."""
+    if args.golden_jobs < 1:
+        error("--golden-jobs must be positive")
     test_list = process_args(args, error)
+
+    from . import snapshot
+
+    snapshot.UPDATE_GOLDEN = args.update_golden
+    from . import wallace_golden
+
+    wallace_golden.JOBS = args.golden_jobs
+    wallace_golden.SHOW_TIMINGS = args.golden_timings
 
     if args.list:
         print_test_list(test_list)
@@ -131,6 +145,9 @@ def main(args, error):
 
             try:
                 testfun()
+            except SnapshotMismatchError as exc:
+                print(str(exc))
+                sys.exit(1)
             except BaseException as exc:
                 print("\x1b[31;1mTest failed\x1b[m")
                 if not isinstance(exc, TestError):
@@ -147,7 +164,11 @@ def main(args, error):
 
     if args.demo:
         _, _, _, demofun = test_list[args.demo[0], "demo"]
-        sys.exit(demofun(args.demo[1:]))
+        try:
+            sys.exit(demofun(args.demo[1:]))
+        except SnapshotMismatchError as exc:
+            print(str(exc))
+            sys.exit(1)
 
     if args.benchmark:
         _, _, _, benchmarktest = test_list[args.benchmark[0], "benchmark"]

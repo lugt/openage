@@ -1,0 +1,48 @@
+{
+  "mission": 1,
+  "tick_seconds": 1.0,
+  "total_ticks": 60,
+  "snapshot_ticks": [
+    1,
+    30,
+    60
+  ],
+  "track_instances": [
+    "object_5462"
+  ],
+  "commands": [],
+  "ai": {
+    "population_limit": 200,
+    "players": [
+      {
+        "player": 1,
+        "difficulty": "moderate",
+        "seed": 7,
+        "attacks": true
+      }
+    ]
+  },
+  "setup_effects": [
+    {
+      "effect_type": 11,
+      "object_list_unit_id": 74,
+      "source_player": 2,
+      "location_x": 38,
+      "location_y": 43
+    },
+    {
+      "effect_type": 11,
+      "object_list_unit_id": 74,
+      "source_player": 2,
+      "location_x": 39,
+      "location_y": 44
+    }
+  ],
+  "ai_expect": {
+    "required_kinds": [
+      "ATTACK"
+    ],
+    "min_operations": 1,
+    "combat_damage": true
+  }
+}

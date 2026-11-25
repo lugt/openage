@@ -1,0 +1,10 @@
+=== TICK 700 (t=700.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=4/0
+tracked_counts: p0_g38=1 p0_g74=3
+unit[object_5462]: owner=0 hp=40/40 pos=(92.50,54.50) dead=0
+=== TICK 850 (t=850.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=4/40
+tracked_counts: p0_g38=1 p0_g70=7 p0_g74=3 p0_g109=1 p1_g74=3
+unit[object_5462]: owner=0 hp=40/40 pos=(94.59,34.41) dead=0

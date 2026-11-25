@@ -51,3 +51,21 @@ The logic of the simulation loop is quite simple as most of the execution happen
 [event system](/doc/code/event_system.md). In every loop iteration, the current simulation time is fetched from the
 [time subsystem](/doc/code/time.md). This time value is then passed to the simulation's
 event loop which executes all events queued until this time.
+
+## Temporary movement obstructions
+
+Player movement checks dynamic occupancy while searching, allowing detours around occupied cells.
+If only a statically valid route exists, the swept-footprint check clamps movement before the obstruction and schedules a replan after 0.25 simulation seconds.
+A movement generation invalidates retries when another movement or stop replaces the order.
+An order permits at most 120 replans; a permanent obstruction then ends with a warning rather than an endless event queue.
+Occupancy still reserves planned positions rather than solving continuous collisions between moving trajectories.
+With converted campaign assets, `bin/run test testing::movement_replanning` checks detours, retry, cancellation and two simultaneous movers without a renderer.
+`bin/run test testing.wallace_golden.movement_golden` checks the existing Mission 1 stop/resume and split-army fixtures separately from full campaign progression.
+
+## Player scores
+
+See [Player scores](scoring.md) for the original resource-value formula, event accounting and leaderboard publication.
+
+## Computer players
+
+See [Computer player design](ai.md) for researched references, difficulty and action limits, economy coordination and AI golden contracts.

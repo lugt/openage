@@ -1,5 +1,7 @@
 add_sources(libopenage
+	chat_console_demo.cpp
     original_wallace.cpp
+    wallace_golden.cpp
     tech_tree_export.cpp
     attack_demo.cpp
     demo_0.cpp

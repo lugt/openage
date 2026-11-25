@@ -42,7 +42,8 @@ const TerrainTile &TerrainChunk::get_tile(const coord::tile &pos) const {
 	return this->tiles.at(pos.ne + pos.se * this->size[0]);
 }
 
-void TerrainChunk::render_update(const time::time_t &time, std::span<const float> corner_heights) {
+void TerrainChunk::render_update(const time::time_t &time, std::span<const float> corner_heights,
+                                 std::span<const std::string> terrain_halo) {
 	if (this->render_entity != nullptr) {
 		// TODO: Update individual tiles instead of the whole chunk
 		std::vector<std::pair<terrain_elevation_t, std::string>> tiles;
@@ -54,7 +55,8 @@ void TerrainChunk::render_update(const time::time_t &time, std::span<const float
 		this->render_entity->update(this->size,
 		                            tiles,
 		                            time,
-		                            corner_heights);
+		                            corner_heights,
+		                            terrain_halo);
 	}
 }
 

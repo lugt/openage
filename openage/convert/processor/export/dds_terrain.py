@@ -4,15 +4,16 @@
 
 from __future__ import annotations
 
+from inspect import getfile
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PIL import Image
 
+from ....util.export_cache import ExportCache
 from ...entity_object.export.formats.terrain_metadata import TerrainMetadata
 from ...entity_object.export.formats.texture_metadata import TextureMetadata
-
 
 if TYPE_CHECKING:
     from openage.util.fslike.path import Path as ConverterPath
@@ -43,6 +44,20 @@ def export_dds_terrain(source: bytes, target_path: Path | ConverterPath, compres
     for metadata in (texture, terrain):
         with (target_path.parent / metadata.filename).open("wb") as output:
             output.write(metadata.dump().encode("utf-8"))
+
+
+def export_dds_terrain_cached(source: bytes, target_path: Path, compression_level: int = 6) -> bool:
+    """Reuse intact terrain media until the source, exporter or compression changes."""
+    version = str(compression_level).encode("ascii")
+    for implementation in (__file__, getfile(TextureMetadata), getfile(TerrainMetadata)):
+        version += Path(implementation).read_bytes()
+    outputs = [target_path.with_suffix(extension) for extension in (".png", ".texture", ".terrain")]
+    cache = ExportCache(source, outputs, version)
+    if cache.valid():
+        return False
+    export_dds_terrain(source, target_path, compression_level)
+    cache.commit()
+    return True
 
 
 def main() -> None:

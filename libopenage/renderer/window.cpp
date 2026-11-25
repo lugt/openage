@@ -19,8 +19,8 @@ std::shared_ptr<Window> Window::create(const std::string &title,
 }
 
 
-Window::Window(size_t width, size_t height) :
-	size{width, height}, event_handler{std::make_shared<WindowEventHandler>()} {}
+Window::Window(size_t width, size_t height, bool ignore_user_input) :
+	size{width, height}, event_handler{std::make_shared<WindowEventHandler>(ignore_user_input)} {}
 
 
 const util::Vector2s &Window::get_size() const {

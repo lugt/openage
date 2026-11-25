@@ -1,0 +1,25 @@
+=== TICK 1 (t=1.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=1/5
+tracked_counts: p0_g83=1 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(56.50,59.50) dead=0
+=== TICK 30 (t=30.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=1/5
+tracked_counts: p0_g83=1 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(56.50,59.50) dead=0
+=== TICK 480 (t=480.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=110 Wood=0 Stone=0 Gold=0 pop=5/5
+tracked_counts: p0_g83=4 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(56.31,57.50) dead=0
+=== TICK 900 (t=900.00s) ===
+mission: VICTORY | victory=1 | defeat=0
+resources[0]: Food=125 Wood=100 Stone=0 Gold=90 pop=5/5
+tracked_counts: p0_g83=4 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(57.50,56.50) dead=0
+=== TICK 1200 (t=1200.00s) ===
+mission: VICTORY | victory=1 | defeat=0
+resources[0]: Food=125 Wood=100 Stone=0 Gold=150 pop=5/5
+tracked_counts: p0_g83=4 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(57.50,56.50) dead=0

@@ -31,6 +31,7 @@ int run_game(const main_arguments &args) {
 	win_settings.width = args.window_args.width;
 	win_settings.height = args.window_args.height;
 	win_settings.vsync = args.window_args.vsync;
+	win_settings.ignore_user_input = args.window_args.ignore_user_input;
 
 	renderer::window_mode wmode;
 	if (args.window_args.mode == "fullscreen") {
@@ -64,6 +65,9 @@ int run_game(const main_arguments &args) {
 	// guard, because initialize_runtime() has either succeeded (and
 	// runtime_initialized=true) or thrown (no partial state to drive).
 	engine.initialize_runtime();
+	if (not args.ai_config.empty()) {
+		engine.configure_ai(args.ai_config);
+	}
 
 	engine.loop();
 

@@ -139,6 +139,13 @@ bash scripts/p4_4d_regression.sh --regression
 
 完整设计详见 **[README-PLUS.zh-CN.md §6](README-PLUS.zh-CN.md#6-跨平台linux--windows--macos发布与打包路线图)**。
 
+### 面向 WASM 与小程序的 UI 设计原则
+
+桌面端继续使用 Qt/QML，共享不依赖 Qt 的展示状态与语义操作，并复用现有指令和事件接口。
+平台相关的绘制、输入、存储和资产访问留在适配层，按具体目标的实际需求增加实现。
+客户端使用预转换且带版本信息的资产；小地图逐步建立通用数据边界，避免提前开发通用 UI 框架。
+完整约束、当前实现边界、小地图方案与最小平台验证计划见 [UI 跨平台设计原则](doc/code/ui_portability.md)。
+
 ---
 
 ## 6. 相关文档与许可证

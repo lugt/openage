@@ -163,6 +163,12 @@ void GatherHandler::invoke(openage::event::EventLoop &loop,
 		}
 		++gather->order;
 		++worker->construction_order;
+		if (worker->building_site != 0) {
+			loop.create_event("game.construction", target, state, time, {
+				{"entity_id", worker->building_site}, {"worker", worker_id}, {"depart", true},
+			});
+			worker->building_site = 0;
+		}
 		system::Move::halt(worker, game, time);
 		phase = gather->carried_amount > 0 ? Phase::Return : Phase::Seek;
 	}

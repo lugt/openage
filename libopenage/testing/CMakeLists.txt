@@ -6,3 +6,7 @@ add_sources(libopenage
 pxdgen(
 	testlist.h
 )
+
+add_sources(libopenage MODULE
+	snapshot.cpp
+)

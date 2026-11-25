@@ -43,16 +43,19 @@ private:
     const util::json::Value *definition(const gamestate::GameEntity &entity) const;
     std::vector<std::shared_ptr<gamestate::GameEntity>> matching(const util::json::Value &record, time::time_t at, bool effects) const;
     void capture_gaia(time::time_t at);
+    std::string substitute_variables(const std::string &tmpl) const;
     TriggerRuntime &runtime_;
     std::shared_ptr<gamestate::GameState> state_;
     std::shared_ptr<gamestate::EntityFactory> factory_;
     util::json::Value config_;
     std::map<TriggerId, time::time_t> activated_;
     std::map<int64_t, int64_t> variables_;
+    std::map<std::string, int64_t> variable_ids_;
     mutable std::mutex input_mutex_;
     std::set<gamestate::entity_id_t> selected_;
     std::optional<coord::scene3> camera_;
     uint64_t created_{0};
     std::string objective_text_;
+    std::string current_instruction_;
 };
 }

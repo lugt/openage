@@ -22,6 +22,7 @@ enum class command_t {
 	BUILD,
 	TRAIN,
 	ATTACK,
+	HEAL,
 };
 
 } // namespace openage::gamestate::component::command

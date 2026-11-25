@@ -133,7 +133,69 @@ def modified_research(tech_id, tech, effects):
     return price, duration
 
 
-class Catalog:
+class IconExporter:
+    """Resolve original UI icons once for catalog and runtime asset preparation."""
+
+    def __init__(self, root: Path, output: Path) -> None:
+        self.output = output
+        self.output.mkdir(parents=True, exist_ok=True)
+        self.icon_root = root / "resources/_common/wpfg/resources"
+        self.icons = {}
+        for directory in (self.icon_root / "uniticons", self.icon_root / "Icons"):
+            if directory.is_dir():
+                for icon in sorted(directory.rglob("*.png")):
+                    self.icons.setdefault(icon.name, icon)
+        self.dds_icons = {}
+        for kind, folder in (("technology", "tech"), ("building", "buildings"), ("unit", "units")):
+            for icon in sorted((root / "widgetui/textures/ingame" / folder).glob("*")):
+                match = re.match(r"^(\d+)_", icon.name)
+                if match and icon.suffix.lower() == ".dds":
+                    self.dds_icons.setdefault((kind, int(match[1])), icon)
+        self.copied_icons = set()
+        self.diagnostics = {"missing_icons": set()}
+
+    @staticmethod
+    def export_image(source: Path, destination: Path) -> None:
+        """Reuse intact decoded icons until their original source changes."""
+        from PIL import Image
+
+        from openage.util.export_cache import ExportCache
+
+        data = source.read_bytes()
+        cache = ExportCache(data, [destination], b"ui-icon-rgba-v1" + Path(__file__).read_bytes())
+        if cache.valid():
+            return
+        with Image.open(io.BytesIO(data)) as image:
+            rgba = image.convert("RGBA")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        rgba.save(destination)
+        cache.commit()
+
+    def icon(self, icon_id: int, kind: str) -> str | None:
+        # Prefer available UI PNGs, then decode the original numbered DDS icons.
+        suffix = {"technology": "50729", "building": "50731", "unit": "50730"}[kind]
+        options = [f"{icon_id:03d}_{suffix}.png"]
+        for name in options:
+            source = self.icons.get(name)
+            if source:
+                destination = self.output / "icons" / name
+                if name not in self.copied_icons:
+                    self.export_image(source, destination)
+                    self.copied_icons.add(name)
+                return f"icons/{name}"
+        original = self.dds_icons.get((kind, icon_id))
+        if original:
+            name = f"{kind}-{icon_id:03d}.png"
+            if name not in self.copied_icons:
+                destination = self.output / "icons" / name
+                self.export_image(original, destination)
+                self.copied_icons.add(name)
+            return f"icons/{name}"
+        self.diagnostics["missing_icons"].add(f"{kind}:{icon_id}")
+        return None
+
+
+class Catalog(IconExporter):
     def __init__(self, data, root, output):
         self.data = data
         self.root = root
@@ -142,19 +204,7 @@ class Catalog:
         self.en = strings_at(root, "en")
         source = root / "resources/_common/dat/civilizations.json"
         self.metadata = json.loads(source.read_text(encoding="utf-8"))["civilization_list"] if source.is_file() else []
-        self.icon_root = root / "resources/_common/wpfg/resources"
-        self.icons = {}
-        for directory in (self.icon_root / "uniticons", self.icon_root / "Icons"):
-            if directory.is_dir():
-                for icon in directory.rglob("*.png"):
-                    self.icons.setdefault(icon.name, icon)
-        self.dds_icons = {}
-        for kind, folder in (("technology", "tech"), ("building", "buildings"), ("unit", "units")):
-            for icon in (root / "widgetui/textures/ingame" / folder).glob("*"):
-                match = re.match(r"^(\d+)_", icon.name)
-                if match and icon.suffix.lower() == ".dds":
-                    self.dds_icons.setdefault((kind, int(match[1])), icon)
-        self.copied_icons = set()
+        super().__init__(root, output)
         self.public = {
             i for i, t in enumerate(data.techs)
             if any(l.location_id > 0 and l.button_id > 0 for l in t.research_locations)
@@ -178,35 +228,6 @@ class Catalog:
 
     def label(self, identifier, fallback):
         return self.zh.get(identifier) or self.en.get(identifier) or fallback
-
-    def icon(self, icon_id, kind):
-        # Prefer available UI PNGs, then decode the original numbered DDS icons.
-        suffix = "50729" if kind == "technology" else "50730"
-        options = [f"{icon_id:03d}_{suffix}.png"]
-        if kind == "building":
-            options.insert(0, f"{icon_id:03d}_50731.png")
-        for name in options:
-            source = self.icons.get(name)
-            if source:
-                destination = self.output / "icons" / name
-                if name not in self.copied_icons:
-                    destination.parent.mkdir(exist_ok=True)
-                    shutil.copyfile(source, destination)
-                    self.copied_icons.add(name)
-                return f"icons/{name}"
-        original = self.dds_icons.get((kind, icon_id))
-        if original:
-            from PIL import Image
-            name = f"{kind}-{icon_id:03d}.png"
-            if name not in self.copied_icons:
-                destination = self.output / "icons" / name
-                destination.parent.mkdir(exist_ok=True)
-                with Image.open(original) as decoded:
-                    decoded.save(destination)
-                self.copied_icons.add(name)
-            return f"icons/{name}"
-        self.diagnostics["missing_icons"].add(f"{kind}:{icon_id}")
-        return None
 
     def producer(self, identifier, civ):
         if 0 <= identifier < len(civ.units):

@@ -19,7 +19,7 @@ namespace openage::renderer::opengl {
 
 GlWindow::GlWindow(const std::string &title,
                    window_settings settings) :
-	Window{settings.width, settings.height} {
+	Window{settings.width, settings.height, settings.ignore_user_input} {
 	if (QGuiApplication::instance() == nullptr) {
 		// Qt windows need to attach to a QtGuiApplication
 		throw Error{MSG(err) << "Failed to create Qt window: QGuiApplication has not been created yet."};

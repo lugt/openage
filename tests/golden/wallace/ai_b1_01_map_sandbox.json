@@ -1,0 +1,39 @@
+{
+  "mission": 1,
+  "campaign_source": "5_Barbarossa_1.aoe2scenario",
+  "campaign_variant": "map-only",
+  "tick_seconds": 1.0,
+  "total_ticks": 30,
+  "snapshot_ticks": [
+    1,
+    15,
+    30
+  ],
+  "track_instances": [],
+  "commands": [],
+  "ai": {
+    "population_limit": 200,
+    "players": [
+      {
+        "player": 1,
+        "difficulty": "easy",
+        "seed": 21,
+        "research": false,
+        "attacks": false
+      },
+      {
+        "player": 3,
+        "difficulty": "easy",
+        "seed": 31,
+        "research": false,
+        "attacks": false
+      }
+    ]
+  },
+  "ai_expect": {
+    "min_operations": 2,
+    "required_kinds": [
+      "GATHER"
+    ]
+  }
+}

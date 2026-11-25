@@ -9,6 +9,7 @@
 #include "error/error.h"
 #include "log/log.h"
 
+#include "gamestate/api/util.h"
 #include "gamestate/component/api/build.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
@@ -17,6 +18,7 @@
 #include "gamestate/player.h"
 
 import nyan;
+import openage.gamestate.score;
 
 
 namespace openage::gamestate {
@@ -113,7 +115,10 @@ void GameState::set_player_name(player_id_t player, std::string name) {
 
 std::string GameState::get_player_name(player_id_t player) const {
 	const auto found = this->player_names.find(player);
-	return found == this->player_names.end() ? std::to_string(player) : found->second;
+	if (found != this->player_names.end() and not found->second.empty()) {
+		return found->second;
+	}
+	return player == 2 ? "Gaia" : ("Player " + std::to_string(player + 1));
 }
 
 std::shared_ptr<const VisibilitySnapshot> GameState::visibility(player_id_t player) const {
@@ -142,6 +147,66 @@ std::string GameState::action_feedback(player_id_t player) const {
 void GameState::set_action_feedback(player_id_t player, std::string message) {
 	std::unique_lock lock{this->economy_mutex};
 	this->economy_feedback.insert_or_assign(player, std::move(message));
+}
+
+std::vector<PlayerScore> GameState::player_scores() const {
+	std::shared_lock lock{this->economy_mutex};
+	return this->scores;
+}
+
+int64_t GameState::entity_score_value(const GameEntity &entity, player_id_t owner) {
+	if (entity.definition.empty()) {
+		return 0;
+	}
+	if (not this->score_costs_initialized) {
+		const auto children = this->db_view->get_obj_children_all("engine.util.create.CreatableGameEntity");
+		std::vector<nyan::fqon_t> names{children.begin(), children.end()};
+		std::ranges::sort(names);
+		for (const auto &name : names) {
+			const auto option = this->db_view->get_object(name);
+			this->score_costs.try_emplace(option.get_object("CreatableGameEntity.game_entity").get_name(),
+			                              option.get_object("CreatableGameEntity.cost").get_name());
+		}
+		this->score_costs_initialized = true;
+	}
+	const auto found = this->score_costs.find(entity.definition);
+	if (found == this->score_costs.end()) {
+		return 0; // Decorations and scenario-only objects have no production cost.
+	}
+	const auto view = this->get_player(owner)->get_db_view();
+	const auto cost = view->get_object(found->second);
+	if (not cost.extends("engine.util.cost.type.ResourceCost")) {
+		return 0;
+	}
+	int64_t value = 0;
+	for (const auto &entry : cost.get_set("ResourceCost.amount")) {
+		const auto amount = view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(entry.get_ptr())->get_name());
+		const auto resource = amount.get_object("ResourceAmount.type").get_name();
+		if (score::is_scored_resource(resource)) {
+			value += api::get_nyan_int_or_float(amount, "ResourceAmount.amount");
+		}
+	}
+	return value;
+}
+
+void GameState::record_enemy_loss(entity_id_t target, player_id_t killer, time::time_t at) {
+	const auto &entity = this->get_game_entity(target);
+	const auto ownership = entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
+	if (not ownership or not this->players.contains(killer)) {
+		return;
+	}
+	const auto victim = ownership->get_owners().get(at);
+	if (this->get_stance(killer, victim) == DiplomaticStance::Enemy
+	    and not this->get_player(victim)->is_gaia and not this->get_player(killer)->is_gaia) {
+		this->get_player(killer)->score_ledger.destroyed_value += this->entity_score_value(*entity, victim);
+	}
+}
+
+void GameState::set_population_limit(int64_t limit) {
+	if (limit < 1) {
+		throw Error{MSG(err) << "Population limit must be positive"};
+	}
+	this->population_limit = limit;
 }
 
 void GameState::update_player_economies(time::time_t at) {
@@ -173,8 +238,62 @@ void GameState::update_player_economies(time::time_t at) {
 			economy.population_capacity += entity->population_provided;
 		}
 	}
+	for (auto &[id, economy] : next) {
+		economy.population_capacity = std::min(economy.population_capacity, this->population_limit);
+	}
+	std::unordered_map<player_id_t, int64_t> investments;
+	std::map<std::pair<player_id_t, nyan::fqon_t>, int64_t> values;
+	for (const auto &[id, entity] : this->game_entities) {
+		const auto ownership = entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
+		const auto build = entity->try_get_component_as<component::Build>(component::component_t::BUILD);
+		if (entity->is_dead() or not ownership or (build and build->is_under_construction())) {
+			continue;
+		}
+		const auto owner = ownership->get_owners().get(at);
+		const auto key = std::pair{owner, entity->definition};
+		auto found = values.find(key);
+		if (found == values.end()) {
+			found = values.emplace(key, this->entity_score_value(*entity, owner)).first;
+		}
+		investments[owner] += found->second;
+	}
+	std::vector<PlayerScore> ranking;
+	for (const auto &[id, player] : this->players) {
+		if (player->is_gaia) {
+			continue;
+		}
+		const auto &economy = next.at(id);
+		const auto view = this->visibility(id);
+		const int64_t explored = view ? std::ranges::count_if(view->tiles, [](auto tile) {
+			return tile != TileVisibility::Unexplored;
+		}) : 0;
+		auto row = score::calculate(player->score_ledger,
+		                            economy.wood + economy.food + economy.gold + economy.stone,
+		                            investments[id], explored, view ? view->tiles.size() : 0);
+		row.player = id;
+		row.name = this->get_player_name(id);
+		ranking.push_back(std::move(row));
+	}
+	std::ranges::sort(ranking, [](const auto &a, const auto &b) {
+		return a.total != b.total ? a.total > b.total : a.player < b.player;
+	});
 	std::unique_lock lock{this->economy_mutex};
+	this->scores = std::move(ranking);
 	this->player_economies = std::move(next);
+}
+
+void GameState::restore_exploration(std::map<player_id_t, VisibilitySnapshot> snapshots) {
+	decltype(this->visibility_by_player) restored;
+	for (auto &[player, snapshot] : snapshots) {
+		if (not this->players.contains(player) or not this->map
+		    or snapshot.width != this->map->get_size()[0] or snapshot.height != this->map->get_size()[1]
+		    or snapshot.tiles.size() != snapshot.width * snapshot.height) {
+			throw Error{MSG(err) << "Invalid restored exploration for player " << player};
+		}
+		restored.emplace(player, std::make_shared<VisibilitySnapshot>(std::move(snapshot)));
+	}
+	std::unique_lock lock{this->visibility_mutex};
+	this->visibility_by_player = std::move(restored);
 }
 
 void GameState::update_visibility(time::time_t at) {
@@ -203,12 +322,24 @@ void GameState::update_visibility(time::time_t at) {
 		auto snapshot = std::make_shared<VisibilitySnapshot>();
 		snapshot->width = size[0];
 		snapshot->height = size[1];
-		snapshot->tiles.resize(size[0] * size[1], TileVisibility::Unexplored);
+		if (this->no_fog_cheat) {
+			snapshot->tiles.resize(size[0] * size[1], TileVisibility::Visible);
+			for (const auto &source : sources) {
+				snapshot->entities.push_back(source.entity);
+			}
+			std::ranges::sort(snapshot->entities, {}, &VisibleEntity::id);
+			next.emplace(viewer, std::move(snapshot));
+			continue;
+		}
+		snapshot->tiles.resize(size[0] * size[1],
+		                       this->reveal_map_cheat ? TileVisibility::Explored : TileVisibility::Unexplored);
 		if (auto previous = this->visibility(viewer); previous
 		    and previous->width == snapshot->width and previous->height == snapshot->height) {
-			std::ranges::transform(previous->tiles, snapshot->tiles.begin(), [](auto tile) {
-				return tile == TileVisibility::Visible ? TileVisibility::Explored : tile;
-			});
+			for (size_t idx = 0; idx < snapshot->tiles.size(); ++idx) {
+				if (previous->tiles[idx] != TileVisibility::Unexplored) {
+					snapshot->tiles[idx] = TileVisibility::Explored;
+				}
+			}
 		}
 		for (const auto &source : sources) {
 			const auto [id, owner, x, y] = source.entity;

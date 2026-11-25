@@ -6,10 +6,15 @@ tests for the games simulation.
 
 import argparse
 
+from libcpp.string cimport string
+from libcpp.vector cimport vector
 from libopenage.util.path cimport Path as Path_cpp
 from libopenage.pyinterface.pyobject cimport PyObj
 from cpython.ref cimport PyObject
-from libopenage.gamestate.demo.tests cimport simulation_demo as simulation_demo_c
+from libopenage.gamestate.demo.tests cimport (
+    simulation_demo as simulation_demo_c,
+    run_wallace_golden as run_wallace_golden_c,
+)
 
 
 def simulation_demo(list argv):
@@ -50,3 +55,33 @@ def simulation_demo(list argv):
 
     with nogil:
         simulation_demo_c(simulation_test_id, root_cpp)
+
+
+def run_wallace_golden_case(str scenario_json, str asset_overlay, bint with_timings=False):
+    """Run a tick-driven Wallace golden scenario and return canonical snapshot text."""
+    from ..cvar.location import get_config_path
+    from ..assets import get_asset_path
+    from ..util.fslike.union import Union
+
+    from ..util.fslike.directory import Directory
+
+    root = Union().root
+    root["assets"].mount(get_asset_path(None))
+    if asset_overlay:
+        root["assets"].mount(Directory(asset_overlay).root)
+    root["cfg"].mount(get_config_path(None))
+
+    cdef Path_cpp root_cpp = Path_cpp(
+        root.subpath,
+        PyObj(<PyObject*>root.fsobj),
+    )
+    cdef string json_cpp = scenario_json.encode("utf-8")
+    cdef string out_cpp
+    cdef vector[double] timings
+    with nogil:
+        out_cpp = run_wallace_golden_c(root_cpp, json_cpp, timings)
+    result = out_cpp.decode("utf-8")
+    if with_timings:
+        names = ("load", "commands", "events", "visibility", "economy", "snapshot")
+        return result, dict(zip(names, timings, strict=True))
+    return result

@@ -135,15 +135,15 @@ def prepare_terrain(name, source_path):
     png = terrain_dir / f"graphics/texture_{name}.png"
     definition = terrain_dir / f"{name}.nyan"
     if source_path:
-        from openage.convert.processor.export.dds_terrain import export_dds_terrain
+        from openage.convert.processor.export.dds_terrain import export_dds_terrain_cached
 
         if not definition.is_file():
             raise SystemExit(f"Convert the de2_base data first: {definition} is missing")
         source = Path(source_path)
         data = source.read_bytes()
         png.parent.mkdir(parents=True, exist_ok=True)
-        export_dds_terrain(data, png)
-        print(f"Converted DE2 terrain from {source}")
+        converted = export_dds_terrain_cached(data, png)
+        print(f"{'Converted' if converted else 'Reusing'} DE2 terrain from {source}")
     return definition.is_file() and all(
         png.with_suffix(ext).is_file() for ext in (".png", ".texture", ".terrain")
     )

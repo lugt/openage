@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "gamestate/component/api_component.h"
 #include "gamestate/component/types.h"
 
@@ -13,6 +15,9 @@ public:
 	using APIComponent::APIComponent;
 
 	component_t get_type() const override;
+
+	/** Invalidates scheduled replans when another movement or stop replaces them. */
+	uint64_t generation = 0;
 };
 
 } // namespace openage::gamestate::component

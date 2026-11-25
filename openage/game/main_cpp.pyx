@@ -33,6 +33,8 @@ def run_game(args, root_path):
         # headless mode
         args_cpp.headless = args.headless
 
+        args_cpp.ai_config = getattr(args, "ai_config_json", "").encode("utf-8")
+
         # mods
         if args.modpacks is not None:
             args_cpp.mods = args.modpacks
@@ -43,6 +45,7 @@ def run_game(args, root_path):
         args_cpp.window_args.width = args.window_args["width"]
         args_cpp.window_args.height = args.window_args["height"]
         args_cpp.window_args.vsync = args.window_args["vsync"]
+        args_cpp.window_args.ignore_user_input = getattr(args, "ignore_user_input", False)
         args_cpp.window_args.mode = args.window_args["window_mode"].encode('utf-8')
 
         # run the game!

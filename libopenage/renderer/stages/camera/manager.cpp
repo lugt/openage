@@ -16,10 +16,10 @@ CameraManager::CameraManager(const std::shared_ptr<renderer::camera::Camera> &ca
 	camera{camera},
 	move_motion_directions{static_cast<int>(MoveDirection::NONE)},
 	zoom_motion_direction{static_cast<int>(ZoomDirection::NONE)},
-	move_motion_speed{4.0f},
+	move_motion_speed{1.8f},
 	move_motion_current_speed{0.0f},
 	last_update_time{std::chrono::steady_clock::now()},
-	zoom_motion_speed{0.05f},
+	zoom_motion_speed{0.03f},
 	camera_boundaries{camera_boundaries} {
 	this->uniforms = this->camera->get_uniform_buffer()->new_uniform_input(
 		"view",

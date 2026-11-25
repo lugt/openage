@@ -2,9 +2,11 @@
 
 layout (location = 0) in vec3 position;
 layout (location = 1) in vec2 uv;
+layout (location = 2) in vec2 weights;
 
 out vec2 tex_pos;
 out vec2 tile_pos;
+out vec2 blend_weights;
 
 uniform mat4 model;
 
@@ -24,6 +26,7 @@ layout (std140) uniform camera {
 void main() {
 	vec4 world = model * vec4(position, 1.0);
 	gl_Position = proj * view * world;
+	blend_weights = weights;
 	tile_pos = vec2(-world.z, world.x);
     tex_pos = vec2(uv.x, 1.0 - uv.y);
 }

@@ -23,6 +23,41 @@ def tests_py():
     """
 
     yield ("openage.testing.doctest.test", "doctest on all modules from DOCTEST_MODULES")
+    yield "openage.testing.launcher.launch_contracts"
+    yield "openage.testing.launcher.parallel_golden_contracts"
+    yield "openage.testing.terrain.cached_conversion"
+    yield "openage.testing.terrain.catalog_conversion"
+    yield "openage.testing.snapshot.headless_regression"
+    yield (
+        "openage.testing.wallace_golden.mission1_golden",
+        "tick-driven golden regression suite for William Wallace Mission 1",
+        lambda env: env["has_assets"],
+    )
+    yield (
+        "openage.testing.wallace_golden.mission2_golden",
+        "tick-driven golden regression suite for William Wallace Mission 2",
+        lambda env: env["has_assets"],
+    )
+    yield (
+        "openage.testing.wallace_golden.ai_mission1_golden",
+        "computer-player decisions and operation replay on Wallace Mission 1",
+        lambda env: env["has_assets"],
+    )
+    yield (
+        "openage.testing.wallace_golden.ai_mission2_golden",
+        "economic computer-player operation replay on Wallace Mission 2",
+        lambda env: env["has_assets"],
+    )
+    yield (
+        "openage.testing.wallace_golden.ai_barbarossa_golden",
+        "two-player AI operation replay on the original Barbarossa map sandbox",
+        lambda env: env["has_assets"],
+    )
+    yield (
+        "openage.testing.wallace_golden.movement_golden",
+        "Mission 1 stop/resume and split-army movement regression",
+        lambda env: env["has_assets"],
+    )
     yield "openage.assets.test"
     yield ("openage.cabextract.test.test", "test CAB archive extraction", lambda env: env["has_assets"])
     yield (
@@ -46,6 +81,8 @@ def demos_py():
     Yields tuples of (name, description) for all Python demo methods.
     """
 
+    yield ("openage.testing.wallace_golden.case_worker", "isolated Wallace case worker")
+    yield ("openage.testing.wallace_golden.run_cases", "selected Wallace cases with timing and parallelism")
     yield (
         "openage.cppinterface.exctranslate_tests.cpp_to_py_demo",
         "translates a C++ exception and its causes to python",
@@ -78,6 +115,20 @@ def tests_cpp():
     If no description is required, just the name may be yielded.
     """
 
+    yield (
+        "openage::testing::campaign_scoring",
+        "original score event accounting",
+        lambda env: env["has_assets"],
+    )
+    yield "openage::testing::ai_action_limits"
+    yield "openage::testing::scoring"
+    yield "openage::testing::automation_input"
+    yield (
+        "openage::testing::movement_replanning",
+        "dynamic movement detours, retry and stop cancellation",
+        lambda env: env["has_assets"],
+    )
+    yield "openage::testing::presenter_without_scenario"
     yield "openage::coord::tests::coord"
     yield "openage::datastructure::tests::concurrent_queue"
     yield "openage::datastructure::tests::constexpr_map"

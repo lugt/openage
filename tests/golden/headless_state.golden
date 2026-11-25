@@ -1,0 +1,4 @@
+WORLD tick=100 map=(32,32) rng=4639825971798519317:12878478228828614585 next_id=4
+PLAYER id=1 food=212.50 wood=105.25 gold=0.00 stone=0.00
+ENTITY id=1 owner=1 type=villager pos=(8.40,2.00) hp=20.00/25.00 action=idle
+ENTITY id=2 owner=1 type=scout pos=(8.00,8.00) hp=45.00/45.00 action=idle

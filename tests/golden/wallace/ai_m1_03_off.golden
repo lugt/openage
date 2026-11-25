@@ -1,0 +1,16 @@
+=== TICK 1 (t=1.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=1/0
+tracked_counts: p0_g74=1 p1_g74=2
+unit[object_5462]: owner=0 hp=40/40 pos=(35.50,43.50) dead=0
+=== TICK 30 (t=30.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=1/0
+tracked_counts: p0_g74=1 p1_g74=2
+unit[object_5462]: owner=0 hp=40/40 pos=(46.50,40.50) dead=0
+=== TICK 60 (t=60.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=1/0
+tracked_counts: p0_g74=1 p1_g74=2
+unit[object_5462]: owner=0 hp=40/40 pos=(46.50,40.50) dead=0
+AI_OPERATIONS

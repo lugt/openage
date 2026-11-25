@@ -44,6 +44,8 @@ struct window_settings {
 	bool vsync = true;
 	// If true, enable debug logging for the selected backend.
 	bool debug = false;
+	// If true, ignore game input during automation; Escape requests close.
+	bool ignore_user_input = false;
 	// Display mode for the window.
 	window_mode mode = window_mode::WINDOWED;
 };
@@ -164,7 +166,7 @@ public:
 	void close();
 
 protected:
-	Window(size_t width, size_t height);
+	Window(size_t width, size_t height, bool ignore_user_input);
 
 	/**
 	 * Determines if the window should be closed.

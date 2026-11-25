@@ -1,0 +1,17 @@
+=== TICK 1 (t=1.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=0 Stone=0 Gold=0 pop=1/5
+tracked_counts: p0_g83=1 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(56.50,59.50) dead=0
+=== TICK 15 (t=15.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=75 Stone=0 Gold=0 pop=1/5
+tracked_counts: p0_g83=1 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(55.50,60.50) dead=0
+last_site: progress=0 builders=1
+=== TICK 70 (t=70.00s) ===
+mission: RUNNING | victory=0 | defeat=0
+resources[0]: Food=0 Wood=75 Stone=0 Gold=0 pop=1/10
+tracked_counts: p0_g83=1 p0_g109=1
+unit[object_8536]: owner=0 hp=25/25 pos=(55.50,60.50) dead=0
+last_site: progress=100 builders=0

@@ -4,3 +4,7 @@ add_sources(libopenage
 )
 
 add_subdirectory("viewmodel")
+
+add_sources(libopenage MODULE
+	tests.cpp
+)
