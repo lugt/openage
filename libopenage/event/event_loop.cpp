@@ -112,15 +112,6 @@ int EventLoop::execute_events(const time::time_t &time_until,
 	log::log(SPAM << "Loop: Pending events in the queue (# = "
 	              << this->queue.get_event_queue().size() << "):");
 
-	{
-		size_t i = 0;
-		for (const auto &e : this->queue.get_event_queue().get_sorted_events()) {
-			log::log(SPAM << "  event "
-			              << i << ": t=" << e->get_time() << ": " << e->get_eventhandler()->id());
-			i++;
-		}
-	}
-
 	int cnt = 0;
 
 	while (true) {

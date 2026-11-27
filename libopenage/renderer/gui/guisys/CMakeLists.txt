@@ -32,3 +32,7 @@ list(APPEND QTGUI_SOURCES
 )
 
 set(QTGUI_SOURCES ${QTGUI_SOURCES} PARENT_SCOPE)
+
+add_sources(libopenage MODULE
+	livereload_tests.cpp
+)

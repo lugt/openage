@@ -446,8 +446,8 @@ Item {
 		width: 86
 		height: 34
 		radius: 3
-		border.color: enabled && (active || control.containsMouse) ? "#d6b677" : "#5c5040"
-		color: enabled ? (active || control.pressed ? "#645037" : "#2b2a29") : "#222020"
+		border.color: enabled && (active || control.pressed || control.containsMouse) ? "#e5c17b" : "#5c5040"
+		color: enabled ? (active || control.pressed ? "#645037" : (control.containsMouse ? "#3b352c" : "#2b2a29")) : "#222020"
 		Image {
 			id: actionIcon
 			anchors.left: parent.left
@@ -476,6 +476,7 @@ Item {
 			anchors.fill: parent
 			enabled: button.enabled
 			hoverEnabled: true
+			cursorShape: button.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
 			onClicked: {
 				if (button.enabled) {
 					button.pressed()

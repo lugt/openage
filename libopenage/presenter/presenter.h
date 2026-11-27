@@ -105,7 +105,7 @@ public:
 	          const std::shared_ptr<time::TimeLoop> &time_loop = nullptr,
 	          const renderer::window_settings &window_settings = {});
 
-	~Presenter() = default;
+	~Presenter();
 
 	/**
 	 * Start the presenter and initialize subsystems.
@@ -254,6 +254,11 @@ protected:
 	std::shared_ptr<renderer::camera::CameraManager> camera_manager;
 
 	/**
+	 * Last map size used to configure dynamic camera boundaries.
+	 */
+	util::Vector2s camera_map_size{0, 0};
+
+	/**
 	 * Graphics output for the map background.
 	 */
 	std::shared_ptr<renderer::skybox::SkyboxRenderStage> skybox_renderer;
@@ -327,6 +332,9 @@ protected:
 	 * concurrently with the simulation worker threads.
 	 */
 	bool initialized = false;
+
+	struct HudCache;
+	std::unique_ptr<HudCache> hud_cache;
 };
 
 } // namespace presenter

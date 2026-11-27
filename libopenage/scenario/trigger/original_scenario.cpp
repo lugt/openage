@@ -51,11 +51,10 @@ std::optional<gamestate::player_id_t> owner(gamestate::GameEntity &entity, time:
 coord::phys3 position(gamestate::GameEntity &entity, time::time_t at) {
     return entity.try_get_component_as<gamestate::component::Position>(component_t::POSITION)->get_positions().get(at);
 }
-bool in_area(const Value &record, const coord::phys3 &point) {
-    if (number(record, "area_x1") < 0) return true;
+bool in_area(int64_t area_x1, int64_t area_x2, int64_t area_y1, int64_t area_y2, const coord::phys3 &point) {
+    if (area_x1 < 0) return true;
     const auto x = std::floor(point.ne.to_double()), y = std::floor(point.se.to_double());
-    return x >= number(record, "area_x1") and x <= number(record, "area_x2")
-        and y >= number(record, "area_y1") and y <= number(record, "area_y2");
+    return x >= area_x1 and x <= area_x2 and y >= area_y1 and y <= area_y2;
 }
 
 class OriginalCondition final : public TriggerCondition {
@@ -112,7 +111,33 @@ private:
 
 OriginalScenario::OriginalScenario(TriggerRuntime &runtime, std::shared_ptr<gamestate::GameState> state,
                                    std::shared_ptr<gamestate::EntityFactory> factory, Value config) :
-    runtime_{runtime}, state_{std::move(state)}, factory_{std::move(factory)}, config_{std::move(config)} {}
+    runtime_{runtime}, state_{std::move(state)}, factory_{std::move(factory)}, config_{std::move(config)} {
+    for (const auto &[orig_key, runtime_val] : this->config_.at("player_map").as_object()) {
+        this->player_map_[std::stoll(orig_key)] = static_cast<gamestate::player_id_t>(runtime_val.as_int());
+    }
+    const auto &definitions = this->config_.at("definitions").as_object();
+    this->defs_by_genie_id_.reserve(definitions.size());
+    this->defs_by_fqon_.reserve(definitions.size());
+    for (const auto &[id_key, value] : definitions) {
+        DefinitionMeta meta{
+            number(value, "object_type"),
+            number(value, "class"),
+            value.has("capturable") and value.at("capturable").is_bool() ? value.at("capturable").as_bool() : false,
+            value.has("radius_x") and value.at("radius_x").is_number() ? value.at("radius_x").as_number() : 0.0,
+            text(value, "fqon"),
+        };
+        const auto genie_id = std::stoll(id_key);
+        auto [it, inserted] = this->defs_by_genie_id_.emplace(genie_id, std::move(meta));
+        if (not it->second.fqon.empty()) {
+            this->defs_by_fqon_[it->second.fqon] = &it->second;
+        }
+    }
+    const auto &triggers = this->config_.at("triggers").as_array();
+    this->trigger_ids_.reserve(triggers.size());
+    for (const auto &record : triggers) {
+        this->trigger_ids_.push_back(trigger_id(number(record, "trigger_id")));
+    }
+}
 
 std::shared_ptr<TriggerCondition> OriginalScenario::condition(const gamestate::MissionTriggerCondition &ir) {
     const auto type = number(ir.args, "condition_type");
@@ -129,13 +154,16 @@ std::shared_ptr<TriggerEffect> OriginalScenario::effect(const gamestate::Mission
 }
 
 gamestate::player_id_t OriginalScenario::player(int64_t original) const {
-    return static_cast<gamestate::player_id_t>(config_.at("player_map").at(std::to_string(original)).as_int());
+    return this->player_map_.at(original);
 }
-const Value *OriginalScenario::definition(const gamestate::GameEntity &entity) const {
-    const auto &definitions = config_.at("definitions");
-    if (entity.genie_id >= 0 and definitions.has(std::to_string(entity.genie_id))) return &definitions.at(std::to_string(entity.genie_id));
-    for (const auto &[id, value] : definitions.as_object()) {
-        if (text(value, "fqon") == entity.definition) return &value;
+const OriginalScenario::DefinitionMeta *OriginalScenario::definition(const gamestate::GameEntity &entity) const {
+    if (entity.genie_id >= 0) {
+        if (const auto it = this->defs_by_genie_id_.find(entity.genie_id); it != this->defs_by_genie_id_.end()) {
+            return &it->second;
+        }
+    }
+    if (const auto it = this->defs_by_fqon_.find(entity.definition); it != this->defs_by_fqon_.end()) {
+        return it->second;
     }
     return nullptr;
 }
@@ -209,38 +237,110 @@ void OriginalScenario::activate(int64_t index, bool enabled, time::time_t at) {
     }
 }
 
-std::vector<std::shared_ptr<gamestate::GameEntity>> OriginalScenario::matching(const Value &record, time::time_t at, bool effects) const {
-    std::set<gamestate::entity_id_t> selected;
+template <typename Fn>
+void OriginalScenario::for_each_matching(const Value &record, time::time_t at, bool effects, Fn &&fn) const {
+    std::vector<gamestate::entity_id_t> selected;
     const auto source_id = number(record, "unit_object");
     if (source_id >= 0) {
-        if (auto id = state_->get_entity_id_by_instance("object_" + std::to_string(source_id))) selected.insert(*id);
+        if (auto id = state_->get_entity_id_by_instance("object_" + std::to_string(source_id))) {
+            selected.push_back(*id);
+        }
     }
     if (record.has("selected_object_ids") and record.at("selected_object_ids").is_array()) {
         for (const auto &item : record.at("selected_object_ids").as_array()) {
-            if (auto id = state_->get_entity_id_by_instance("object_" + std::to_string(item.as_int()))) selected.insert(*id);
+            if (auto id = state_->get_entity_id_by_instance("object_" + std::to_string(item.as_int()))) {
+                selected.push_back(*id);
+            }
         }
     }
     const bool specific = source_id >= 0 or not selected.empty();
-    std::vector<std::shared_ptr<gamestate::GameEntity>> result;
-    for (const auto &[id, entity] : state_->get_game_entities()) {
-        if (entity->is_dead() or (specific and not selected.contains(id))) continue;
-        if (number(record, "source_player") >= 0 and owner(*entity, at) != player(number(record, "source_player"))) continue;
-        const auto data = definition(*entity);
-        const auto unit_id = number(record, effects ? "object_list_unit_id" : "object_list");
-        if (unit_id >= 0 and entity->genie_id != unit_id) {
-            if (not config_.at("definitions").has(std::to_string(unit_id)) or entity->definition != text(config_.at("definitions").at(std::to_string(unit_id)), "fqon")) continue;
+    if (specific and selected.empty()) {
+        return;
+    }
+    if (selected.size() > 1) {
+        std::ranges::sort(selected);
+        const auto [first, last] = std::ranges::unique(selected);
+        selected.erase(first, last);
+    }
+
+    const auto raw_source_player = number(record, "source_player");
+    const std::optional<gamestate::player_id_t> required_owner =
+        raw_source_player >= 0 ? std::make_optional(this->player(raw_source_player)) : std::nullopt;
+    const auto unit_id = number(record, effects ? "object_list_unit_id" : "object_list");
+    const std::string *target_fqon = nullptr;
+    if (unit_id >= 0) {
+        if (const auto def_it = this->defs_by_genie_id_.find(unit_id); def_it != this->defs_by_genie_id_.end()) {
+            target_fqon = &def_it->second.fqon;
         }
-        if (number(record, "object_type") > 0 and (not data or number(*data, "object_type") != number(record, "object_type"))) continue;
-        if (number(record, "object_group") >= 0 and (not data or number(*data, "class") != number(record, "object_group"))) continue;
-        if (not effects and number(record, "condition_type") == 3) {
-            if (const auto build = entity->try_get_component_as<gamestate::component::Build>(component_t::BUILD);
-                build and build->is_under_construction()) {
-                continue;
+    }
+    const auto object_type = number(record, "object_type");
+    const auto object_group = number(record, "object_group");
+    const bool check_construction = not effects and number(record, "condition_type") == 3;
+    const auto area_x1 = number(record, "area_x1");
+    const auto area_x2 = number(record, "area_x2");
+    const auto area_y1 = number(record, "area_y1");
+    const auto area_y2 = number(record, "area_y2");
+
+    auto check_and_visit = [&](const std::shared_ptr<gamestate::GameEntity> &entity) {
+        if (not entity or entity->is_dead()) {
+            return;
+        }
+        if (required_owner and owner(*entity, at) != *required_owner) {
+            return;
+        }
+        if (unit_id >= 0 and entity->genie_id != unit_id) {
+            if (not target_fqon or entity->definition != *target_fqon) {
+                return;
             }
         }
-        if (not in_area(record, position(*entity, at))) continue;
-        result.push_back(entity);
+        if (object_type > 0 or object_group >= 0) {
+            const auto *data = this->definition(*entity);
+            if (object_type > 0 and (not data or data->object_type != object_type)) {
+                return;
+            }
+            if (object_group >= 0 and (not data or data->object_class != object_group)) {
+                return;
+            }
+        }
+        if (check_construction) {
+            if (const auto build = entity->try_get_component_as<gamestate::component::Build>(component_t::BUILD);
+                build and build->is_under_construction()) {
+                return;
+            }
+        }
+        if (area_x1 >= 0 and not in_area(area_x1, area_x2, area_y1, area_y2, position(*entity, at))) {
+            return;
+        }
+        fn(entity);
+    };
+
+    if (specific) {
+        for (const auto id : selected) {
+            if (state_->has_game_entity(id)) {
+                check_and_visit(state_->get_game_entity(id));
+            }
+        }
+        return;
     }
+
+    for (const auto &[id, entity] : state_->get_game_entities()) {
+        check_and_visit(entity);
+    }
+}
+
+size_t OriginalScenario::count_matching(const Value &record, time::time_t at) const {
+    size_t count = 0;
+    this->for_each_matching(record, at, false, [&count](const std::shared_ptr<gamestate::GameEntity> &) {
+        ++count;
+    });
+    return count;
+}
+
+std::vector<std::shared_ptr<gamestate::GameEntity>> OriginalScenario::matching(const Value &record, time::time_t at, bool effects) const {
+    std::vector<std::shared_ptr<gamestate::GameEntity>> result;
+    this->for_each_matching(record, at, effects, [&result](const std::shared_ptr<gamestate::GameEntity> &entity) {
+        result.push_back(entity);
+    });
     std::ranges::sort(result, {}, &gamestate::GameEntity::get_id);
     return result;
 }
@@ -294,13 +394,16 @@ bool OriginalScenario::evaluate(const Value &condition, time::time_t at) const {
     else if (type == 13) {
         const auto target = player(number(condition, "source_player"));
         value = std::ranges::none_of(state_->get_game_entities(), [&](const auto &entry) {
-            const auto data = definition(*entry.second);
-            return not entry.second->is_dead() and owner(*entry.second, at) == target and data and number(*data, "object_type") != 1;
+            if (entry.second->is_dead() or owner(*entry.second, at) != target) {
+                return false;
+            }
+            const auto *data = this->definition(*entry.second);
+            return data and data->object_type != 1;
         });
         if (target == player(0)) value = false;
     }
     else {
-        const auto count = matching(condition, at, false).size();
+        const auto count = this->count_matching(condition, at);
         const auto quantity = std::max<int64_t>(1, number(condition, "quantity", 1));
         if (type == 4) value = count <= static_cast<size_t>(std::max<int64_t>(0, number(condition, "quantity", 0)));
         else value = count >= static_cast<size_t>(quantity);
@@ -364,6 +467,9 @@ void OriginalScenario::execute(const Value &effect, time::time_t at) {
             entity->get_manager()->run_activity_system(at);
         }
         state_->register_named_entity("created_" + std::to_string(created_++), entity->get_id());
+        if (const auto *meta = this->definition(*entity); meta and meta->capturable) {
+            this->capturable_entities_.push_back(entity->get_id());
+        }
     }
     else if (type == 15) {
         for (const auto &entity : matching(effect, at, true)) {
@@ -393,26 +499,63 @@ void OriginalScenario::complete_objective(TriggerId id) {
 void OriginalScenario::changed(time::time_t at) {
     capture_gaia(at);
     state_->update_visibility(at);
-    for (const auto &record : config_.at("triggers").as_array()) {
-        const auto id = trigger_id(number(record, "trigger_id"));
+    for (const auto &id : this->trigger_ids_) {
         const auto instance = runtime_.trigger(id);
         if (instance and instance->state() == TriggerState::ARMED) runtime_.schedule_evaluation(id, at);
     }
     runtime_.mission_state().notify_progress();
 }
 void OriginalScenario::capture_gaia(time::time_t at) {
+    if (not this->capturable_indexed_) {
+        this->capturable_entities_.clear();
+        for (const auto &[id, entity] : state_->get_game_entities()) {
+            const auto *data = this->definition(*entity);
+            if (data and data->capturable) {
+                this->capturable_entities_.push_back(id);
+            }
+        }
+        this->capturable_indexed_ = true;
+    }
+    if (this->capturable_entities_.empty()) {
+        return;
+    }
+    const auto gaia_player = player(0);
+    bool has_gaia_capturable = false;
+    for (const auto id : this->capturable_entities_) {
+        if (state_->has_game_entity(id)) {
+            const auto &entity = state_->get_game_entity(id);
+            if (not entity->is_dead() and owner(*entity, at) == gaia_player) {
+                has_gaia_capturable = true;
+                break;
+            }
+        }
+    }
+    if (not has_gaia_capturable) {
+        return;
+    }
     std::vector<coord::phys3> scouts;
     for (const auto &[id, entity] : state_->get_game_entities()) {
-        const auto data = definition(*entity);
-        if (data and not entity->is_dead() and owner(*entity, at) == 0 and number(*data, "object_type") != 1) scouts.push_back(position(*entity, at));
+        if (entity->is_dead() or owner(*entity, at) != 0) {
+            continue;
+        }
+        const auto *data = this->definition(*entity);
+        if (data and data->object_type != 1) {
+            scouts.push_back(position(*entity, at));
+        }
+    }
+    if (scouts.empty()) {
+        return;
     }
     for (bool captured = true; captured;) {
         captured = false;
-        for (const auto &[id, entity] : state_->get_game_entities()) {
-            const auto data = definition(*entity);
-            if (not data or not data->at("capturable").as_bool() or entity->is_dead() or owner(*entity, at) != player(0)) continue;
+        for (const auto id : this->capturable_entities_) {
+            if (not state_->has_game_entity(id)) continue;
+            const auto &entity = state_->get_game_entity(id);
+            if (entity->is_dead() or owner(*entity, at) != gaia_player) continue;
+            const auto *data = this->definition(*entity);
+            if (not data or not data->capturable) continue;
             const auto point = position(*entity, at);
-            const auto reach = 5.0 + data->at("radius_x").as_number();
+            const auto reach = 5.0 + data->radius_x;
             if (std::ranges::any_of(scouts, [&](const auto &scout) {
                 return std::hypot((scout.ne - point.ne).to_double(), (scout.se - point.se).to_double()) <= reach;
             })) {

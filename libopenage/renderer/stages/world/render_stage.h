@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <shared_mutex>
+#include <unordered_map>
 #include <vector>
 
 #include "util/path.h"
@@ -144,6 +145,7 @@ private:
 	 * Render entities requested by the game world.
 	 */
 	std::vector<std::shared_ptr<WorldObject>> render_objects;
+	std::unordered_map<uint32_t, std::shared_ptr<WorldObject>> render_objects_by_id;
 	std::shared_ptr<const gamestate::VisibilitySnapshot> visibility;
 
 	/**

@@ -111,6 +111,23 @@ const nyan::fqon_t health_attribute = "de2_base.data.util.attribute.types.Health
 
 } // namespace
 
+struct Presenter::HudCache {
+	std::unordered_map<std::string, QString> icon_urls;
+	bool has_selection_snapshot{false};
+	QVariantList last_cards;
+	QVariantList last_actions;
+	int last_construction{-1};
+	bool last_can_stop{false};
+	QString last_action_status;
+	int last_idle_villagers{-1};
+	bool has_diplomacy_snapshot{false};
+	QVariantList last_diplomacy;
+	size_t minimap_width{0};
+	size_t minimap_height{0};
+	std::vector<QRgb> minimap_visible_colors;
+	std::vector<QRgb> minimap_explored_colors;
+};
+
 Presenter::Presenter(const util::Path &root_dir,
                      const std::shared_ptr<gamestate::GameSimulation> &simulation,
                      const std::shared_ptr<time::TimeLoop> &time_loop,
@@ -119,7 +136,10 @@ Presenter::Presenter(const util::Path &root_dir,
 	window_settings{window_settings},
 	render_passes{},
 	simulation{simulation},
-	time_loop{time_loop} {}
+	time_loop{time_loop},
+	hud_cache{std::make_unique<HudCache>()} {}
+
+Presenter::~Presenter() = default;
 
 
 void Presenter::run() {
@@ -478,7 +498,10 @@ void Presenter::init_input() {
 		}
 		if (this->mission_ui_pressed or over_hud) {
 			this->gui->get_input_handler()->process(std::shared_ptr<QEvent>(ev.clone()));
-			if (this->mission_ui_pressed) {
+			if (this->mission_ui_pressed or (this->mission_hud and this->mission_hud->menu_open())) {
+				if (this->camera_manager) {
+					this->camera_manager->set_move_motion_dirs(0);
+				}
 				return;
 			}
 		}
@@ -828,10 +851,17 @@ void Presenter::update_campaign_map() {
 			++idle_villager_count;
 		}
 	}
-	this->mission_hud->set_idle_villagers(idle_villager_count);
-	this->mission_hud->set_action_status(this->pending_build
-		? QObject::tr("Left-click to place the building. Right-click to cancel.")
-		: QString::fromStdString(state->action_feedback(viewer)));
+	if (idle_villager_count != this->hud_cache->last_idle_villagers) {
+		this->hud_cache->last_idle_villagers = idle_villager_count;
+		this->mission_hud->set_idle_villagers(idle_villager_count);
+	}
+	const QString action_status = this->pending_build
+	                                ? QObject::tr("Left-click to place the building. Right-click to cancel.")
+	                                : QString::fromStdString(state->action_feedback(viewer));
+	if (action_status != this->hud_cache->last_action_status) {
+		this->hud_cache->last_action_status = action_status;
+		this->mission_hud->set_action_status(action_status);
+	}
 
 	QVariantList relations;
 	std::vector<gamestate::player_id_t> players;
@@ -848,29 +878,62 @@ void Presenter::update_campaign_map() {
 			{"stance", static_cast<int>(state->get_stance(viewer, id))},
 		});
 	}
-	this->mission_hud->set_diplomacy(std::move(relations));
+	if (not this->hud_cache->has_diplomacy_snapshot or relations != this->hud_cache->last_diplomacy) {
+		this->hud_cache->last_diplomacy = relations;
+		this->hud_cache->has_diplomacy_snapshot = true;
+		this->mission_hud->set_diplomacy(std::move(relations));
+	}
 	if (not view) {
 		return;
 	}
 
-	QImage terrain(view->width, view->height, QImage::Format_RGB32);
-	terrain.fill(QColor("#0d141b"));
-	for (const auto &chunk : state->get_map()->get_terrain()->get_chunks()) {
-		const auto offset = chunk->get_offset();
-		const auto size = chunk->get_size();
-		const auto &tiles = chunk->get_tiles();
-		for (size_t local_y = 0; local_y < size[1]; ++local_y) {
-			for (size_t local_x = 0; local_x < size[0]; ++local_x) {
-				const auto x = offset.ne + local_x;
-				const auto y = offset.se + local_y;
-				auto visibility = view->at(x, y);
-				if (visibility == gamestate::TileVisibility::Unexplored) {
-					continue;
+	if (this->hud_cache->minimap_width != view->width or this->hud_cache->minimap_height != view->height) {
+		this->hud_cache->minimap_width = view->width;
+		this->hud_cache->minimap_height = view->height;
+		const size_t total_tiles = view->width * view->height;
+		const QColor water_color("#356f8f");
+		const QColor road_color("#aa946a");
+		const QColor grass_color("#6b894d");
+		this->hud_cache->minimap_visible_colors.assign(total_tiles, grass_color.rgb());
+		this->hud_cache->minimap_explored_colors.assign(total_tiles, grass_color.darker(240).rgb());
+		for (const auto &chunk : state->get_map()->get_terrain()->get_chunks()) {
+			const auto offset = chunk->get_offset();
+			const auto size = chunk->get_size();
+			const auto &tiles = chunk->get_tiles();
+			for (size_t local_y = 0; local_y < size[1]; ++local_y) {
+				for (size_t local_x = 0; local_x < size[0]; ++local_x) {
+					const auto x = offset.ne + local_x;
+					const auto y = offset.se + local_y;
+					if (x >= view->width or y >= view->height) {
+						continue;
+					}
+					const auto &name = tiles[local_y * size[0] + local_x].terrain.get_name();
+					const QColor color = name.find("water") != std::string::npos ? water_color
+					                   : name.find("road") != std::string::npos  ? road_color
+					                                                             : grass_color;
+					const size_t idx = y * view->width + x;
+					this->hud_cache->minimap_visible_colors[idx] = color.rgb();
+					this->hud_cache->minimap_explored_colors[idx] = color.darker(240).rgb();
 				}
-				const auto &name = tiles[local_y * size[0] + local_x].terrain.get_name();
-				QColor color = name.find("water") != std::string::npos ? QColor("#356f8f")
-				             : name.find("road") != std::string::npos ? QColor("#aa946a") : QColor("#6b894d");
-				terrain.setPixelColor(x, y, visibility == gamestate::TileVisibility::Explored ? color.darker(240) : color);
+			}
+		}
+	}
+
+	QImage terrain(view->width, view->height, QImage::Format_RGB32);
+	const QRgb unexplored_rgb = QColor("#0d141b").rgb();
+	for (size_t y = 0; y < view->height; ++y) {
+		auto *row = reinterpret_cast<QRgb *>(terrain.scanLine(static_cast<int>(y)));
+		const size_t row_offset = y * view->width;
+		for (size_t x = 0; x < view->width; ++x) {
+			const auto vis = view->tiles[row_offset + x];
+			if (vis == gamestate::TileVisibility::Unexplored) {
+				row[x] = unexplored_rgb;
+			}
+			else if (vis == gamestate::TileVisibility::Explored) {
+				row[x] = this->hud_cache->minimap_explored_colors[row_offset + x];
+			}
+			else {
+				row[x] = this->hud_cache->minimap_visible_colors[row_offset + x];
 			}
 		}
 	}
@@ -919,6 +982,25 @@ void Presenter::render() {
 			}
 		}
 	}
+	if (this->simulation and this->simulation->get_game() and this->camera_manager) {
+		const auto state = this->simulation->get_game()->get_state();
+		if (state and state->get_map()) {
+			const auto map_size = state->get_map()->get_size();
+			if (map_size[0] > 0 and map_size[1] > 0 and map_size != this->camera_map_size) {
+				// Default camera height is 10.0 -> horizontal look-at offset is 10 * sqrt(3) / sqrt(2).
+				constexpr float side_length = 12.2474487f;
+				this->camera_manager->set_camera_boundaries(
+					renderer::camera::CameraBoundaries{
+						side_length,
+						side_length + static_cast<float>(map_size[0]),
+						renderer::camera::Y_BOUND_MIN,
+						renderer::camera::Y_BOUND_MAX,
+						side_length - static_cast<float>(map_size[1]),
+						side_length});
+				this->camera_map_size = map_size;
+			}
+		}
+	}
 	// TODO: Pass current time to update() instead of fetching it in renderer
 	this->camera_manager->update();
 	this->update_campaign_map();
@@ -934,10 +1016,16 @@ void Presenter::render() {
 		const auto render_time = this->time_loop->get_clock()->get_real_time();
 		const auto player = this->game_controller->get_controlled();
 		const auto selected = this->game_controller->get_selected();
-		auto icon_url = [this](const nyan::fqon_t &subject) {
+		auto icon_url = [this](const nyan::fqon_t &subject) -> const QString & {
+			if (const auto it = this->hud_cache->icon_urls.find(subject); it != this->hud_cache->icon_urls.end()) {
+				return it->second;
+			}
 			const auto path = this->root_dir / "assets" / "converted" / "ww_mvp" / "campaign"
 			                  / "william_wallace" / "hud" / (subject + ".png");
-			return path.is_file() ? QUrl::fromLocalFile(QString::fromStdString(path.resolve_native_path())).toString() : QString{};
+			QString resolved = path.is_file()
+			                       ? QUrl::fromLocalFile(QString::fromStdString(path.resolve_native_path())).toString()
+			                       : QString{};
+			return this->hud_cache->icon_urls.emplace(subject, std::move(resolved)).first->second;
 		};
 		QVariantList cards;
 		QVariantList actions;
@@ -1044,8 +1132,19 @@ void Presenter::render() {
 			}
 		}
 		if (this->mission_hud) {
-			this->mission_hud->set_selection_details(std::move(cards), std::move(actions), construction, can_stop,
-				{{"stop", icon_url("command.stop")}, {"cancel", icon_url("command.cancel")}});
+			if (not this->hud_cache->has_selection_snapshot
+			    or cards != this->hud_cache->last_cards
+			    or actions != this->hud_cache->last_actions
+			    or construction != this->hud_cache->last_construction
+			    or can_stop != this->hud_cache->last_can_stop) {
+				this->hud_cache->last_cards = cards;
+				this->hud_cache->last_actions = actions;
+				this->hud_cache->last_construction = construction;
+				this->hud_cache->last_can_stop = can_stop;
+				this->hud_cache->has_selection_snapshot = true;
+				this->mission_hud->set_selection_details(std::move(cards), std::move(actions), construction, can_stop,
+					{{"stop", icon_url("command.stop")}, {"cancel", icon_url("command.cancel")}});
+			}
 		}
 	}
 	this->hud_renderer->set_selection_overlays(std::move(quads));

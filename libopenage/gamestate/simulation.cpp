@@ -2,6 +2,9 @@
 
 #include "simulation.h"
 
+#include <chrono>
+#include <thread>
+
 #include "assets/mod_manager.h"
 #include "event/event_loop.h"
 #include "gamestate/entity_factory.h"
@@ -333,8 +336,16 @@ void GameSimulation::run() {
 
 	time::time_t last_logged_at = time::time_t{0};
 	time::time_t next_snapshot_update = time::time_t::zero();
+	time::time_t last_sim_time = time::TIME_MIN;
 	while (this->lifecycle == SimulationLifecycle::Running and this->running) {
 		time::time_t current_time = this->time_loop->get_clock()->get_time();
+		if (current_time == last_sim_time) {
+			// Avoid busy-spinning on Clock/EventLoop mutexes when simulation
+			// time has not advanced (Clock::update_time steps at >=1ms).
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			continue;
+		}
+		last_sim_time = current_time;
 		this->event_loop->reach_time(current_time, this->game->get_state());
 		if (current_time >= next_snapshot_update) {
 			this->game->get_state()->update_visibility(current_time);

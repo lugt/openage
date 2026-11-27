@@ -5,6 +5,7 @@
 #include "testlist.h"
 
 import openage.presenter.tests;
+import openage.renderer.gui.guisys.livereload_tests;
 import openage.gamestate.movement_tests;
 import openage.testing.snapshot;
 import openage.gamestate.score;
@@ -16,6 +17,14 @@ namespace testing {
 
 bool fail(const log::message &msg) {
 	throw TestError{msg};
+}
+
+void gui_source_changes() {
+	qtgui::tests::source_changes();
+}
+
+void hud_clicks() {
+	presenter::tests::hud_clicks();
 }
 
 void campaign_scoring() {

@@ -26,7 +26,7 @@ def original_map(template, source, textures, destination):
                    victory=replace(template.victory, required_removals=()))
 
 
-def convert_terrain(data, textures, destination, terrain_definitions=None):
+def convert_terrain(data, textures, destination, terrain_definitions=None, graphics_dir=None):
     """Reuse the original terrain export for scenario grids and saved grids."""
     tiles = data["terrain_ids"]
     used = sorted(set(tiles))
@@ -37,7 +37,7 @@ def convert_terrain(data, textures, destination, terrain_definitions=None):
             raise ValueError(f"Terrain {tile} requires the exported original DAT terrain catalog")
         record = terrain_definitions[tile]
         filename = record['name_2']
-        if not filename or '/' in filename or '\\' in filename or record['is_water'] not in (1, 2, 4, 16, 32):
+        if not filename or '/' in filename or '\\' in filename:
             raise ValueError(f"Unsupported DAT terrain definition {tile}")
         filenames[tile] = filename
         if record['is_water'] in (1, 2, 4):
@@ -45,7 +45,7 @@ def convert_terrain(data, textures, destination, terrain_definitions=None):
 
     originals = {name: (textures / f"{name}.dds").read_bytes()
                  for name in sorted({filenames[tile] for tile in used})}
-    graphics = destination / "original_terrain_graphics"
+    graphics = graphics_dir or (destination / "original_terrain_graphics")
     graphics.mkdir(parents=True, exist_ok=True)
     for name, image in originals.items():
         export_dds_terrain_cached(image, graphics / f"{name}.png")

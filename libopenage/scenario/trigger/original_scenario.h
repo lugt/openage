@@ -6,6 +6,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 #include "coord/scene.h"
@@ -37,10 +38,21 @@ public:
     const util::json::Value &config() const { return this->config_; }
 
 private:
+    struct DefinitionMeta {
+        int64_t object_type{-1};
+        int64_t object_class{-1};
+        bool capturable{false};
+        double radius_x{0.0};
+        std::string fqon;
+    };
+
     void activate(int64_t index, bool enabled, time::time_t at);
     void schedule(int64_t index, time::time_t at);
     gamestate::player_id_t player(int64_t original) const;
-    const util::json::Value *definition(const gamestate::GameEntity &entity) const;
+    const DefinitionMeta *definition(const gamestate::GameEntity &entity) const;
+    template <typename Fn>
+    void for_each_matching(const util::json::Value &record, time::time_t at, bool effects, Fn &&fn) const;
+    size_t count_matching(const util::json::Value &record, time::time_t at) const;
     std::vector<std::shared_ptr<gamestate::GameEntity>> matching(const util::json::Value &record, time::time_t at, bool effects) const;
     void capture_gaia(time::time_t at);
     std::string substitute_variables(const std::string &tmpl) const;
@@ -48,6 +60,12 @@ private:
     std::shared_ptr<gamestate::GameState> state_;
     std::shared_ptr<gamestate::EntityFactory> factory_;
     util::json::Value config_;
+    std::unordered_map<int64_t, gamestate::player_id_t> player_map_;
+    std::unordered_map<int64_t, DefinitionMeta> defs_by_genie_id_;
+    std::unordered_map<std::string, const DefinitionMeta *> defs_by_fqon_;
+    std::vector<TriggerId> trigger_ids_;
+    mutable std::vector<gamestate::entity_id_t> capturable_entities_;
+    mutable bool capturable_indexed_{false};
     std::map<TriggerId, time::time_t> activated_;
     std::map<int64_t, int64_t> variables_;
     std::map<std::string, int64_t> variable_ids_;

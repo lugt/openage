@@ -70,12 +70,16 @@ void WorldRenderStage::update() {
 		if (not object->is_removed(current_time)) {
 			return false;
 		}
+		this->render_objects_by_id.erase(object->get_id());
 		this->render_pass->remove_renderables(object->get_uniforms());
 		return true;
 	});
 	auto &camera_frustum = this->camera->get_frustum_2d();
 	for (auto &obj : this->render_objects) {
 		obj->fetch_updates(current_time);
+		if (obj->is_changed()) {
+			this->render_objects_by_id[obj->get_id()] = obj;
+		}
 
 		if (WorldRenderStage::ENABLE_FRUSTUM_CULLING
 		    and not obj->is_visible(camera_frustum, current_time)) {
@@ -133,6 +137,9 @@ std::optional<uint32_t> WorldRenderStage::pick(size_t x, size_t y) const {
 }
 
 float WorldRenderStage::get_sprite_top(uint32_t id) const {
+	if (const auto it = this->render_objects_by_id.find(id); it != this->render_objects_by_id.end()) {
+		return it->second->get_sprite_top();
+	}
 	const auto object = std::ranges::find_if(this->render_objects, [id](const auto &obj) {
 		return obj->get_id() == id;
 	});

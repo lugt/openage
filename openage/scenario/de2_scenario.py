@@ -9,12 +9,16 @@ def _record(obj):
         return obj.value
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
-    if isinstance(obj, (list, tuple)):
+    if isinstance(obj, bytes):
+        return obj.hex()
+    if isinstance(obj, (list, tuple, set, frozenset)):
         return [_record(value) for value in obj]
     if isinstance(obj, dict):
         return {str(key): _record(value) for key, value in obj.items()}
-    return {key: _record(value) for key, value in vars(obj).items()
-            if not key.startswith('_') and key not in ('new_effect', 'new_condition')}
+    if hasattr(obj, '__dict__'):
+        return {key: _record(value) for key, value in vars(obj).items()
+                if not key.startswith('_') and key not in ('new_effect', 'new_condition')}
+    return str(obj)
 
 
 def read_scenario(path, strings=None):

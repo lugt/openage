@@ -43,11 +43,15 @@ def _sprite(original, graphic, destination):
     expected = frames * angles
     if len(texture.frames) < expected:
         available = len(texture.frames)
-        if available % angles == 1 and angles > 1:
-            available -= 1
-        if available % angles or available < angles:
+        if available < 1:
             raise ValueError(f"Invalid source frame layout for graphic {graphic['id']}")
-        frames = available // angles
+        if available < angles:
+            angles = available
+            frames = 1
+        else:
+            if available % angles == 1 and angles > 1:
+                available -= 1
+            frames = max(1, available // angles)
         expected = frames * angles
     del texture.frames[expected:]
     merge_frames(texture)
@@ -74,7 +78,7 @@ def _sprite(original, graphic, destination):
     return f'./original_entity_graphics/{stem}.sprite'
 
 
-def _definitions(scene, original, destination, catalog):
+def _definitions(scene, original, destination, catalog, de2_base_dir=None, media_dir=None):
     units = json.loads(gzip.decompress((catalog / 'raw/civilizations/00-gaia.json.gz').read_bytes()))['units']
     graphics = json.loads(gzip.decompress((catalog / 'raw/graphics.json.gz').read_bytes()))
     lookup = names.UNIT_LINE_LOOKUPS | names.BUILDING_LINE_LOOKUPS | names.AMBIENT_GROUP_LOOKUPS
@@ -100,8 +104,9 @@ def _definitions(scene, original, destination, catalog):
              '    Update(patch.Patch):', '        Patch.patch = InfantrySight', '',
              '        InfantrySight<militia.Militia.LineOfSight>(patch.NyanPatch):',
              '            LineOfSight.range += 2.0']
-    media = destination / 'original_entity_graphics'
-    media.mkdir(exist_ok=True)
+    media = media_dir or (destination / 'original_entity_graphics')
+    media.mkdir(parents=True, exist_ok=True)
+    de2_base = de2_base_dir or (destination.parents[2] / 'de2_base')
     result = {}
     for identifier in sorted(required):
         unit = units[identifier]
@@ -111,7 +116,7 @@ def _definitions(scene, original, destination, catalog):
         ).is_file()
         if identifier in lookup and (
             not has_sld
-            or (destination.parents[2] / f'de2_base/data/game_entity/generic/{lookup[identifier][1]}/graphics/idle_{lookup[identifier][1]}.sprite').is_file()
+            or (de2_base / f'data/game_entity/generic/{lookup[identifier][1]}/graphics/idle_{lookup[identifier][1]}.sprite').is_file()
         ):
             name, folder = lookup[identifier]
             fqon = f'de2_base.data.game_entity.generic.{folder}.{folder}.{name}'
@@ -140,11 +145,11 @@ def _definitions(scene, original, destination, catalog):
     return result
 
 
-def _hud_icons(original: Path, destination: Path, catalog: Path, definitions: dict[str, dict]) -> None:
+def _hud_icons(original: Path, destination: Path, catalog: Path, definitions: dict[str, dict], hud_dir: Path | None = None) -> None:
     """Prepare original portraits and action subjects without a runtime DAT reader."""
     from scripts.tech_tree.catalog import IconExporter
 
-    exporter = IconExporter(original, destination / "hud")
+    exporter = IconExporter(original, hud_dir or (destination / "hud"))
     actions = original / "widgetui/textures/ingame/actions"
     for command, identifier in (("stop", 3), ("cancel", 0), ("pack", 16), ("unpack", 17)):
         source = actions / f"{identifier:03d}_.png"
@@ -208,10 +213,13 @@ def _civilization_actions(catalog, civilization):
     return sorted(allowed)
 
 
-def original_scene(template, mission, original, destination, catalog):
-    scene = json.loads(mission.read_text())
-    definitions = _definitions(scene, original, destination, catalog)
-    _hud_icons(original, destination, catalog, definitions)
+def original_scene(template, mission, original, destination, catalog, de2_base_dir=None, shared_media_dir=None):
+    scene = json.loads(mission.read_text()) if isinstance(mission, Path) else mission
+    media_dir = (shared_media_dir / 'original_entity_graphics') if shared_media_dir else None
+    terrain_dir = (shared_media_dir / 'original_terrain_graphics') if shared_media_dir else None
+    hud_dir = (shared_media_dir / 'hud') if shared_media_dir else None
+    definitions = _definitions(scene, original, destination, catalog, de2_base_dir=de2_base_dir, media_dir=media_dir)
+    _hud_icons(original, destination, catalog, definitions, hud_dir=hud_dir)
     # Reserve player 2 for Gaia, preserving other slots if a later scene uses them.
     remap = {0: 2, 1: 0, 2: 1, **{index: index for index in range(3, 9)}}
     active = {0, 1} | {unit['player'] for unit in scene['units']}
@@ -259,7 +267,9 @@ def original_scene(template, mission, original, destination, catalog):
         for b in sorted(active):
             if a == b:
                 continue
-            stance = 'neutral' if 0 in (a, b) else {0: 'ally', 1: 'neutral', 3: 'enemy'}.get(scene['players'][a]['diplomacy'][b - 1], 'neutral')
+            row = scene['players'][a].get('diplomacy') or []
+            raw_stance = row[b - 1] if 0 <= b - 1 < len(row) else 1
+            stance = 'neutral' if 0 in (a, b) else {0: 'ally', 1: 'neutral', 3: 'enemy'}.get(raw_stance, 'neutral')
             diplomacy.append((remap[a], remap[b], stance))
     match = __import__('re').search(r'_(\d+)\.', scene['source_file'])
     number = int(match.group(1)) if match else 1
@@ -277,7 +287,7 @@ def original_scene(template, mission, original, destination, catalog):
     terrain_definitions = json.loads(gzip.decompress(raw_terrain.read_bytes()))['terrain_block']['terrains']
     return replace(template, id=f'ww_mission{number}_original', source='original-aoe2scenario', source_file=scene['source_file'],
                    map=convert_terrain(terrain, original / 'resources/_common/terrain/textures/2x',
-                                       destination, terrain_definitions),
+                                       destination, terrain_definitions, graphics_dir=terrain_dir),
                    players=players, placements=placements, areas=[], triggers=triggers,
                    victory=VictoryDefinition('original-triggers'), diplomacy=tuple(diplomacy), fog_of_war=True,
                    original_scenario=metadata)

@@ -1,6 +1,8 @@
 """Start an openage campaign mission or inspect the original Mission 1 terrain."""
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 from argparse import REMAINDER, ArgumentParser
@@ -163,6 +165,46 @@ def prepare_campaign(install_args: Sequence[str | Path]) -> None:
     publish()
 
 
+def activate_converted_mission(campaign_id: str, mission_id: str) -> None:
+    """Activate a pre-converted Mission Pack into assets/converted/ww_mvp/."""
+    campaigns_root = ROOT / "assets/converted/campaigns"
+    source = campaigns_root / campaign_id / mission_id
+    if not (source / "scenario.json").is_file() or not (source / "mission_01.nyan").is_file():
+        raise ValueError(f"未找到已转换的战役关卡: {campaign_id}/{mission_id}")
+    destination = ROOT / "assets/converted/ww_mvp/campaign/william_wallace"
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / "assets/nyan/ww_mvp/modpack.toml", ROOT / "assets/converted/ww_mvp/modpack.toml")
+    for filename in (
+        "mission_01.nyan",
+        "original_entities.nyan",
+        "original_terrain.nyan",
+        "scenario.json",
+        "object_table.csv",
+        "trigger_graph.json",
+        "coverage.json",
+    ):
+        src_file = source / filename
+        if src_file.is_file():
+            shutil.copyfile(src_file, destination / filename)
+    shared = campaigns_root / "_shared"
+    for subdir in ("hud", "original_terrain_graphics", "original_entity_graphics"):
+        target = destination / subdir
+        if target.is_symlink() or target.exists():
+            if target.is_symlink():
+                target.unlink()
+            else:
+                shutil.rmtree(target)
+        shared_sub = shared / subdir
+        if shared_sub.is_dir():
+            target.symlink_to(os.path.relpath(shared_sub, destination))
+
+
+def run_converted(campaign_id: str, mission_id: str, game_args=()):
+    """Activate a pre-converted campaign mission and launch the engine."""
+    activate_converted_mission(campaign_id, mission_id)
+    return subprocess.call(["bash", GAME, *game_args], cwd=ROOT)
+
+
 def run_mode(mode, source_save=None, terrain=None, game_args=()):
     """Prepare the selected Mission Pack and run the existing game launcher."""
     local_save, local_terrain, particles = locate_original()
@@ -286,12 +328,21 @@ def create_menu():
 def main():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=[mode[0] for mode in MODES])
+    parser.add_argument("--campaign", help="Pre-converted campaign ID (e.g. cam0)")
+    parser.add_argument("--mission", help="Pre-converted mission ID (e.g. 0_Challenges_1)")
     parser.add_argument("--save", type=Path)
     parser.add_argument("--terrain-dds", type=Path)
     parser.add_argument(
         "--game-args", nargs=REMAINDER, default=[], help="arguments forwarded to the game launcher"
     )
     args = parser.parse_args()
+    if args.campaign or args.mission:
+        if not (args.campaign and args.mission):
+            parser.exit(2, "Both --campaign and --mission are required together.\n")
+        try:
+            return run_converted(args.campaign, args.mission, args.game_args)
+        except (ValueError, OSError, subprocess.CalledProcessError) as error:
+            parser.exit(1, f"{error}\n")
     if args.mode:
         try:
             return run_mode(args.mode, args.save, args.terrain_dds, args.game_args)

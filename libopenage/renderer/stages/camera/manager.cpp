@@ -16,7 +16,7 @@ CameraManager::CameraManager(const std::shared_ptr<renderer::camera::Camera> &ca
 	camera{camera},
 	move_motion_directions{static_cast<int>(MoveDirection::NONE)},
 	zoom_motion_direction{static_cast<int>(ZoomDirection::NONE)},
-	move_motion_speed{1.8f},
+	move_motion_speed{9.0f},
 	move_motion_current_speed{0.0f},
 	last_update_time{std::chrono::steady_clock::now()},
 	zoom_motion_speed{0.03f},
@@ -105,6 +105,9 @@ void CameraManager::update_motion() {
 		}
 		if (this->move_motion_directions & static_cast<int>(MoveDirection::BACKWARD)) {
 			move_dir += Eigen::Vector3f(1.0f, 0.0f, 1.0f);
+		}
+		if (move_dir.squaredNorm() > 0.0f) {
+			move_dir.normalize();
 		}
 
 		// Ease the speed in toward the cap so edge-scrolling accelerates briefly

@@ -123,6 +123,7 @@ def tests_cpp():
     yield "openage::testing::ai_action_limits"
     yield "openage::testing::scoring"
     yield "openage::testing::automation_input"
+    yield "openage::testing::gui_source_changes"
     yield (
         "openage::testing::movement_replanning",
         "dynamic movement detours, retry and stop cancellation",
@@ -161,6 +162,7 @@ def demos_cpp():
     Yields tuples of (name, description) for all C++ demo methods.
     """
 
+    yield ("openage::testing::hud_clicks", "automated pointer checks for the shipped mission HUD")
     yield ("openage::console::tests::render", "prints a few test lines to a buffer, and renders it to stdout")
     yield (
         "openage::console::tests::interactive",

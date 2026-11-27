@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QEvent>
 #include <QFocusEvent>
+#include <QHoverEvent>
 #include <QQuickWindow>
 
 #include "renderer/gui/guisys/public/gui_renderer.h"
@@ -35,9 +36,17 @@ bool GuiInputImpl::process(const std::shared_ptr<QEvent> &event) {
 		// the scenePosition in e is ignored and is replaced by position. This is necessary
 		// because QQuickWindow thinks of itself as a top-level window always.
 		auto mouse_event = std::dynamic_pointer_cast<QMouseEvent>(event);
+		const QPointF pos = mouse_event->position();
+		const QPointF global_pos = mouse_event->globalPosition();
+		const QPointF old_pos = this->last_mouse_pos.x() >= 0.0 ? this->last_mouse_pos : pos;
+		if (event->type() == QEvent::MouseMove or pos != this->last_mouse_pos) {
+			QHoverEvent hover_ev{QEvent::HoverMove, pos, global_pos, old_pos, mouse_event->modifiers()};
+			QCoreApplication::instance()->sendEvent(this->window.get(), &hover_ev);
+			this->last_mouse_pos = pos;
+		}
 		QMouseEvent ev{mouse_event->type(),
-		               mouse_event->position(),
-		               mouse_event->globalPosition(),
+		               pos,
+		               global_pos,
 		               mouse_event->button(),
 		               mouse_event->buttons(),
 		               mouse_event->modifiers()};

@@ -13,6 +13,10 @@ It's being developed in QML language.
 Sources are in the `assets/qml` directory.
 Start the game and edit the code.
 Changes apply immediately after any QML file is saved.
+The live reloader watches the QML directory and its descendants, including file edits and atomic replacements.
+It keeps the filesystem watcher alive and compares entry sizes and modification times before reloading, so backend notifications without source changes do not destroy active controls.
+Run `bin/run test testing::gui_source_changes` for the asset-free source-change regression test.
+Run `QT_QPA_PLATFORM=offscreen bin/run test -d testing::hud_clicks` to inject pointer clicks into the shipped mission HUD and check menu navigation and settings at two window sizes without a GPU.
 
 ### Image providers
 

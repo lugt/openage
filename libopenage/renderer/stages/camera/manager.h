@@ -151,9 +151,9 @@ private:
 	/**
 	 * Move acceleration (units per second squared). How fast the current move
 	 * speed ramps up toward move_motion_speed while a move direction is held.
-	 * Gives a brief ease-in (~0.25s to full speed at the defaults).
+	 * Gives a brief ease-in (~0.2s to full speed at the defaults).
 	 */
-	static constexpr float MOVE_ACCEL = 16.0f;
+	static constexpr float MOVE_ACCEL = 45.0f;
 
 	/**
 	 * Current (actual) move speed (units per second). Eases toward

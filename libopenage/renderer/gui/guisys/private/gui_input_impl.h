@@ -5,6 +5,7 @@
 #include <memory>
 
 #include <QObject>
+#include <QPointF>
 
 Q_FORWARD_DECLARE_OBJC_CLASS(QEvent);
 Q_FORWARD_DECLARE_OBJC_CLASS(QQuickWindow);
@@ -30,6 +31,7 @@ public:
 
 private:
 	std::shared_ptr<QQuickWindow> window;
+	QPointF last_mouse_pos{-1.0, -1.0};
 };
 
 } // namespace qtgui

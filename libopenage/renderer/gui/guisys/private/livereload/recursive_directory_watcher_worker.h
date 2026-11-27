@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include <memory>
-
+#include <QDateTime>
 #include <QFileSystemWatcher>
+#include <QMap>
 #include <QStringList>
 #include <QTimer>
 
@@ -36,7 +36,7 @@ private:
 	 * Actual watcher.
 	 * Its event processing and destruction has to be in the same separate thread.
 	 */
-	std::unique_ptr<QFileSystemWatcher> watcher;
+	QFileSystemWatcher watcher;
 
 	/**
 	 * Waits to glue multiple changes into one event.
@@ -44,6 +44,8 @@ private:
 	QTimer batching_timer;
 
 	QStringList root_dirs_paths;
+	QMap<QString, QPair<qint64, QDateTime>> entries;
+	bool initialized{false};
 };
 
 } // namespace qtgui
