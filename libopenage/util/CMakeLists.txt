@@ -38,6 +38,7 @@ add_sources(libopenage
 # C++ module unit
 add_sources(libopenage MODULE
 	color.cpp
+	startup_trace.cpp
 )
 
 pxdgen(

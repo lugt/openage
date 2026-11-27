@@ -130,12 +130,111 @@ void HudQmlAdapter::set_selection_details(QVariantList cards, QVariantList actio
 	    and this->stop_enabled == can_stop and this->command_images == command_icons) {
 		return;
 	}
+	QVariantList previous_ids;
+	QVariantList current_ids;
+	for (const auto &card : this->cards) {
+		previous_ids.append(card.toMap().value("id"));
+	}
+	for (const auto &card : cards) {
+		current_ids.append(card.toMap().value("id"));
+	}
+	if (previous_ids != current_ids) {
+		this->command_page_.clear();
+	}
 	this->cards = std::move(cards);
 	this->command_images = std::move(command_icons);
 	this->actions = std::move(actions);
+	if (not this->command_page_.isEmpty()) {
+		bool has_page = false;
+		for (const auto &action : this->actions) {
+			has_page = has_page or action.toMap().value("category").toString() == this->command_page_;
+		}
+		if (not has_page) {
+			this->command_page_.clear();
+		}
+	}
 	this->construction = construction;
 	this->stop_enabled = can_stop;
 	emit this->selection_details_changed();
+}
+
+QVariantList HudQmlAdapter::command_options() const {
+	QVariantList result;
+	QVariantMap groups;
+	for (const auto &entry : this->actions) {
+		const auto action = entry.toMap();
+		if (not action.value("build").toBool()) {
+			if (this->command_page_.isEmpty()) {
+				result.append(action);
+			}
+			continue;
+		}
+		const auto category = action.value("category").toString();
+		if (category.isEmpty()) {
+			// Actions without a declared category remain accessible.
+			if (this->command_page_.isEmpty()) {
+				result.append(action);
+			}
+		}
+		else if (this->command_page_ == category) {
+			result.append(action);
+		}
+		else if (this->command_page_.isEmpty() and not groups.contains(category)) {
+			groups.insert(category, QVariantMap{
+				{"page", category}, {"name", category == "economic" ? tr("Economic buildings") : tr("Military buildings")},
+				{"icon", action.value("icon")}, {"navigation", true},
+			});
+		}
+	}
+	if (this->command_page_.isEmpty()) {
+		QVariantList navigation;
+		for (const auto &category : {QStringLiteral("economic"), QStringLiteral("military")}) {
+			if (groups.contains(category)) {
+				navigation.append(groups.value(category));
+			}
+		}
+		navigation.append(result);
+		result = std::move(navigation);
+	}
+	else {
+		result.append(QVariantMap{{"page", ""}, {"name", tr("Back")}, {"navigation", true}, {"back", true}});
+	}
+	return result;
+}
+
+bool HudQmlAdapter::activateCommand(int index) {
+	const auto commands = this->command_options();
+	if (index < 0 or index >= commands.size()) {
+		return false;
+	}
+	const auto command = commands[index].toMap();
+	if (command.value("back").toBool()) {
+		return false;
+	}
+	if (command.value("navigation").toBool()) {
+		this->command_page_ = command.value("page").toString();
+		emit this->selection_details_changed();
+	}
+	else {
+		this->requestAction(command.value("id").toString(), command.value("build").toBool());
+	}
+	return true;
+}
+
+bool HudQmlAdapter::backCommands() {
+	if (this->command_page_.isEmpty()) {
+		return false;
+	}
+	this->command_page_.clear();
+	emit this->selection_details_changed();
+	return true;
+}
+
+void HudQmlAdapter::set_production_queue(QVariantList queue) {
+	if (this->prod_queue_ != queue) {
+		this->prod_queue_ = std::move(queue);
+		emit this->production_queue_changed();
+	}
 }
 
 void HudQmlAdapter::set_action_status(QString status) {
@@ -143,6 +242,15 @@ void HudQmlAdapter::set_action_status(QString status) {
 		this->status = std::move(status);
 		emit this->action_status_changed();
 	}
+}
+
+void HudQmlAdapter::show_toast(QString message) {
+	if (message.isEmpty()) {
+		return;
+	}
+	this->toast_message_ = std::move(message);
+	++this->toast_seq_;
+	emit this->toast_changed();
 }
 
 void HudQmlAdapter::toggleMapUnits() {

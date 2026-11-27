@@ -141,12 +141,18 @@ PlayerEconomy GameState::player_economy(player_id_t player) const {
 std::string GameState::action_feedback(player_id_t player) const {
 	std::shared_lock lock{this->economy_mutex};
 	const auto found = this->economy_feedback.find(player);
-	return found == this->economy_feedback.end() ? std::string{} : found->second;
+	return found == this->economy_feedback.end() ? std::string{} : found->second.message;
 }
 
-void GameState::set_action_feedback(player_id_t player, std::string message) {
+GameState::ActionFeedback GameState::action_feedback_event(player_id_t player) const {
+	std::shared_lock lock{this->economy_mutex};
+	const auto found = this->economy_feedback.find(player);
+	return found == this->economy_feedback.end() ? ActionFeedback{} : found->second;
+}
+
+void GameState::set_action_feedback(player_id_t player, std::string message, bool is_error) {
 	std::unique_lock lock{this->economy_mutex};
-	this->economy_feedback.insert_or_assign(player, std::move(message));
+	this->economy_feedback.insert_or_assign(player, ActionFeedback{std::move(message), this->next_feedback_seq++, is_error});
 }
 
 std::vector<PlayerScore> GameState::player_scores() const {

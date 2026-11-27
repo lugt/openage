@@ -18,7 +18,15 @@ It keeps the filesystem watcher alive and compares entry sizes and modification 
 Run `bin/run test testing::gui_source_changes` for the asset-free source-change regression test.
 Run `QT_QPA_PLATFORM=offscreen bin/run test -d testing::hud_clicks` to inject pointer clicks into the shipped mission HUD and check menu navigation and settings at two window sizes without a GPU.
 Run `bin/run test -d testing::gui_native_input` on a graphical desktop to exercise the native window event queue, real GUI renderer, pointer release and text input.
-The offscreen GUI uses a separate pointer device because native release processing clears the native device's grabs before queued input reaches QML.
+Run `bin/run test -d testing::hud_native_clicks` to exercise the shipped mission HUD, pause/settings menus and villager building pages in that native window at two sizes.
+The game and QML HUD share a native `QQuickWindow`; QML consumes input first and unaccepted events reach the game callbacks.
+
+The villager command panel opens economic and military building pages, with a Back button and Escape navigation.
+Grid shortcuts operate on the displayed page; Escape cancels placement or repair targeting before returning to the root page.
+Converted original scenarios supply building categories from their source `interface_kind`, including economic Blacksmith, Monastery and University buildings.
+Repair targets a damaged, completed building owned by the selected villager's player and uses converted repair rates and resource costs.
+Stop or another order cancels an active repair.
+Selecting multiple owned villagers keeps the building pages available and assigns reachable selected workers to the same site; the building cost is paid once.
 
 ### Image providers
 

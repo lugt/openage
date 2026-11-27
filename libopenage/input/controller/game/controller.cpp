@@ -160,6 +160,13 @@ bool is_attack_target(const std::shared_ptr<gamestate::GameState> &state, const 
 	    and state->get_game_entity(pick.entity)->has_component(gamestate::component::component_t::LIVE);
 }
 
+std::optional<gamestate::entity_id_t> command_target(const std::shared_ptr<gamestate::GameState> &state,
+                                                   const coord::phys3 &world, std::optional<uint32_t> sprite,
+                                                   gamestate::player_id_t viewer, time::time_t now) {
+	const auto pick = context_pick(state, world, sprite, viewer, now);
+	return pick.has_entity ? std::make_optional(pick.entity) : std::nullopt;
+}
+
 Controller::Controller(const std::unordered_set<size_t> &controlled_factions,
                        size_t active_faction_id) :
 	controlled_factions{controlled_factions},
@@ -253,11 +260,18 @@ bool Controller::process(const event_arguments &ev_args, const std::shared_ptr<B
 	return true;
 }
 
-void Controller::set_drag_select_start(const coord::input &start) {
+void Controller::set_drag_select_start(const coord::input &start, bool double_click) {
 	std::unique_lock lock{this->mutex};
 
 	log::log(DBG << "Drag select start at " << start);
 	this->drag_select_start = start;
+	this->drag_select_double_click = double_click;
+}
+
+bool Controller::is_drag_select_double_click() const {
+	std::unique_lock lock{this->mutex};
+
+	return this->drag_select_double_click;
 }
 
 const coord::input Controller::get_drag_select_start() const {
@@ -281,6 +295,7 @@ void Controller::reset_drag_select() {
 
 	log::log(DBG << "Drag select start reset");
 	this->drag_select_start = std::nullopt;
+	this->drag_select_double_click = false;
 }
 
 void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
@@ -443,11 +458,19 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 
 	binding_func_t init_drag_selection{[](const event_arguments &args,
 	                                       const std::shared_ptr<Controller> controller) {
-		controller->set_drag_select_start(args.mouse);
+		controller->set_drag_select_start(args.mouse, false);
 		return nullptr;
 	}};
 
 	binding_action init_drag_selection_action{forward_action_t::CLEAR, init_drag_selection};
+
+	binding_func_t init_double_click_selection{[](const event_arguments &args,
+	                                              const std::shared_ptr<Controller> controller) {
+		controller->set_drag_select_start(args.mouse, true);
+		return nullptr;
+	}};
+
+	binding_action init_double_click_selection_action{forward_action_t::CLEAR, init_double_click_selection};
 
 	binding_func_t drag_selection{
 		[time_loop, simulation, camera, bottom_hud_height, sprite_picker = std::move(sprite_picker)](const event_arguments &args,
@@ -466,7 +489,7 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 			Eigen::Matrix4f cam_matrix = camera->get_projection_matrix() * camera->get_view_matrix();
 			event::EventHandler::param_map::map_t params{
 				{"controlled", gamestate::player_id_t{controller->get_controlled()}},
-				{"same_type", bool(args.e.mod_code & Qt::ShiftModifier)},
+				{"same_type", bool(args.e.mod_code & Qt::ShiftModifier) or controller->is_drag_select_double_click()},
 				{"screen_bottom", 2.0f * bottom_hud_height / camera->get_viewport_size()[1] - 1.0f},
 				{"additive", bool(args.e.mod_code & (Qt::ControlModifier
 #ifdef __APPLE__
@@ -506,7 +529,7 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	auto bind_mouse = [&](Qt::KeyboardModifiers modifiers) {
 		ctx->bind({event_class::MOUSE_BUTTON, Qt::LeftButton, static_cast<modset_t>(modifiers), QEvent::MouseButtonPress}, init_drag_selection_action);
 		ctx->bind({event_class::MOUSE_BUTTON, Qt::LeftButton, static_cast<modset_t>(modifiers), QEvent::MouseButtonRelease}, drag_selection_action);
-		ctx->bind({event_class::MOUSE_BUTTON_DBL, Qt::LeftButton, static_cast<modset_t>(modifiers), QEvent::MouseButtonDblClick}, init_drag_selection_action);
+		ctx->bind({event_class::MOUSE_BUTTON_DBL, Qt::LeftButton, static_cast<modset_t>(modifiers), QEvent::MouseButtonDblClick}, init_double_click_selection_action);
 		ctx->bind({event_class::MOUSE_BUTTON, Qt::RightButton, static_cast<modset_t>(modifiers), QEvent::MouseButtonRelease}, move_entity_action);
 	};
 	for (auto modifiers : {Qt::KeyboardModifiers{}, Qt::KeyboardModifiers{Qt::ControlModifier},

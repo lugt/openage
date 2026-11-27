@@ -69,6 +69,9 @@ private:
     std::map<TriggerId, time::time_t> activated_;
     std::map<int64_t, int64_t> variables_;
     std::map<std::string, int64_t> variable_ids_;
+    std::unordered_map<gamestate::player_id_t, std::set<int64_t>> researched_techs_;
+    std::set<int64_t> ai_signals_;
+    int64_t difficulty_{2};
     mutable std::mutex input_mutex_;
     std::set<gamestate::entity_id_t> selected_;
     std::optional<coord::scene3> camera_;

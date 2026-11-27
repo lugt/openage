@@ -37,52 +37,56 @@ const std::shared_ptr<renderer::hud::DragRenderEntity> &Controller::get_drag_ent
 
 void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
                     const std::shared_ptr<renderer::hud::HudRenderStage> &hud_renderer) {
-	binding_func_t drag_selection_init{[&](const event_arguments &args,
-	                                       const std::shared_ptr<Controller> controller) {
+	binding_func_t drag_selection_init{[hud_renderer](const event_arguments &args,
+	                                                  const std::shared_ptr<Controller> controller) {
 		auto render_entity = std::make_shared<renderer::hud::DragRenderEntity>(args.mouse);
-		hud_renderer->add_drag_entity(render_entity);
+		if (hud_renderer) {
+			hud_renderer->add_drag_entity(render_entity);
+		}
 		controller->set_drag_entity(render_entity);
 	}};
 
 	binding_action drag_selection_init_action{drag_selection_init};
-	Event ev_mouse_lmb_press{
-		event_class::MOUSE_BUTTON,
-		Qt::MouseButton::LeftButton,
-		Qt::KeyboardModifier::NoModifier,
-		QEvent::MouseButtonPress};
 
-	ctx->bind(ev_mouse_lmb_press, drag_selection_init_action);
-
-	binding_func_t drag_selection_move{[&](const event_arguments &args,
-	                                       const std::shared_ptr<Controller> controller) {
+	binding_func_t drag_selection_move{[](const event_arguments &args,
+	                                      const std::shared_ptr<Controller> controller) {
 		if (controller->get_drag_entity()) {
 			controller->get_drag_entity()->update(args.mouse);
 		}
 	}};
 
 	binding_action drag_selection_move_action{drag_selection_move};
-	Event ev_mouse_move{
-		event_class::MOUSE_MOVE,
-		Qt::MouseButton::NoButton,
-		Qt::KeyboardModifier::NoModifier,
-		QEvent::MouseMove};
+	ctx->bind(event_class::MOUSE_MOVE, drag_selection_move_action);
 
-	ctx->bind(ev_mouse_move, drag_selection_move_action);
-
-	binding_func_t drag_selection_end{[&](const event_arguments & /* args */,
-	                                      const std::shared_ptr<Controller> controller) {
-		hud_renderer->remove_drag_entity();
+	binding_func_t drag_selection_end{[hud_renderer](const event_arguments & /* args */,
+	                                                 const std::shared_ptr<Controller> controller) {
+		if (hud_renderer) {
+			hud_renderer->remove_drag_entity();
+		}
 		controller->set_drag_entity(nullptr);
 	}};
 
 	binding_action drag_selection_end_action{drag_selection_end};
-	Event ev_mouse_lmb_release{
-		event_class::MOUSE_BUTTON,
-		Qt::MouseButton::LeftButton,
-		Qt::KeyboardModifier::NoModifier,
-		QEvent::MouseButtonRelease};
 
-	ctx->bind(ev_mouse_lmb_release, drag_selection_end_action);
+	auto bind_drag = [&](Qt::KeyboardModifiers modifiers) {
+		const auto mod = static_cast<modset_t>(modifiers);
+		ctx->bind({event_class::MOUSE_BUTTON, Qt::MouseButton::LeftButton, mod, QEvent::MouseButtonPress},
+		          drag_selection_init_action);
+		ctx->bind({event_class::MOUSE_BUTTON, Qt::MouseButton::LeftButton, mod, QEvent::MouseButtonRelease},
+		          drag_selection_end_action);
+	};
+
+	for (auto modifiers : {Qt::KeyboardModifiers{},
+	                       Qt::KeyboardModifiers{Qt::ShiftModifier},
+	                       Qt::KeyboardModifiers{Qt::ControlModifier},
+	                       Qt::ControlModifier | Qt::ShiftModifier,
+	                       Qt::KeyboardModifiers{Qt::AltModifier}}) {
+		bind_drag(modifiers);
+	}
+#ifdef __APPLE__
+	bind_drag(Qt::MetaModifier);
+	bind_drag(Qt::MetaModifier | Qt::ShiftModifier);
+#endif
 }
 
 } // namespace openage::input::hud

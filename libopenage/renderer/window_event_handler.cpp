@@ -40,8 +40,16 @@ bool WindowEventHandler::eventFilter(QObject * /* obj */, QEvent *event) {
 	case QEvent::MouseButtonPress:
 	case QEvent::MouseButtonRelease:
 	case QEvent::MouseMove:
-	case QEvent::Resize:
 	case QEvent::Wheel:
+		if (this->queue_input_events) {
+			add_to_queue();
+		}
+		// pass on the event
+		return false;
+	case QEvent::Resize:
+	case QEvent::Leave:
+	case QEvent::FocusOut:
+	case QEvent::WindowDeactivate:
 		add_to_queue();
 		// pass on the event
 		return false;
@@ -67,6 +75,11 @@ bool WindowEventHandler::eventFilter(QObject * /* obj */, QEvent *event) {
 	// true: event is filtered = ignored
 	// false: event is forwarded to its registered qt handler
 	return false;
+}
+
+
+void WindowEventHandler::enqueue(std::shared_ptr<QEvent> event) {
+	this->event_queue.push_back(std::move(event));
 }
 
 

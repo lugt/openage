@@ -122,8 +122,16 @@ def tests_cpp():
         lambda env: env["has_assets"],
     )
     yield "openage::testing::ai_action_limits"
+    yield "openage::testing::wildlife_neighbors"
+    yield "openage::gamestate::event::tests::construction_schedule"
+    yield (
+        "openage::testing::wildlife_behavior",
+        "neutral wildlife movement, combat, capture and villager repair",
+        lambda env: env["has_assets"],
+    )
     yield "openage::testing::scoring"
     yield "openage::testing::automation_input"
+    yield "openage::testing::input_edge_cases"
     yield "openage::testing::gui_source_changes"
     yield (
         "openage::testing::movement_replanning",
@@ -164,7 +172,8 @@ def demos_cpp():
     """
 
     yield ("openage::testing::hud_clicks", "automated pointer checks for the shipped mission HUD")
-    yield ("openage::testing::gui_native_input", "native window to offscreen GUI pointer and keyboard checks")
+    yield ("openage::testing::hud_native_clicks", "shipped mission HUD menus in the native Qt window")
+    yield ("openage::testing::gui_native_input", "native Qt window pointer and keyboard routing checks")
     yield ("openage::console::tests::render", "prints a few test lines to a buffer, and renders it to stdout")
     yield (
         "openage::console::tests::interactive",
@@ -184,5 +193,5 @@ def benchmark_cpp():
     methods.
     """
 
-    # TODO Add a real benchmark here!
+    yield ("openage::testing::wildlife_spatial", "wildlife indexing and local queries with 14,053 entities")
     yield ("openage::test::benchmark", "Test the benchmark")

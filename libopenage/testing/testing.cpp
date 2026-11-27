@@ -10,6 +10,7 @@ import openage.gamestate.movement_tests;
 import openage.testing.snapshot;
 import openage.gamestate.score;
 import openage.gamestate.ai;
+import openage.gamestate.wildlife;
 
 namespace openage {
 namespace testing {
@@ -27,6 +28,10 @@ void hud_clicks() {
 	presenter::tests::hud_clicks();
 }
 
+void hud_native_clicks() {
+	presenter::tests::hud_clicks(true);
+}
+
 void gui_native_input() {
 	qtgui::tests::native_input();
 }
@@ -37,6 +42,18 @@ void campaign_scoring() {
 
 void ai_action_limits() {
 	gamestate::ai::tests::action_limits();
+}
+
+void wildlife_neighbors() {
+	gamestate::wildlife::tests::neighbors();
+}
+
+void wildlife_behavior() {
+	gamestate::wildlife::tests::behavior();
+}
+
+void wildlife_spatial() {
+	gamestate::wildlife::tests::spatial_benchmark();
 }
 
 void scoring() {
@@ -50,6 +67,11 @@ void movement_replanning() {
 
 void automation_input() {
 	presenter::tests::automation_input();
+}
+
+
+void input_edge_cases() {
+	presenter::tests::input_edge_cases();
 }
 
 

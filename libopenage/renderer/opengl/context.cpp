@@ -17,6 +17,55 @@
 
 namespace openage::renderer::opengl {
 
+namespace {
+
+gl_context_spec query_current_specs() {
+	gl_context_spec caps{};
+
+	GLint temp = 0;
+	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &temp);
+	caps.max_texture_size = temp;
+	glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &temp);
+	caps.max_texture_slots = temp;
+	glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &temp);
+	caps.max_vertex_attributes = temp;
+	glGetIntegerv(GL_MAX_UNIFORM_LOCATIONS, &temp);
+	caps.max_uniform_locations = temp;
+	glGetIntegerv(GL_MAX_UNIFORM_BUFFER_BINDINGS, &temp);
+	caps.max_uniform_buffer_bindings = temp;
+
+	glGetIntegerv(GL_MAJOR_VERSION, &caps.major_version);
+	glGetIntegerv(GL_MINOR_VERSION, &caps.minor_version);
+
+	return caps;
+}
+
+void validate_specs(const gl_context_spec &specs) {
+	int epoxy_glv = specs.major_version * 10 + specs.minor_version;
+	if (not epoxy_is_desktop_gl() or epoxy_gl_version() < epoxy_glv) {
+		throw Error(MSG(err) << "The used version of libepoxy does not support OpenGL version "
+		                     << specs.major_version << "." << specs.minor_version);
+	}
+
+	log::log(MSG(info) << "Created OpenGL context version " << specs.major_version << "." << specs.minor_version);
+
+	log::log(MSG(dbg) << "Maximum supported texture size: "
+	                  << specs.max_texture_size);
+	if (specs.max_texture_size < 1024) {
+		throw Error(MSG(err) << "Maximum supported texture size is too small: "
+		                     << specs.max_texture_size);
+	}
+
+	log::log(MSG(dbg) << "Maximum supported texture units: "
+	                  << specs.max_texture_slots);
+	if (specs.max_texture_slots < 2) {
+		throw Error(MSG(err) << "Your GPU doesn't have enough texture units: "
+		                     << specs.max_texture_slots);
+	}
+}
+
+} // namespace
+
 /// The first element is the lowest version we need, last is highest version we support.
 static constexpr std::array<std::pair<int, int>, 1> gl_versions = {{{3, 3}}}; // for now we don't need any higher versions
 
@@ -114,31 +163,36 @@ GlContext::GlContext(const std::shared_ptr<QWindow> &window,
 		this->log_handler->start();
 	}
 
-	// We still have to verify that our version of libepoxy supports this version of OpenGL.
-	int epoxy_glv = specs.major_version * 10 + specs.minor_version;
-	if (not epoxy_is_desktop_gl() or epoxy_gl_version() < epoxy_glv) {
-		throw Error(MSG(err) << "The used version of libepoxy does not support OpenGL version "
-		                     << specs.major_version << "." << specs.minor_version);
+	validate_specs(specs);
+}
+
+GlContext::GlContext(const std::shared_ptr<QWindow> &window,
+                     QOpenGLContext *external_context,
+                     bool debug) :
+	window{window},
+	log_handler{} {
+	ENSURE(window != nullptr, "Cannot create GlContext for null QWindow.");
+	ENSURE(external_context != nullptr and external_context->isValid(),
+	       "External Qt OpenGL context is null or invalid.");
+
+	// Non-owning shared_ptr because QQuickWindow owns its QOpenGLContext.
+	this->gl_context = std::shared_ptr<QOpenGLContext>(external_context, [](QOpenGLContext *) {});
+
+	if (QOpenGLContext::currentContext() != external_context) {
+		if (not this->gl_context->makeCurrent(window.get())) {
+			throw Error(MSG(err) << "Failed to make external Qt OpenGL context current.");
+		}
 	}
 
-	log::log(MSG(info) << "Created OpenGL context version " << specs.major_version << "." << specs.minor_version);
+	this->specs = query_current_specs();
+	this->uniform_buffer_bindings = std::vector<bool>(this->specs.max_uniform_buffer_bindings);
 
-	// To quote the standard doc: 'The value gives a rough estimate of the
-	// largest texture that the GL can handle'
-	// -> wat?  anyways, we need at least 1024x1024.
-	log::log(MSG(dbg) << "Maximum supported texture size: "
-	                  << specs.max_texture_size);
-	if (specs.max_texture_size < 1024) {
-		throw Error(MSG(err) << "Maximum supported texture size is too small: "
-		                     << specs.max_texture_size);
+	if (debug) {
+		this->log_handler = std::make_shared<GlDebugLogHandler>();
+		this->log_handler->start();
 	}
 
-	log::log(MSG(dbg) << "Maximum supported texture units: "
-	                  << specs.max_texture_slots);
-	if (specs.max_texture_slots < 2) {
-		throw Error(MSG(err) << "Your GPU doesn't have enough texture units: "
-		                     << specs.max_texture_slots);
-	}
+	validate_specs(this->specs);
 }
 
 GlContext::GlContext(GlContext &&other) :
@@ -159,6 +213,8 @@ std::shared_ptr<QOpenGLContext> GlContext::get_raw_context() const {
 }
 
 GLuint GlContext::get_default_framebuffer_id() {
+	ENSURE(this->gl_context != nullptr,
+	       "Cannot get default framebuffer ID without an OpenGL context.");
 	return this->gl_context->defaultFramebufferObject();
 }
 
@@ -246,6 +302,36 @@ size_t GlContext::get_uniform_buffer_binding() {
 
 	throw Error(MSG(err) << "Cannot get free uniform buffer binding point: "
 	                     << "No free uniform buffer binding points available.");
+}
+
+void GlContext::reset_gl_state() {
+	// Drain any benign GL error flags left by Qt's QRhi probing so
+	// subsequent GlContext::check_error() calls only report renderer errors.
+	size_t drained = 0;
+	for (GLenum err = glGetError(); err != GL_NO_ERROR; err = glGetError()) {
+		++drained;
+		log::log(MSG(dbg) << "Drained pre-existing GL error flag before renderer pass: 0x"
+		                  << std::hex << err << std::dec);
+		if (drained >= 16) {
+			break;
+		}
+	}
+	this->set_current_program(nullptr);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glBlendFuncSeparate(
+		GL_SRC_ALPHA,
+		GL_ONE_MINUS_SRC_ALPHA,
+		GL_ONE,
+		GL_ONE_MINUS_SRC_ALPHA
+	);
+	glDepthFunc(GL_LEQUAL);
+	glDepthRange(0.0, 1.0);
+	glDisable(GL_SCISSOR_TEST);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_STENCIL_TEST);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDepthMask(GL_TRUE);
+	glFrontFace(GL_CCW);
 }
 
 void GlContext::free_uniform_buffer_binding(size_t binding_point) {

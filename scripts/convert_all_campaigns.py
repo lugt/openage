@@ -283,20 +283,22 @@ def convert_all(
             try:
                 if not force_reparse and (dest / "scenario.json").is_file() and (dest / "mission_01.nyan").is_file():
                     existing = json.loads((dest / "scenario.json").read_text(encoding="utf-8"))
-                    _link_shared_media(dest, shared_dir)
-                    converted_missions += 1
-                    missions_out.append({
-                        "id": slug,
-                        "title": title,
-                        "source_file": fname,
-                        "status": "converted",
-                        "path": f"{cid}/{slug}",
-                        "width": existing.get("map", {}).get("width", 0),
-                        "height": existing.get("map", {}).get("height", 0),
-                        "objects": len(existing.get("placements", [])),
-                        "triggers": len(existing.get("triggers", [])),
-                    })
-                    continue
+                    metadata = existing.get("ScenarioDefinition", {}).get("original_scenario") or {}
+                    if metadata.get("gameplay_metadata_version") == original_scene.GAMEPLAY_METADATA_VERSION:
+                        _link_shared_media(dest, shared_dir)
+                        converted_missions += 1
+                        missions_out.append({
+                            "id": slug,
+                            "title": title,
+                            "source_file": fname,
+                            "status": "converted",
+                            "path": f"{cid}/{slug}",
+                            "width": existing.get("map", {}).get("width", 0),
+                            "height": existing.get("map", {}).get("height", 0),
+                            "objects": len(existing.get("placements", [])),
+                            "triggers": len(existing.get("triggers", [])),
+                        })
+                        continue
                 dest.mkdir(parents=True, exist_ok=True)
                 ir = original_scene.original_scene(
                     template,

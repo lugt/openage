@@ -21,9 +21,16 @@ public:
 	 *
 	 * @param ignore_user_input Block mouse/keyboard input, allowing Escape to close.
 	 */
-	explicit WindowEventHandler(bool ignore_user_input) :
-		ignore_user_input{ignore_user_input} {}
+	explicit WindowEventHandler(bool ignore_user_input, bool queue_input_events = true) :
+		ignore_user_input{ignore_user_input},
+		queue_input_events{queue_input_events} {}
 	~WindowEventHandler() = default;
+
+	/**
+	 * Append a cloned event to the queue. Used when the window lets QML
+	 * handle input first and only queues events that QML did not accept.
+	 */
+	void enqueue(std::shared_ptr<QEvent> event);
 
 	/**
 	 * Filter events of the window the filter is attached to and store them in the
@@ -52,6 +59,7 @@ public:
 
 private:
 	bool ignore_user_input;
+	bool queue_input_events;
 
 protected:
 	/**

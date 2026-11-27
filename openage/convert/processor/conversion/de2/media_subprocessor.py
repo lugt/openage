@@ -106,7 +106,14 @@ class DE2MediaSubprocessor:
 
                 # Add metadata from graphics to animation metadata
                 sequence_type = graphic["sequence_type"].value
-                if sequence_type == 0x00:
+                layer_pos = graphic["layer"].value
+                frame_rate = round(graphic["frame_rate"].value, ndigits=6)
+                if frame_rate < 0.000001:
+                    frame_rate = None
+
+                # Static variant sheets (e.g. houses with randomized orientations)
+                # have zero frame duration and must stay on a fixed frame instead of looping.
+                if sequence_type == 0x00 or frame_rate is None:
                     layer_mode = LayerMode.OFF
 
                 elif sequence_type & 0x08 or sprite.get_filename().startswith("attack_"):
@@ -114,11 +121,6 @@ class DE2MediaSubprocessor:
 
                 else:
                     layer_mode = LayerMode.LOOP
-
-                layer_pos = graphic["layer"].value
-                frame_rate = round(graphic["frame_rate"].value, ndigits=6)
-                if frame_rate < 0.000001:
-                    frame_rate = None
 
                 replay_delay = round(graphic["replay_delay"].value, ndigits=6)
                 if replay_delay < 0.000001:

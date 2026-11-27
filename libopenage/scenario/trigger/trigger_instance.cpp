@@ -120,12 +120,28 @@ bool TriggerInstance::evaluate_conditions(
 	if (this->conditions_.empty()) {
 		return true;
 	}
-	for (auto &c : this->conditions_) {
-		if (not c->evaluate(state, at)) {
-			return false;
+	bool has_or = false;
+	bool group_ok = true;
+	bool group_has_cond = false;
+	for (const auto &c : this->conditions_) {
+		if (c->is_or_separator()) {
+			has_or = true;
+			if (group_has_cond and group_ok) {
+				return true;
+			}
+			group_ok = true;
+			group_has_cond = false;
+			continue;
+		}
+		group_has_cond = true;
+		if (group_ok and not c->evaluate(state, at)) {
+			group_ok = false;
 		}
 	}
-	return true;
+	if (has_or) {
+		return group_has_cond and group_ok;
+	}
+	return group_ok;
 }
 
 

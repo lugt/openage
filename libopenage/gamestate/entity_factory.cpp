@@ -309,23 +309,22 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 		auto ability_fqon = std::dynamic_pointer_cast<nyan::ObjectValue>(ability_val.get_ptr())->get_name();
 		auto ability_obj = owner_db_view->get_object(ability_fqon);
 
-		auto ability_parent = ability_obj.get_parents()[0];
-		if (ability_parent == "engine.ability.type.Move") {
+		if (ability_obj.extends("engine.ability.type.Move")) {
 			auto move = std::make_shared<component::Move>(loop, ability_obj);
 			entity->add_component(move);
 		}
-		else if (ability_parent == "engine.ability.type.Turn") {
+		else if (ability_obj.extends("engine.ability.type.Turn")) {
 			auto turn = std::make_shared<component::Turn>(loop, ability_obj);
 			entity->add_component(turn);
 		}
-		else if (ability_parent == "engine.ability.type.Idle") {
+		else if (ability_obj.extends("engine.ability.type.Idle")) {
 			auto idle = std::make_shared<component::Idle>(loop, ability_obj);
 			entity->add_component(idle);
 		}
-		else if (ability_parent == "engine.ability.type.LineOfSight") {
+		else if (ability_obj.extends("engine.ability.type.LineOfSight")) {
 			entity->line_of_sight = std::max(0.0, ability_obj.get_float("LineOfSight.range"));
 		}
-		else if (ability_parent == "engine.ability.type.Live") {
+		else if (ability_obj.extends("engine.ability.type.Live")) {
 			auto live = std::make_shared<component::Live>(loop, ability_obj);
 			entity->add_component(live);
 
@@ -346,10 +345,10 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 				                                                               start_value));
 			}
 		}
-		else if (ability_parent == "engine.ability.type.Activity") {
+		else if (ability_obj.extends("engine.ability.type.Activity")) {
 			activity_ability = ability_obj;
 		}
-		else if (ability_parent == "engine.ability.type.Selectable") {
+		else if (ability_obj.extends("engine.ability.type.Selectable")) {
 			auto selectable = std::make_shared<component::Selectable>(loop, ability_obj);
 			entity->add_component(selectable);
 		}
@@ -359,7 +358,7 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 		// for every AoE2 ability but entity_factory only loaded 6 of them).
 		// Each branch mounts a corresponding API component; behaviour is
 		// a stub for now - Phase C wires activity graphs / systems on top.
-		else if (ability_parent == "engine.ability.type.Gather") {
+		else if (ability_obj.extends("engine.ability.type.Gather")) {
 			auto gather = entity->try_get_component_as<component::Gather>(component::component_t::GATHER);
 			if (not gather) {
 				gather = std::make_shared<component::Gather>(loop, ability_obj);
@@ -367,11 +366,11 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 			}
 			gather->add_ability(ability_obj);
 		}
-		else if (ability_parent == "engine.ability.type.DropResources") {
+		else if (ability_obj.extends("engine.ability.type.DropResources")) {
 			auto storage = std::make_shared<component::ResourceStorage>(loop, ability_obj);
 			entity->add_component(storage);
 		}
-		else if (ability_parent == "engine.ability.type.Harvestable") {
+		else if (ability_obj.extends("engine.ability.type.Harvestable")) {
 			auto spot = ability_obj.get_object("Harvestable.resources");
 			const auto types = nyan_obj.get_set("GameEntity.types");
 			const bool animal = std::ranges::any_of(types, [](const auto &value) {
@@ -383,24 +382,24 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 				spot.get_int("ResourceSpot.starting_amount"), animal,
 			};
 		}
-		else if (ability_parent == "engine.ability.type.DropSite") {
+		else if (ability_obj.extends("engine.ability.type.DropSite")) {
 			for (const auto &entry : ability_obj.get_set("DropSite.accepts_from")) {
 				entity->drop_containers.push_back(std::dynamic_pointer_cast<nyan::ObjectValue>(entry.get_ptr())->get_name());
 			}
 		}
-		else if (ability_parent == "engine.ability.type.RegenerateResourceSpot") {
+		else if (ability_obj.extends("engine.ability.type.RegenerateResourceSpot")) {
 			// Same: regeneration is owned by the terrain / spot handler.
 		}
-		else if (ability_parent == "engine.ability.type.Constructable") {
+		else if (ability_obj.extends("engine.ability.type.Constructable")) {
 			auto build = std::make_shared<component::Build>(loop, ability_obj);
 			entity->add_component(build);
 		}
-		else if (ability_parent == "engine.ability.type.Foundation") {
+		else if (ability_obj.extends("engine.ability.type.Foundation")) {
 			foundation_ability = ability_obj;
 		}
-		else if (ability_parent == "engine.ability.type.Create"
-		         or ability_parent == "engine.ability.type.Research") {
-			const bool research = ability_parent == "engine.ability.type.Research";
+		else if (ability_obj.extends("engine.ability.type.Create")
+		         or ability_obj.extends("engine.ability.type.Research")) {
+			const bool research = ability_obj.extends("engine.ability.type.Research");
 			const auto member = research ? "Research.researchables" : "Create.creatables";
 			for (const auto &entry : ability_obj.get_set(member)) {
 				const auto option = owner_db_view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(entry.get_ptr())->get_name());
@@ -448,19 +447,22 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 				entity->action_options.push_back(std::move(decoded));
 			}
 		}
-		else if (ability_parent == "engine.ability.type.ProductionQueue") {
+		else if (ability_obj.extends("engine.ability.type.ProductionQueue")) {
 			auto production = std::make_shared<component::Production>(loop, ability_obj);
 			entity->add_component(production);
 		}
-		else if (ability_parent == "engine.ability.type.ApplyContinuousEffect" and ability_fqon.ends_with(".Construct")) {
+		else if (ability_obj.extends("engine.ability.type.ApplyContinuousEffect") and ability_fqon.ends_with(".Construct")) {
 			entity->construct_ability = ability_obj;
 		}
-		else if (ability_parent == "engine.ability.type.RangedContinuousEffect" and ability_fqon.ends_with(".Heal")) {
+		else if (ability_obj.extends("engine.ability.type.ApplyContinuousEffect") and ability_fqon.ends_with(".Repair")) {
+			entity->repair_ability = ability_obj;
+		}
+		else if (ability_obj.extends("engine.ability.type.RangedContinuousEffect") and ability_fqon.ends_with(".Heal")) {
 			entity->heal_ability = ability_obj;
 		}
-		else if (ability_parent == "engine.ability.type.ApplyDiscreteEffect"
-		      || ability_parent == "engine.ability.type.RangedDiscreteEffect"
-		      || ability_parent == "engine.ability.type.ShootProjectile") {
+		else if (ability_obj.extends("engine.ability.type.ApplyDiscreteEffect")
+		      || ability_obj.extends("engine.ability.type.RangedDiscreteEffect")
+		      || ability_obj.extends("engine.ability.type.ShootProjectile")) {
 			// Phase 2 event-driven AttackSystem: mount the Attack component
 			// (ability data + runtime attack state). The converter emits
 			// Attack abilities as ApplyDiscreteEffect (melee, e.g. villager)
@@ -470,10 +472,10 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 			auto attack = std::make_shared<component::Attack>(loop, ability_obj);
 			entity->add_component(attack);
 		}
-		else if (ability_parent == "engine.ability.type.Resistance") {
+		else if (ability_obj.extends("engine.ability.type.Resistance")) {
 			resistance_ability = ability_obj;
 		}
-		else if (ability_parent == "engine.ability.type.Collision") {
+		else if (ability_obj.extends("engine.ability.type.Collision")) {
 			// P4.4B.1 §1: REQUIRED Footprint. The entity
 			// declares the Collision ability, so a valid
 			// gameplay Footprint is required. A missing or
@@ -529,19 +531,19 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 				/*is_static=*/false);
 			entity->set_footprint(fp);
 		}
-		else if (ability_parent == "engine.ability.type.PassiveTransformTo") {
+		else if (ability_obj.extends("engine.ability.type.PassiveTransformTo")) {
 			if (ability_fqon.ends_with(".Death")) {
 				entity->set_death_animation(api::APIAnimation::get_ability_animation_path(ability_obj),
 				                            ability_obj.get_float("PassiveTransformTo.transform_time"));
 			}
 		}
-		else if (ability_parent == "engine.ability.type.Despawn") {
+		else if (ability_obj.extends("engine.ability.type.Despawn")) {
 			entity->set_corpse_animation(api::APIAnimation::get_ability_animation_path(ability_obj),
 			                             ability_obj.get_float("Despawn.despawn_time"));
 		}
-		else if (ability_parent == "engine.ability.type.ProvideContingent"
-		         or ability_parent == "engine.ability.type.UseContingent") {
-			const bool provides = ability_parent == "engine.ability.type.ProvideContingent";
+		else if (ability_obj.extends("engine.ability.type.ProvideContingent")
+		         or ability_obj.extends("engine.ability.type.UseContingent")) {
+			const bool provides = ability_obj.extends("engine.ability.type.ProvideContingent");
 			auto &population = provides ? entity->population_provided : entity->population_used;
 			for (const auto &entry : ability_obj.get_set(provides ? "ProvideContingent.amount" : "UseContingent.amount")) {
 				const auto amount = owner_db_view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(entry.get_ptr())->get_name());
@@ -555,7 +557,7 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 			// nyan drifts (e.g. a converter emitting a new ability name)
 			// are visible at startup.
 			log::log(MSG(warn) << "EntityFactory: unhandled ability parent "
-			                   << ability_parent << " on entity "
+			                   << ability_obj.get_parents()[0] << " on entity "
 			                   << nyan_entity);
 		}
 	}

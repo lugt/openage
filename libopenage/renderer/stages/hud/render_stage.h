@@ -90,11 +90,19 @@ public:
 	std::shared_ptr<renderer::RenderPass> get_render_pass();
 
 	/**
-	 * Get the dedicated render pass for world-space selection overlays.
-	 * Added to the presenter's render_passes right after the HUD pass
-	 * so the overlay composites on top of terrain/units but under the GUI.
+	 * Get the dedicated render pass for world-space ground selection rings.
+	 * Added between terrain and world passes so rings draw beneath units/buildings.
 	 *
-	 * @return Render pass for selection overlay drawing.
+	 * @return Render pass for selection ring drawing.
+	 */
+	std::shared_ptr<renderer::RenderPass> get_selection_ring_render_pass();
+
+	/**
+	 * Get the dedicated render pass for world-space selection health bars.
+	 * Added to the presenter's render_passes right after the HUD pass
+	 * so health bars composite on top of terrain/units but under the GUI.
+	 *
+	 * @return Render pass for selection health bar drawing.
 	 */
 	std::shared_ptr<renderer::RenderPass> get_selection_render_pass();
 
@@ -199,7 +207,22 @@ private:
 	std::vector<SelectionOverlayQuad> selection_quads;
 
 	/**
-	 * Dedicated render pass for selection overlays. Owns its own FBO
+	 * Dedicated render pass for ground selection rings (composited under world objects).
+	 */
+	std::shared_ptr<renderer::RenderPass> selection_ring_render_pass;
+
+	/**
+	 * Output texture for the selection ring FBO.
+	 */
+	std::shared_ptr<renderer::Texture2d> selection_ring_output_texture;
+
+	/**
+	 * Depth texture for the selection ring FBO.
+	 */
+	std::shared_ptr<renderer::Texture2d> selection_ring_depth_texture;
+
+	/**
+	 * Dedicated render pass for selection health bars. Owns its own FBO
 	 * (output + depth textures) so the drag-rect pass lifecycle is
 	 * undisturbed. Cleared and rebuilt every \p update().
 	 */

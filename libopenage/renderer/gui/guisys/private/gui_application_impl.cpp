@@ -34,6 +34,12 @@ std::shared_ptr<GuiApplicationImpl> GuiApplicationImpl::get() {
 		// scales (1.25x / 1.5x / 1.75x).
 		QGuiApplication::setHighDpiScaleFactorRoundingPolicy(
 			Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+
+		// Keep the Qt Quick scene graph on the main thread so openage's
+		// OpenGL renderer and QML share one context without cross-thread handoffs.
+		if (!qEnvironmentVariableIsSet("QSG_RENDER_LOOP")) {
+			qputenv("QSG_RENDER_LOOP", "basic");
+		}
 	}
 
 	return candidate ? candidate : std::shared_ptr<GuiApplicationImpl>{new GuiApplicationImpl};

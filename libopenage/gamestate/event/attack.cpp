@@ -21,6 +21,7 @@
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
+#include "gamestate/player.h"
 #include "gamestate/system/idle.h"
 #include "gamestate/system/move.h"
 #include "gamestate/types.h"
@@ -138,6 +139,7 @@ void AttackHandler::invoke(openage::event::EventLoop &loop,
 		auto source_owner = entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
 		auto target_owner = target_entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
 		if (source_owner and target_owner
+		    and not (entity->wildlife_predator and gstate->get_player(source_owner->get_owners().get(time))->is_gaia)
 		    and gstate->get_stance(source_owner->get_owners().get(time), target_owner->get_owners().get(time))
 		            != DiplomaticStance::Enemy) {
 			if (attack_comp->is_active()) {

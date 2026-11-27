@@ -11,12 +11,18 @@
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/system/idle.h"
+#include "testing/testing.h"
 
 namespace openage::gamestate::event {
 
 namespace {
 
 const nyan::fqon_t health = "de2_base.data.util.attribute.types.Health";
+
+time::time_t construction_delay(double seconds) {
+	const auto raw = std::max<int64_t>(1, static_cast<int64_t>(std::ceil(seconds * time::time_t{1}.get_raw_value())));
+	return time::time_t::from_raw_value(raw);
+}
 
 void apply_progress(GameEntity &entity, component::Build &build, double next_exact, const time::time_t &time) {
 	const auto clamped = std::clamp(next_exact, build.exact_progress, 100.0);
@@ -82,8 +88,10 @@ void schedule_next(openage::event::EventLoop &loop,
 	const double multiplier = ((static_cast<double>(build.active_builders.size()) + 2.0) / 3.0) * aegis_mult;
 	const double rate = 100.0 * multiplier / build.build_seconds;
 	const double delay = std::max(0.0, (static_cast<double>(next_target) - build.exact_progress) / rate);
+	// Rounding down can repeatedly schedule the same unfinished milestone
+	// at the current timestamp, preventing simulation time from advancing.
 	const auto gen = ++build.schedule_gen;
-	loop.create_event("game.construction", target, state, time + time::time_t::from_double(delay), {
+	loop.create_event("game.construction", target, state, time + construction_delay(delay), {
 		{"entity_id", site_id}, {"gen", gen},
 	});
 }
@@ -198,5 +206,17 @@ time::time_t ConstructionHandler::predict_invoke_time(
 	const time::time_t &at) {
 	return at;
 }
+
+namespace tests {
+
+/** A remaining milestone smaller than one time quantum must still advance time. */
+void construction_schedule() {
+	TESTEQUALS(construction_delay(0).get_raw_value(), 1);
+	TESTEQUALS(construction_delay(1e-12).get_raw_value(), 1);
+	TESTEQUALS(construction_delay(1).get_raw_value(), time::time_t{1}.get_raw_value());
+	TESTEQUALS(construction_delay(0.1).get_raw_value(), 6554);
+}
+
+} // namespace tests
 
 } // namespace openage::gamestate::event

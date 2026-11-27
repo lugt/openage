@@ -18,17 +18,24 @@ def media_requests() -> None:
     class Graphic(dict):
         """Small graphics records with the fields consumed by the exporter."""
 
-        def __init__(self, identifier: int):
+        def __init__(
+            self,
+            identifier: int,
+            *,
+            sequence_type: int = 0,
+            frame_rate: float = 0.1,
+            frame_count: int = 1,
+        ):
             super().__init__(
                 (key, SimpleNamespace(value=value))
                 for key, value in {
                     "filename": f"source_{identifier}",
                     "slp_id": -1,
-                    "sequence_type": 0,
+                    "sequence_type": sequence_type,
                     "layer": 20,
-                    "frame_rate": 0.1,
+                    "frame_rate": frame_rate,
                     "replay_delay": 0.0,
-                    "frame_count": 1,
+                    "frame_count": frame_count,
                     "angle_count": 1,
                 }.items()
             )
@@ -55,7 +62,10 @@ def media_requests() -> None:
         def resolve_sprite_location(self) -> str:
             return f"units/{self.name}/graphics"
 
-    graphics = [Graphic(11), Graphic(12)]
+    graphics = [
+        Graphic(11),
+        Graphic(12, sequence_type=0x04, frame_rate=0.0, frame_count=3),
+    ]
     dataset = SimpleNamespace(
         combined_sprites={1: Sprite("idle"), 2: Sprite("construct")},
         graphics_exports={},
@@ -71,6 +81,7 @@ def media_requests() -> None:
         assert_value(set(sprite.graphics_metadata), filenames)
         for metadata in sprite.graphics_metadata.values():
             assert_value(metadata[0].startswith("../../../shared/graphics/"), True)
+            assert_value(metadata[1].value, "off")
         assert_value(sprite.request_refs, {id(req) for req in dataset.graphics_exports.values()})
         assert_value(sprite.dump().count("\nlayer "), 2)
         for request in dataset.graphics_exports.values():

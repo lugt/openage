@@ -376,23 +376,26 @@ Item {
 		property string fallbackText: ""
 		property string hotkey: ""
 		property bool active: false
+		property bool visualEnabled: true
+		property int badgeCount: 0
 		property url iconSource: ""
+		readonly property bool activeVisual: iconButton.enabled && iconButton.visualEnabled
 		signal pressed
 		signal hoveredChanged(bool hovered)
 		width: 40
 		height: 40
 		radius: 3
 		Accessible.name: tooltip
-		border.color: iconControl.containsMouse ? (enabled ? "#d6b677" : "#8b4a4a")
-		              : (enabled && active ? "#d6b677" : (enabled ? "#5c5040" : "#443636"))
-		color: enabled ? (active || iconControl.pressed ? "#645037" : "#2b2a29") : "#1e1b1b"
+		border.color: iconControl.containsMouse ? (activeVisual ? "#d6b677" : "#8b4a4a")
+		              : (activeVisual && active ? "#d6b677" : (activeVisual ? "#5c5040" : "#443636"))
+		color: activeVisual ? (active || iconControl.pressed ? "#645037" : "#2b2a29") : "#1e1b1b"
 		Image {
 			id: iconImage
 			anchors.fill: parent
 			anchors.margins: 4
 			source: iconButton.iconSource
 			fillMode: Image.PreserveAspectFit
-			opacity: iconButton.enabled ? 1.0 : 0.35
+			opacity: iconButton.activeVisual ? 1.0 : 0.35
 		}
 		Text {
 			anchors.centerIn: parent
@@ -401,9 +404,28 @@ Item {
 			horizontalAlignment: Text.AlignHCenter
 			elide: Text.ElideRight
 			text: iconButton.fallbackText
-			color: iconButton.enabled ? "#f7e6c8" : "#7b756c"
+			color: iconButton.activeVisual ? "#f7e6c8" : "#7b756c"
 			font.pixelSize: 10
 			font.bold: true
+		}
+		Rectangle {
+			visible: iconButton.badgeCount > 0
+			anchors.left: parent.left
+			anchors.top: parent.top
+			anchors.margins: 2
+			width: Math.max(14, badgeLabel.implicitWidth + 5)
+			height: 14
+			radius: 2
+			color: "#d914181e"
+			border.color: "#d6b677"
+			Text {
+				id: badgeLabel
+				anchors.centerIn: parent
+				text: iconButton.badgeCount
+				color: "#fff3d1"
+				font.pixelSize: 9
+				font.bold: true
+			}
 		}
 		Rectangle {
 			visible: iconButton.hotkey.length > 0
@@ -418,7 +440,7 @@ Item {
 				id: hotkeyLabel
 				anchors.centerIn: parent
 				text: iconButton.hotkey
-				color: iconButton.enabled ? "#f3d89b" : "#7b756c"
+				color: iconButton.activeVisual ? "#f3d89b" : "#7b756c"
 				font.pixelSize: 9
 				font.bold: true
 			}
@@ -528,13 +550,13 @@ Item {
 					columns: 5
 					spacing: cellSpacing
 					Repeater {
-						model: hud.actionOptions
+						model: hud.commandOptions
 						delegate: IconCommandButton {
 							required property var modelData
 							required property int index
 							readonly property var gridKeys: ["Q", "W", "E", "R", "T", "A", "S", "D", "F", "G", "Z", "X", "C", "V", "B"]
-							readonly property string keyLabel: index < gridKeys.length ? gridKeys[index] : ""
-							readonly property string actionTitle: modelData.transform ? modelData.name
+							readonly property string keyLabel: modelData.back ? "Esc" : index < gridKeys.length ? gridKeys[index] : ""
+							readonly property string actionTitle: modelData.navigation || modelData.command || modelData.transform ? modelData.name
 								: (modelData.build ? qsTr("Build %1") : modelData.research ? qsTr("Research %1") : qsTr("Train %1")).arg(modelData.name)
 							readonly property string richTooltip: {
 								var html = "<b style='color:#f3d89b'>" + actionTitle + "</b>"
@@ -550,17 +572,22 @@ Item {
 									}
 									html += "<br/>" + parts.join(" · ")
 								}
-								if (modelData.available === false) {
+								if (modelData.queued === true) {
+									html += "<br/><span style='color:#f3d89b'>" + qsTr("Already in queue") + "</span>"
+								}
+								else if (modelData.available === false) {
 									html += "<br/><span style='color:#ff6b6b'>" + qsTr("Requires prerequisite building or age") + "</span>"
 								}
 								return html
 							}
 							width: commandGrid.cellSize
 							height: commandGrid.cellSize
-							enabled: modelData.enabled !== false
+							enabled: true
+							visualEnabled: modelData.enabled !== false
+							badgeCount: modelData.queuedCount || 0
 							hotkey: keyLabel
 							iconSource: modelData.icon || ""
-							fallbackText: modelData.name ? modelData.name.slice(0, 2) : ""
+							fallbackText: modelData.back ? qsTr("Back") : modelData.name ? modelData.name.slice(0, 2) : ""
 							tooltip: richTooltip
 							onHoveredChanged: (hovered) => {
 								if (hovered) {
@@ -570,13 +597,14 @@ Item {
 									commands.hoveredTooltip = ""
 								}
 							}
-							onPressed: hud.requestAction(modelData.id, modelData.build)
+							onPressed: modelData.back ? hud.backCommands() : hud.activateCommand(index)
 						}
 					}
 					IconCommandButton {
 						width: commandGrid.cellSize
 						height: commandGrid.cellSize
 						hotkey: "S"
+						visible: hud.commandPage.length === 0
 						iconSource: hud.commandIcons.stop || ""
 						fallbackText: qsTr("Stop")
 						tooltip: "<b style='color:#f3d89b'>" + qsTr("Stop") + "</b> <span style='color:#a7b7c5'>[S]</span>"
@@ -595,6 +623,7 @@ Item {
 						width: commandGrid.cellSize
 						height: commandGrid.cellSize
 						hotkey: "Esc"
+						visible: hud.commandPage.length === 0
 						iconSource: hud.commandIcons.cancel || ""
 						fallbackText: qsTr("Esc")
 						tooltip: "<b style='color:#f3d89b'>" + qsTr("Deselect") + "</b>"
@@ -686,123 +715,318 @@ Item {
 				clip: true
 				boundsBehavior: Flickable.StopAtBounds
 
-				Column {
+				Flow {
 					id: details
 					width: parent.width
-					spacing: 5
+					spacing: 14
 
-					Text {
-						readonly property var card: hud.selectionCards.length ? hud.selectionCards[0] : null
-						text: !card ? qsTr("No selection")
-						      : hud.selectionCards.length > 1
-						      ? qsTr("%1 selected").arg(hud.selectionCards.length) + "  ·  " + card.owner
-						      : card.name + "  ·  " + card.owner
-						color: "#37281c"
-						font.bold: true
-						font.pixelSize: 16
-					}
-
-					Text {
-						visible: hud.selectionCards.length > 0
-						readonly property var card: visible ? hud.selectionCards[0] : null
-						text: !card ? ""
-						      : qsTr("Player: %1  |  Civ: %2").arg(card.owner).arg(card.civ || "Unknown")
-						color: "#5b4031"
-						font.pixelSize: 11
-						font.bold: true
-					}
-
-					Text {
-						visible: hud.selectionCards.length === 1
-						readonly property var card: visible ? hud.selectionCards[0] : null
-						text: card && card.maxHp > 0 ? qsTr("HP %1/%2").arg(card.hp).arg(card.maxHp)
-						      + (hud.selectedAttackDamage > 0 ? qsTr("    Attack %1    Range %2")
-						         .arg(hud.selectedAttackDamage).arg(hud.selectedAttackRange.toFixed(1)) : "")
-						      : ""
-						color: "#463326"
-						font.pixelSize: 12
-					}
-
-					Flow {
-						width: parent.width
+					Column {
+						id: selectionInfoColumn
+						readonly property bool showQueueAside: hud.selectionCards.length === 1 && hud.productionQueue.length > 0 && details.width >= 380
+						width: showQueueAside ? Math.min(240, details.width * 0.44) : details.width
 						spacing: 5
-						Repeater {
-							model: hud.selectionCards
-							delegate: Rectangle {
-								id: card
-								required property var modelData
-								required property int index
-								width: 39
-								height: 39
+
+						Text {
+							readonly property var card: hud.selectionCards.length ? hud.selectionCards[0] : null
+							text: !card ? qsTr("No selection")
+							      : hud.selectionCards.length > 1
+							      ? qsTr("%1 selected").arg(hud.selectionCards.length) + "  ·  " + card.owner
+							      : card.name + "  ·  " + card.owner
+							color: "#37281c"
+							font.bold: true
+							font.pixelSize: 16
+							width: parent.width
+							elide: Text.ElideRight
+						}
+
+						Text {
+							visible: hud.selectionCards.length > 0
+							readonly property var card: visible ? hud.selectionCards[0] : null
+							text: !card ? ""
+							      : qsTr("Player: %1  |  Civ: %2").arg(card.owner).arg(card.civ || "Unknown")
+							color: "#5b4031"
+							font.pixelSize: 11
+							font.bold: true
+							width: parent.width
+							elide: Text.ElideRight
+						}
+
+						Text {
+							visible: hud.selectionCards.length === 1
+							readonly property var card: visible ? hud.selectionCards[0] : null
+							text: card && card.maxHp > 0 ? qsTr("HP %1/%2").arg(card.hp).arg(card.maxHp)
+							      + (hud.selectedAttackDamage > 0 ? qsTr("    Attack %1    Range %2")
+							         .arg(hud.selectedAttackDamage).arg(hud.selectedAttackRange.toFixed(1)) : "")
+							      : ""
+							color: "#463326"
+							font.pixelSize: 12
+							width: parent.width
+							elide: Text.ElideRight
+						}
+
+						Flow {
+							width: parent.width
+							spacing: 5
+							Repeater {
+								model: hud.selectionCards
+								delegate: Rectangle {
+									id: card
+									required property var modelData
+									required property int index
+									width: 39
+									height: 39
+									color: "#292723"
+									border.color: cardClick.containsMouse ? "#fff5d9" : "#8a6e49"
+									Accessible.name: modelData.name
+									Image {
+										id: portrait
+										anchors.fill: parent
+										anchors.margins: 2
+										source: card.modelData.icon || ""
+										fillMode: Image.PreserveAspectFit
+									}
+									Text {
+										anchors.centerIn: parent
+										visible: portrait.status !== Image.Ready
+										text: card.modelData.name.split(" ").map(word => word.charAt(0)).join("").slice(0, 3)
+										color: "#f2e4c6"
+										font.bold: true
+										font.pixelSize: 15
+									}
+									Rectangle {
+										anchors.left: parent.left
+										anchors.bottom: parent.bottom
+										anchors.margins: 2
+										height: 4
+										readonly property real hpRatio: card.modelData.maxHp > 0
+										       ? Math.max(0, Math.min(1, card.modelData.hp / card.modelData.maxHp)) : 1
+										width: (parent.width - 4) * hpRatio
+										color: hpRatio > 0.5 ? "#57d157" : (hpRatio > 0.25 ? "#e6c84a" : "#e64a4a")
+									}
+									MouseArea {
+										id: cardClick
+										anchors.fill: parent
+										hoverEnabled: true
+										onClicked: hud.selectCard(card.index)
+									}
+								}
+							}
+						}
+
+						Text {
+							visible: hud.actionStatus.length > 0 && !(hud.selectionCards.length === 1 && hud.productionQueue.length > 0)
+							width: parent.width
+							text: hud.actionStatus
+							color: "#493422"
+							wrapMode: Text.WordWrap
+							font.pixelSize: 12
+						}
+
+						Row {
+							visible: hud.constructionProgress >= 0
+							spacing: 8
+							Text {
+								text: qsTr("Construction %1%").arg(hud.constructionProgress)
+								color: "#493422"
+								font.bold: true
+								font.pixelSize: 12
+							}
+							Rectangle {
+								visible: hud.constructionProgress >= 0
+								width: 90
+								height: 9
+								anchors.verticalCenter: parent.verticalCenter
+								color: "#5b4031"
+								Rectangle {
+									width: parent.width * Math.max(0, hud.constructionProgress) / 100
+									height: parent.height
+									color: "#d99741"
+								}
+							}
+						}
+					}
+
+					// AoE2-style production / training / research queue panel
+					Column {
+						id: productionQueuePanel
+						visible: hud.selectionCards.length === 1 && hud.productionQueue.length > 0
+						width: selectionInfoColumn.showQueueAside ? Math.max(180, details.width - selectionInfoColumn.width - 14) : details.width
+						spacing: 6
+						readonly property var activeItem: hud.productionQueue.length > 0 ? hud.productionQueue[0] : null
+
+						Row {
+							width: parent.width
+							spacing: 8
+							Rectangle {
+								id: activeQueueSlot
+								width: 38
+								height: 38
 								color: "#292723"
-								border.color: cardClick.containsMouse ? "#fff5d9" : "#8a6e49"
-								Accessible.name: modelData.name
+								border.width: 2
+								border.color: activeSlotArea.containsMouse ? "#fff5d9" : "#d4a84f"
+								radius: 2
 								Image {
-									id: portrait
+									id: activeQueueImg
 									anchors.fill: parent
-									anchors.margins: 2
-									source: card.modelData.icon || ""
+									anchors.margins: 3
+									source: productionQueuePanel.activeItem ? (productionQueuePanel.activeItem.icon || "") : ""
 									fillMode: Image.PreserveAspectFit
 								}
 								Text {
 									anchors.centerIn: parent
-									visible: portrait.status !== Image.Ready
-									text: card.modelData.name.split(" ").map(word => word.charAt(0)).join("").slice(0, 3)
+									visible: activeQueueImg.status !== Image.Ready && productionQueuePanel.activeItem !== null
+									text: productionQueuePanel.activeItem ? productionQueuePanel.activeItem.name.slice(0, 2) : ""
 									color: "#f2e4c6"
 									font.bold: true
-									font.pixelSize: 15
-								}
-								Rectangle {
-									anchors.left: parent.left
-									anchors.bottom: parent.bottom
-									anchors.margins: 2
-									height: 4
-									readonly property real hpRatio: card.modelData.maxHp > 0
-									       ? Math.max(0, Math.min(1, card.modelData.hp / card.modelData.maxHp)) : 1
-									width: (parent.width - 4) * hpRatio
-									color: hpRatio > 0.5 ? "#57d157" : (hpRatio > 0.25 ? "#e6c84a" : "#e64a4a")
+									font.pixelSize: 12
 								}
 								MouseArea {
-									id: cardClick
+									id: activeSlotArea
 									anchors.fill: parent
 									hoverEnabled: true
-									onClicked: hud.selectCard(card.index)
+									cursorShape: Qt.PointingHandCursor
+									onClicked: hud.cancelQueueItem(0)
+								}
+							}
+							Column {
+								width: Math.max(100, parent.width - 46)
+								anchors.verticalCenter: parent.verticalCenter
+								spacing: 4
+								Text {
+									width: parent.width
+									readonly property var item: productionQueuePanel.activeItem
+									text: !item ? ""
+									      : (item.research ? qsTr("Researching %1")
+									         : item.transform ? "%1"
+									         : qsTr("Training %1")).arg(item.name) + "  " + item.progress + "%"
+									color: "#37281c"
+									font.bold: true
+									font.pixelSize: 12
+									elide: Text.ElideRight
+								}
+								Rectangle {
+									width: Math.min(200, parent.width)
+									height: 10
+									color: "#4a3525"
+									border.color: "#2f2116"
+									radius: 2
+									Rectangle {
+										anchors.left: parent.left
+										anchors.top: parent.top
+										anchors.bottom: parent.bottom
+										anchors.margins: 1
+										width: (parent.width - 2) * (productionQueuePanel.activeItem ? Math.max(0, Math.min(100, productionQueuePanel.activeItem.progress)) / 100 : 0)
+										color: productionQueuePanel.activeItem && productionQueuePanel.activeItem.research ? "#4c9ed9" : "#52b752"
+										radius: 1
+									}
+								}
+							}
+						}
+
+						Flow {
+							visible: hud.productionQueue.length > 1
+							width: parent.width
+							spacing: 4
+							Repeater {
+								model: hud.productionQueue.length > 1 ? hud.productionQueue.slice(1) : []
+								delegate: Rectangle {
+									id: queuedSlot
+									required property var modelData
+									required property int index
+									width: 30
+									height: 30
+									color: "#292723"
+									border.color: queuedSlotArea.containsMouse ? "#fff5d9" : "#8a6e49"
+									radius: 2
+									Image {
+										id: queuedImg
+										anchors.fill: parent
+										anchors.margins: 2
+										source: queuedSlot.modelData.icon || ""
+										fillMode: Image.PreserveAspectFit
+									}
+									Text {
+										anchors.centerIn: parent
+										visible: queuedImg.status !== Image.Ready
+										text: queuedSlot.modelData.name ? queuedSlot.modelData.name.slice(0, 2) : ""
+										color: "#f2e4c6"
+										font.bold: true
+										font.pixelSize: 10
+									}
+									Rectangle {
+										anchors.right: parent.right
+										anchors.bottom: parent.bottom
+										anchors.margins: 1
+										width: Math.max(11, slotIdxLabel.implicitWidth + 3)
+										height: 11
+										radius: 2
+										color: "#cc101418"
+										Text {
+											id: slotIdxLabel
+											anchors.centerIn: parent
+											text: queuedSlot.index + 2
+											color: "#f3d89b"
+											font.pixelSize: 8
+											font.bold: true
+										}
+									}
+									MouseArea {
+										id: queuedSlotArea
+										anchors.fill: parent
+										hoverEnabled: true
+										cursorShape: Qt.PointingHandCursor
+										onClicked: hud.cancelQueueItem(queuedSlot.index + 1)
+									}
 								}
 							}
 						}
 					}
+				}
+			}
+		}
+	}
 
-					Text {
-						visible: hud.actionStatus.length > 0
-						width: parent.width
-						text: hud.actionStatus
-						color: "#493422"
-						wrapMode: Text.WordWrap
-						font.pixelSize: 12
-					}
-
-					Row {
-						visible: hud.constructionProgress >= 0
-						spacing: 8
-						Text {
-							text: qsTr("Construction %1%").arg(hud.constructionProgress)
-							color: "#493422"
-							font.bold: true
-							font.pixelSize: 12
-						}
-						Rectangle {
-							visible: hud.constructionProgress >= 0
-							width: 90
-							height: 9
-							anchors.verticalCenter: parent.verticalCenter
-							color: "#5b4031"
-							Rectangle {
-								width: parent.width * Math.max(0, hud.constructionProgress) / 100
-								height: parent.height
-								color: "#d99741"
-							}
-						}
-					}
+	Rectangle {
+		id: toastBanner
+		property bool shown: false
+		anchors.horizontalCenter: parent.horizontalCenter
+		anchors.bottom: bottomPanel.top
+		anchors.bottomMargin: 12
+		width: Math.min(Math.max(180, toastText.implicitWidth + 36), Math.min(520, Math.max(200, root.width - 48)))
+		height: toastText.implicitHeight + 18
+		color: "#cc3a3a3c"
+		border.color: "#88b0b0b5"
+		border.width: 1
+		radius: 6
+		z: 25
+		opacity: shown && hud.toastMessage.length > 0 ? 1.0 : 0.0
+		visible: opacity > 0.01
+		Behavior on opacity {
+			NumberAnimation { duration: 200 }
+		}
+		Text {
+			id: toastText
+			anchors.centerIn: parent
+			width: parent.width - 36
+			text: hud.toastMessage
+			color: "#f5f5f7"
+			font.pixelSize: 13
+			font.bold: true
+			horizontalAlignment: Text.AlignHCenter
+			wrapMode: Text.WordWrap
+		}
+		Timer {
+			id: toastTimer
+			interval: 3500
+			repeat: false
+			onTriggered: toastBanner.shown = false
+		}
+		Connections {
+			target: hud
+			function onToast_changed() {
+				if (hud.toastMessage.length > 0) {
+					toastBanner.shown = true
+					toastTimer.restart()
 				}
 			}
 		}
@@ -965,6 +1189,7 @@ Item {
 
 		MouseArea {
 			anchors.fill: parent
+			acceptedButtons: Qt.AllButtons
 		}
 
 		Rectangle {

@@ -45,3 +45,5 @@ This provides geometric texture transitions without requiring original-game blen
 Fog keeps separate explored and currently visible channels and interpolates their cell-center samples into contours that cross tile interiors.
 This changes presentation only; entity visibility and selection still use the simulation's visibility snapshot.
 The result approximates rounded sight boundaries and does not reproduce the original game's exact fog algorithm.
+The world stage removes draw calls for objects hidden by fog and skips their texture and animation uniform updates.
+When an object becomes visible again, its layer uniforms are recreated and the current animation frame is refreshed before drawing.

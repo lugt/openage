@@ -6,6 +6,33 @@ See [simulation architecture](README.md), [event scheduling](../event_system.md)
 
 ## Running the controller
 
+### Neutral wildlife
+
+Converted original scenarios enable neutral wildlife automatically, independently of strategic player profiles.
+Only Gaia-owned animals participate; ownership changes and explicit movement orders take precedence.
+Birds fly between map locations and periodically leave an edge, rest outside the map and return.
+Deer and herdables alternate short walks with grazing and flee nearby non-Gaia mobile units.
+Only wolves initiate attacks, and they select villagers inside the source animal's sight radius without changing Gaia diplomacy.
+Other predators retain their existing behavior.
+
+The controller schedules simulation events every half second and limits movement decisions to sixteen animals per event.
+It builds a spatial index of nearby people once per event instead of comparing every animal with every entity or running per rendered frame.
+Ground animals use the existing collision-aware movement system; flying birds use fixed-point position curves.
+Converted animal definitions preserve source movement, idle and death graphics, speed, health, collision extents and food amounts.
+
+Optional `original_scenario.gameplay_metadata_version`, `command_categories` and per-definition `wildlife` fields describe the imported behavior.
+`command_categories` maps building FQONs to `economic` or `military`.
+Each `wildlife` object contains `kind` (`bird`, `prey`, `herdable` or `wolf`) and positive `speed`; the definition's existing `sight` supplies the detection range.
+Older packs without these optional fields keep their previous behavior until reconverted.
+The campaign launcher refreshes outdated converted missions from their cached parsed originals when available.
+Wildlife decisions are deterministic for an unchanged initial entity set; loading a save rebuilds their idle decisions rather than restoring an exact AI checkpoint.
+
+`bin/run test testing::wildlife_neighbors` checks spatial boundaries, sight limits, deterministic ties and villager filtering without assets.
+`bin/run test testing::wildlife_behavior` uses converted assets to check fleeing, flight out of and back into the map, neutral wolf combat, captured herdables and cancellable building repair without a renderer.
+`bin/run test -b testing::wildlife_spatial` measures index construction and 200 local queries across 14,053 synthetic people; it does not measure pathfinding or rendering.
+
+### Strategic players
+
 AI is disabled by default.
 After preparing a scenario, pass `bin/run main --scenario --no-convert --no-prompts --ai-config /path/to/ai.json`.
 The JSON file contains an optional positive match-wide `population_limit` and a `players` array:

@@ -45,6 +45,10 @@ std::shared_ptr<renderer::RenderPass> HudRenderStage::get_render_pass() {
 	return this->render_pass;
 }
 
+std::shared_ptr<renderer::RenderPass> HudRenderStage::get_selection_ring_render_pass() {
+	return this->selection_ring_render_pass;
+}
+
 std::shared_ptr<renderer::RenderPass> HudRenderStage::get_selection_render_pass() {
 	return this->selection_render_pass;
 }
@@ -57,6 +61,9 @@ void HudRenderStage::set_selection_overlays(std::vector<SelectionOverlayQuad> qu
 void HudRenderStage::add_drag_entity(const std::shared_ptr<DragRenderEntity> entity) {
 	std::unique_lock lock{this->mutex};
 
+	if (this->render_pass) {
+		this->render_pass->clear_renderables();
+	}
 	auto hud_object = std::make_shared<HudDragObject>(this->asset_manager);
 	hud_object->set_render_entity(entity);
 	hud_object->set_camera(this->camera);
@@ -100,25 +107,30 @@ void HudRenderStage::update() {
 	}
 
 	// Rebuild the world-space selection overlay renderables every frame.
-	// Each quad becomes one Renderable using the shared selection_geometry.
-	// Depth test is disabled and alpha blending is enabled so the overlay
-	// is visible over terrain regardless of the entity's depth.
+	// Ground rings go into selection_ring_render_pass (composited beneath
+	// world units/buildings); health bars go into selection_render_pass
+	// (composited above world units/buildings).
+	if (this->selection_ring_render_pass) [[likely]] {
+		this->selection_ring_render_pass->clear_renderables();
+	}
 	if (this->selection_render_pass) [[likely]] {
 		this->selection_render_pass->clear_renderables();
-		for (const auto &quad : this->selection_quads) {
-			const Eigen::Vector2f half_size{quad.half_width, quad.half_height};
+	}
+	for (const auto &quad : this->selection_quads) {
+		const Eigen::Vector2f half_size{quad.half_width, quad.half_height};
+		if (this->selection_ring_render_pass) [[likely]] {
 			auto ring = this->selection_shader->new_uniform_input(
 				"obj_world_position", quad.world_center, "half_size", half_size,
 				"health_color", quad.health_color, "overlay_bar", false,
 				"health_fraction", quad.health_fraction, "sprite_top", quad.sprite_top);
-			this->selection_render_pass->add_renderables(Renderable{ring, this->selection_geometry, true, false});
-			if (quad.health_fraction >= 0.0f) {
-				auto bar = this->selection_shader->new_uniform_input(
-					"obj_world_position", quad.world_center, "half_size", half_size,
-					"health_color", quad.health_color, "overlay_bar", true,
-					"health_fraction", quad.health_fraction, "sprite_top", quad.sprite_top);
-				this->selection_render_pass->add_renderables(Renderable{bar, this->selection_geometry, true, false});
-			}
+			this->selection_ring_render_pass->add_renderables(Renderable{ring, this->selection_geometry, true, false});
+		}
+		if (this->selection_render_pass and quad.health_fraction >= 0.0f) {
+			auto bar = this->selection_shader->new_uniform_input(
+				"obj_world_position", quad.world_center, "half_size", half_size,
+				"health_color", quad.health_color, "overlay_bar", true,
+				"health_fraction", quad.health_fraction, "sprite_top", quad.sprite_top);
+			this->selection_render_pass->add_renderables(Renderable{bar, this->selection_geometry, true, false});
 		}
 	}
 }
@@ -136,7 +148,14 @@ void HudRenderStage::resize(size_t width, size_t height) {
 	auto fbo = this->renderer->create_texture_target({this->output_texture, this->depth_texture});
 	this->render_pass->set_target(fbo);
 
-	// Resize the selection overlay FBO to match the window.
+	// Resize the selection overlay FBOs to match the window.
+	if (this->selection_ring_render_pass) {
+		this->selection_ring_output_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::rgba8));
+		this->selection_ring_depth_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::depth24));
+
+		auto ring_fbo = this->renderer->create_texture_target({this->selection_ring_output_texture, this->selection_ring_depth_texture});
+		this->selection_ring_render_pass->set_target(ring_fbo);
+	}
 	if (this->selection_render_pass) {
 		this->selection_output_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::rgba8));
 		this->selection_depth_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::depth24));
@@ -196,7 +215,14 @@ void HudRenderStage::initialize_render_pass(size_t width,
 	// Shared quad geometry: every selection overlay reuses this.
 	this->selection_geometry = this->renderer->add_mesh_geometry(resources::MeshData::make_quad());
 
-	// Own FBO for selection overlays (output + depth), sized to window.
+	// Own FBO for ground selection rings (composited under world entities).
+	this->selection_ring_output_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::rgba8));
+	this->selection_ring_depth_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::depth24));
+
+	auto ring_fbo = this->renderer->create_texture_target({this->selection_ring_output_texture, this->selection_ring_depth_texture});
+	this->selection_ring_render_pass = this->renderer->add_render_pass({}, ring_fbo);
+
+	// Own FBO for selection health bars (output + depth), sized to window.
 	this->selection_output_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::rgba8));
 	this->selection_depth_texture = renderer->add_texture(resources::Texture2dInfo(width, height, resources::pixel_format::depth24));
 

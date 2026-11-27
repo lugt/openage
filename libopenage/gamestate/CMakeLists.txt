@@ -25,6 +25,7 @@ add_sources(libopenage MODULE
 	movement_tests.cpp
 	score.cpp
 	state_snapshot.cpp
+	wildlife.cpp
 )
 
 add_subdirectory(activity/)

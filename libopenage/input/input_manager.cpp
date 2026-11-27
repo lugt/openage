@@ -7,7 +7,6 @@
 #include "input/controller/hud/controller.h"
 #include "input/event.h"
 #include "input/input_context.h"
-#include "renderer/gui/guisys/public/gui_input.h"
 
 
 namespace openage::input {
@@ -18,12 +17,7 @@ InputManager::InputManager() :
 	available_contexts{},
 	game_controller{nullptr},
 	camera_controller{nullptr},
-	hud_controller{nullptr},
-	gui_input{nullptr} {
-}
-
-void InputManager::set_gui(const std::shared_ptr<qtgui::GuiInput> &gui_input) {
-	this->gui_input = gui_input;
+	hud_controller{nullptr} {
 }
 
 void InputManager::set_camera_controller(const std::shared_ptr<camera::Controller> &controller) {
@@ -196,7 +190,7 @@ void InputManager::process_action(const input::Event &ev,
 			break;
 
 		case input_action_t::GUI:
-			this->gui_input->process(args.e.get_event());
+			// Qt Quick handles GUI input natively on the host QQuickWindow.
 			break;
 
 		case input_action_t::CUSTOM:

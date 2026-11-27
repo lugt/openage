@@ -141,6 +141,10 @@ public:
 	 * @param uniforms Uniform inputs of this object's layers.
 	 */
 	void set_uniforms(std::vector<std::shared_ptr<renderer::UniformInput>> &&uniforms);
+	/** Release hidden draw inputs and recreate them when the object becomes visible. */
+	void clear_uniforms();
+	/** Use the same fog rule for draw submission and shader uniforms. */
+	bool is_hidden_by_fog(const time::time_t &time, const gamestate::VisibilitySnapshot *visibility) const;
 
 	/**
 	 * Check whether the object is visible in the camera view.
@@ -218,6 +222,8 @@ private:
 	 * renderable in the render pass.
 	 */
 	std::vector<std::shared_ptr<renderer::UniformInput>> layer_uniforms;
+	bool uniforms_initialized = false;
+	bool fog_was_hidden = false;
 	float sprite_top = 0.0f;
 
 	/**

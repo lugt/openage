@@ -8,9 +8,11 @@
 #include <utility>
 
 #include "event/event_loop.h"
+#include "error/error.h"
 #include "coord/tile.h"
 #include "gamestate/component/api/attack.h"
 #include "gamestate/component/api/build.h"
+#include "gamestate/component/api/live.h"
 #include "gamestate/component/internal/activity.h"
 #include "gamestate/component/internal/commands/attack.h"
 #include "gamestate/component/internal/commands/move.h"
@@ -57,11 +59,46 @@ bool in_area(int64_t area_x1, int64_t area_x2, int64_t area_y1, int64_t area_y2,
     return x >= area_x1 and x <= area_x2 and y >= area_y1 and y <= area_y2;
 }
 
+bool compare_value(int64_t lhs, int64_t rhs, int64_t op) {
+    switch (op) {
+        case 0: return lhs == rhs;
+        case 1: return lhs < rhs;
+        case 2: return lhs > rhs;
+        case 3: return lhs <= rhs;
+        case 4: return lhs >= rhs;
+        default: return false;
+    }
+}
+std::optional<std::string> resource_fqon(int64_t attribute) {
+    constexpr const char *resources[]{"Food", "Wood", "Stone", "Gold"};
+    if (attribute >= 0 and attribute < 4) {
+        return std::string{"de2_base.data.util.resource.types."} + resources[attribute];
+    }
+    return std::nullopt;
+}
+gamestate::DiplomaticStance to_stance(int64_t value) {
+    switch (value) {
+        case 0: return gamestate::DiplomaticStance::Ally;
+        case 3: return gamestate::DiplomaticStance::Enemy;
+        default: return gamestate::DiplomaticStance::Neutral;
+    }
+}
+int64_t from_stance(gamestate::DiplomaticStance stance) {
+    switch (stance) {
+        case gamestate::DiplomaticStance::Self:
+        case gamestate::DiplomaticStance::Ally: return 0;
+        case gamestate::DiplomaticStance::Enemy: return 3;
+        case gamestate::DiplomaticStance::Neutral: return 1;
+    }
+    return 1;
+}
+
 class OriginalCondition final : public TriggerCondition {
 public:
     OriginalCondition(std::shared_ptr<OriginalScenario> source, Value args) : source{std::move(source)}, args{std::move(args)} {}
     bool evaluate(const gamestate::GameState &, time::time_t at) const override { return source->evaluate(args, at); }
     std::vector<DependencyKey> dependencies() const override { return {}; }
+    bool is_or_separator() const override { return number(this->args, "condition_type") == 29; }
 private:
     std::shared_ptr<OriginalScenario> source;
     Value args;
@@ -112,6 +149,15 @@ private:
 OriginalScenario::OriginalScenario(TriggerRuntime &runtime, std::shared_ptr<gamestate::GameState> state,
                                    std::shared_ptr<gamestate::EntityFactory> factory, Value config) :
     runtime_{runtime}, state_{std::move(state)}, factory_{std::move(factory)}, config_{std::move(config)} {
+    if (this->config_.has("command_categories")) {
+        for (const auto &[subject, category] : this->config_.at("command_categories").as_object()) {
+            const auto name = category.as_string();
+            if (name != "economic" and name != "military") {
+                throw Error{MSG(err) << "Unknown build command category: " << name};
+            }
+            this->state_->command_categories[subject] = name;
+        }
+    }
     for (const auto &[orig_key, runtime_val] : this->config_.at("player_map").as_object()) {
         this->player_map_[std::stoll(orig_key)] = static_cast<gamestate::player_id_t>(runtime_val.as_int());
     }
@@ -140,16 +186,9 @@ OriginalScenario::OriginalScenario(TriggerRuntime &runtime, std::shared_ptr<game
 }
 
 std::shared_ptr<TriggerCondition> OriginalScenario::condition(const gamestate::MissionTriggerCondition &ir) {
-    const auto type = number(ir.args, "condition_type");
-    // All variants present in the source scenes. Unknown records must fail before play.
-    const std::set<int64_t> supported{1, 3, 4, 5, 6, 8, 10, 11, 13, 15, 22};
-    if (not supported.contains(type)) throw std::invalid_argument{"Unsupported original condition " + std::to_string(type)};
     return std::make_shared<OriginalCondition>(shared_from_this(), ir.args);
 }
 std::shared_ptr<TriggerEffect> OriginalScenario::effect(const gamestate::MissionTriggerEffect &ir) {
-    const auto type = number(ir.args, "effect_type");
-    const std::set<int64_t> supported{2, 4, 8, 9, 11, 12, 13, 15, 16, 20, 21, 56};
-    if (not supported.contains(type)) throw std::invalid_argument{"Unsupported original effect " + std::to_string(type)};
     return std::make_shared<OriginalEffect>(ir.args);
 }
 
@@ -348,48 +387,132 @@ std::vector<std::shared_ptr<gamestate::GameEntity>> OriginalScenario::matching(c
 bool OriginalScenario::evaluate(const Value &condition, time::time_t at) const {
     const auto type = number(condition, "condition_type");
     bool value = false;
-    if (type == 10) {
+    if (type == 0 or type == 29 or type == 34 or type == 57) {
+        value = true;
+    }
+    else if (type == 10) {
         const auto start = activated_.find(trigger_id(number(condition, "parent")));
         value = start != activated_.end() and at >= start->second + time::time_t::from_double(number(condition, "timer", 0));
     }
     else if (type == 8) {
-        constexpr const char *resources[]{"Food", "Wood", "Stone", "Gold"};
-        const auto resource = number(condition, "attribute");
-        if (resource >= 0 and resource < 4) {
-            value = state_->get_player(player(number(condition, "source_player")))->get_resource(
-                std::string{"de2_base.data.util.resource.types."} + resources[resource]) >= number(condition, "quantity");
+        const auto attribute = number(condition, "attribute");
+        const auto target = player(number(condition, "source_player"));
+        const auto requested = number(condition, "quantity", 0);
+        if (const auto fqon = resource_fqon(attribute)) {
+            value = state_->get_player(target)->get_resource(*fqon) >= requested;
+        }
+        else if (attribute == 11) {
+            int64_t pop = 0;
+            for (const auto &[id, entity] : state_->get_game_entities()) {
+                if (entity->is_dead() or owner(*entity, at) != target) {
+                    continue;
+                }
+                const auto *data = this->definition(*entity);
+                if (data and data->object_type != 1 and data->object_type != 2) {
+                    ++pop;
+                }
+            }
+            value = pop >= requested;
+        }
+        else {
+            value = false;
         }
     }
     else if (type == 22) {
         const auto found = variables_.find(number(condition, "variable"));
         const auto amount = found == variables_.end() ? 0 : found->second;
         const auto requested = number(condition, "quantity", 0);
-        switch (number(condition, "comparison", 0)) {
-            case 0: value = amount == requested; break;
-            case 1: value = amount < requested; break;
-            case 2: value = amount > requested; break;
-            case 3: value = amount <= requested; break;
-            case 4: value = amount >= requested; break;
-            default: throw std::invalid_argument{"Unsupported variable comparison"};
-        }
+        value = compare_value(amount, requested, number(condition, "comparison", 0));
     }
     else if (type == 6) {
         const auto id = state_->get_entity_id_by_instance("object_" + std::to_string(number(condition, "unit_object")));
         value = id and (not state_->has_game_entity(*id) or state_->get_game_entity(*id)->is_dead());
     }
-    else if (type == 15 or type == 11) {
+    else if (type == 7) {
         const auto id = state_->get_entity_id_by_instance("object_" + std::to_string(number(condition, "unit_object")));
         if (id and state_->has_game_entity(*id)) {
-            if (type == 15) {
+            const auto &entity = state_->get_game_entity(*id);
+            value = not entity->is_dead() and owner(*entity, at) == player(number(condition, "source_player"));
+        }
+    }
+    else if (type == 2) {
+        const auto id1 = state_->get_entity_id_by_instance("object_" + std::to_string(number(condition, "unit_object")));
+        const auto id2 = state_->get_entity_id_by_instance("object_" + std::to_string(number(condition, "next_object")));
+        if (id1 and id2 and state_->has_game_entity(*id1) and state_->has_game_entity(*id2)) {
+            const auto &e1 = state_->get_game_entity(*id1);
+            const auto &e2 = state_->get_game_entity(*id2);
+            if (not e1->is_dead() and not e2->is_dead()) {
+                const auto p1 = position(*e1, at);
+                const auto p2 = position(*e2, at);
+                value = std::hypot((p1.ne - p2.ne).to_double(), (p1.se - p2.se).to_double()) <= 2.5;
+            }
+        }
+    }
+    else if (type == 9 or type == 21) {
+        const auto target = player(number(condition, "source_player"));
+        const auto tech_id = number(condition, "technology");
+        bool researched = false;
+        if (const auto it = researched_techs_.find(target); it != researched_techs_.end()) {
+            researched = it->second.contains(tech_id);
+        }
+        if (not researched and config_.at("technologies").has(std::to_string(tech_id))) {
+            const auto fqon = config_.at("technologies").at(std::to_string(tech_id)).as_string();
+            researched = state_->get_player(target)->has_researched(fqon);
+        }
+        if (type == 9) {
+            value = researched;
+        }
+        else {
+            const auto state_val = researched ? 3 : 1;
+            value = state_val == number(condition, "quantity", 3);
+        }
+    }
+    else if (type == 12 or type == 30) {
+        value = ai_signals_.contains(number(condition, "ai_signal"));
+    }
+    else if (type == 15 or type == 16 or type == 27 or type == 11 or type == 26) {
+        const auto id = state_->get_entity_id_by_instance("object_" + std::to_string(number(condition, "unit_object")));
+        if (id and state_->has_game_entity(*id)) {
+            if (type == 15 or type == 16 or type == 27) {
                 const auto point = position(*state_->get_game_entity(*id), at).to_tile();
                 const auto visible = state_->visibility(0);
-                value = visible and visible->at(point.ne, point.se) == gamestate::TileVisibility::Visible;
+                const bool is_visible = visible and visible->at(point.ne, point.se) == gamestate::TileVisibility::Visible;
+                value = (type == 16) ? not is_visible : is_visible;
             }
             else {
                 std::lock_guard lock{input_mutex_};
                 value = selected_.contains(*id);
             }
         }
+        else if (type == 16) {
+            value = true;
+        }
+    }
+    else if (type == 19) {
+        value = number(condition, "quantity", 2) == this->difficulty_;
+    }
+    else if (type == 20) {
+        const auto pct = number(condition, "quantity", 0);
+        const auto h = static_cast<int64_t>((static_cast<uint64_t>(at.to_double() * 1000) + static_cast<uint64_t>(number(condition, "parent", 0)) * 2654435761ULL) % 100);
+        value = h < pct;
+    }
+    else if (type == 23) {
+        const auto id = state_->get_entity_id_by_instance("object_" + std::to_string(number(condition, "unit_object")));
+        if (id and state_->has_game_entity(*id) and not state_->get_game_entity(*id)->is_dead()) {
+            if (const auto live = state_->get_game_entity(*id)->try_get_component_as<gamestate::component::Live>(component_t::LIVE)) {
+                if (const auto hp = live->get_attribute_value(at, "de2_base.data.util.attribute.types.Health")) {
+                    value = compare_value(*hp, number(condition, "quantity", 0), number(condition, "comparison", 0));
+                }
+            }
+        }
+    }
+    else if (type == 24) {
+        const auto src = player(number(condition, "source_player"));
+        const auto dst = player(number(condition, "target_player"));
+        value = from_stance(state_->get_stance(src, dst)) == number(condition, "quantity", 0);
+    }
+    else if (type == 14 or type == 17 or type == 18 or type == 25 or type == 28 or type == 54 or type == 55 or type == 56) {
+        value = false;
     }
     else if (type == 13) {
         const auto target = player(number(condition, "source_player"));
@@ -402,11 +525,15 @@ bool OriginalScenario::evaluate(const Value &condition, time::time_t at) const {
         });
         if (target == player(0)) value = false;
     }
-    else {
+    else if (type == 1 or type == 3 or type == 4 or type == 5) {
         const auto count = this->count_matching(condition, at);
         const auto quantity = std::max<int64_t>(1, number(condition, "quantity", 1));
         if (type == 4) value = count <= static_cast<size_t>(std::max<int64_t>(0, number(condition, "quantity", 0)));
         else value = count >= static_cast<size_t>(quantity);
+    }
+    else {
+        log::log(MSG(warn) << "OriginalScenario: unhandled condition_type " << type);
+        value = false;
     }
     return number(condition, "inverted", 0) == 1 ? not value : value;
 }
@@ -422,12 +549,40 @@ void OriginalScenario::execute(const Value &effect, time::time_t at) {
         current_instruction_ = objective_text_;
         runtime_.mission_state().set_instruction(substitute_variables(current_instruction_));
     }
-    else if (type == 4) {
-        // Sound effect playback is currently silent in headless/campaign runtime.
+    else if (type == 3) {
+        log::log(MSG(info) << "OriginalScenario chat: " << text(effect, "message"));
     }
-    else if (type == 8 or type == 9) activate(number(effect, "trigger_id"), type == 8, at);
+    else if (type == 1) {
+        const auto src = player(number(effect, "source_player"));
+        const auto dst = player(number(effect, "target_player"));
+        state_->set_stance(src, dst, to_stance(number(effect, "diplomacy", 1)));
+    }
+    else if (type == 5) {
+        if (const auto fqon = resource_fqon(number(effect, "attribute"))) {
+            const auto amount = number(effect, "quantity", 0);
+            const auto src = state_->get_player(player(number(effect, "source_player")));
+            const auto dst = state_->get_player(player(number(effect, "target_player")));
+            if (amount > 0) {
+                const auto available = std::min(amount, src->get_resource(*fqon));
+                if (available > 0) src->spend(*fqon, available);
+                dst->add_resource(*fqon, amount);
+            }
+        }
+    }
+    else if (type == 8 or type == 9) {
+        const auto tid = number(effect, "trigger_id");
+        if (runtime_.trigger(trigger_id(tid))) {
+            activate(tid, type == 8, at);
+        }
+        else {
+            log::log(MSG(warn) << "OriginalScenario: ignoring unknown trigger " << tid << " in effect " << type);
+        }
+    }
     else if (type == 13) {
-        runtime_.mission_state().declare_victory("original_scenario_victory");
+        const auto raw_player = number(effect, "source_player", -1);
+        if (raw_player < 0 or player(raw_player) == 0) {
+            runtime_.mission_state().declare_victory("original_scenario_victory");
+        }
     }
     else if (type == 56) {
         const auto variable = number(effect, "variable");
@@ -436,47 +591,107 @@ void OriginalScenario::execute(const Value &effect, time::time_t at) {
             case 1: variables_[variable] = amount; break;
             case 2: variables_[variable] += amount; break;
             case 3: variables_[variable] -= amount; break;
-            default: throw std::invalid_argument{"Unsupported original variable operation"};
+            case 4: variables_[variable] *= amount; break;
+            case 5: if (amount != 0) variables_[variable] /= amount; break;
+            default: log::log(MSG(warn) << "OriginalScenario: unsupported variable operation " << number(effect, "operation")); break;
         }
         runtime_.mission_state().set_instruction(substitute_variables(current_instruction_));
+    }
+    else if (type == 52 or type == 53) {
+        if (const auto fqon = resource_fqon(number(effect, "attribute"))) {
+            const auto target = state_->get_player(player(number(effect, "source_player")));
+            int64_t amount = number(effect, "quantity", 0);
+            if (type == 53) {
+                const auto it = variables_.find(number(effect, "variable"));
+                amount = it != variables_.end() ? it->second : 0;
+            }
+            const auto op = number(effect, "operation", 2);
+            if (op == 1) {
+                target->spend(*fqon, target->get_resource(*fqon));
+                if (amount > 0) target->add_resource(*fqon, amount);
+            }
+            else if (op == 3) {
+                if (amount > 0) target->spend(*fqon, std::min(amount, target->get_resource(*fqon)));
+            }
+            else {
+                if (amount > 0) target->add_resource(*fqon, amount);
+                else if (amount < 0) target->spend(*fqon, std::min(-amount, target->get_resource(*fqon)));
+            }
+        }
     }
     else if (type == 16) {
         std::lock_guard lock{input_mutex_};
         camera_ = coord::scene3{double(number(effect, "location_x")), double(number(effect, "location_y")), 0};
     }
     else if (type == 2) {
-        const auto technology = config_.at("technologies").at(std::to_string(number(effect, "technology"))).as_string();
-        if (not gamestate::event::force_scenario_research(*state_, player(number(effect, "source_player")), technology, at)) {
-            throw std::runtime_error{"Original technology could not be applied: " + technology};
+        const auto tech_id = number(effect, "technology");
+        const auto key = std::to_string(tech_id);
+        const auto target_player = player(number(effect, "source_player"));
+        this->researched_techs_[target_player].insert(tech_id);
+        const auto &techs = config_.at("technologies");
+        if (techs.has(key)) {
+            const auto technology = techs.at(key).as_string();
+            try {
+                if (not gamestate::event::force_scenario_research(*state_, target_player, technology, at)) {
+                    log::log(MSG(warn) << "OriginalScenario: technology could not be applied: " << technology);
+                }
+            }
+            catch (const std::exception &err) {
+                log::log(MSG(warn) << "OriginalScenario: technology '" << technology << "' failed: " << err.what());
+            }
+        }
+        else {
+            log::log(MSG(warn) << "OriginalScenario: unmapped technology id " << tech_id);
         }
     }
-    else if (type == 11) {
+    else if (type == 11 or type == 49) {
         const auto unit_id = number(effect, "object_list_unit_id");
-        const auto &data = config_.at("definitions").at(std::to_string(unit_id));
-        const auto target = player(number(effect, "source_player"));
-        auto entity = factory_->add_game_entity(loop, state_, target, text(data, "fqon"));
-        entity->genie_id = unit_id;
-        coord::phys3 point{coord::phys_t::from_double(number(effect, "location_x")), coord::phys_t::from_double(number(effect, "location_y")), 0};
-        point.up = coord::phys_t::from_double(state_->get_map()->get_terrain()->height_at(point.ne.to_double(), point.se.to_double()));
-        entity->try_get_component_as<gamestate::component::Position>(component_t::POSITION)->set_position(at, point);
-        entity->try_get_component_as<gamestate::component::Ownership>(component_t::OWNERSHIP)->set_owner(at, target);
-        state_->add_game_entity(entity);
-        gamestate::register_entity_in_dynamic_occupancy(*state_->get_map(), *entity, point.ne.to_double(), point.se.to_double());
-        if (auto activity = entity->try_get_component_as<gamestate::component::Activity>(component_t::ACTIVITY)) {
-            activity->init(at);
-            entity->get_manager()->run_activity_system(at);
-        }
-        state_->register_named_entity("created_" + std::to_string(created_++), entity->get_id());
-        if (const auto *meta = this->definition(*entity); meta and meta->capturable) {
-            this->capturable_entities_.push_back(entity->get_id());
+        const auto key = std::to_string(unit_id);
+        if (unit_id >= 0 and config_.at("definitions").has(key)) {
+            const auto &data = config_.at("definitions").at(key);
+            const auto target = player(number(effect, "source_player"));
+            std::string fqon = text(data, "fqon");
+            if (fqon == "de2_base.data.game_entity.generic.fire_trireme.fire_trireme.FireTrireme") {
+                fqon = "de2_base.data.game_entity.generic.fire_galley.fire_galley.FireGalley";
+            }
+            else if (fqon == "de2_base.data.game_entity.generic.demo_ship.demo_ship.DemolitionShip") {
+                fqon = "de2_base.data.game_entity.generic.demolition_raft.demolition_raft.DemolitionRaft";
+            }
+            auto entity = factory_->add_game_entity(loop, state_, target, fqon);
+            entity->genie_id = unit_id;
+            const auto map_size = state_->get_map()->get_size();
+            const double lx = std::clamp(double(number(effect, "location_x", 0)), 0.0, std::max(0.0, double(map_size[0]) - 0.01));
+            const double ly = std::clamp(double(number(effect, "location_y", 0)), 0.0, std::max(0.0, double(map_size[1]) - 0.01));
+            coord::phys3 point{coord::phys_t::from_double(lx), coord::phys_t::from_double(ly), 0};
+            point.up = coord::phys_t::from_double(state_->get_map()->get_terrain()->height_at(point.ne.to_double(), point.se.to_double()));
+            entity->try_get_component_as<gamestate::component::Position>(component_t::POSITION)->set_position(at, point);
+            entity->try_get_component_as<gamestate::component::Ownership>(component_t::OWNERSHIP)->set_owner(at, target);
+            state_->add_game_entity(entity);
+            gamestate::register_entity_in_dynamic_occupancy(*state_->get_map(), *entity, point.ne.to_double(), point.se.to_double());
+            if (auto activity = entity->try_get_component_as<gamestate::component::Activity>(component_t::ACTIVITY)) {
+                activity->init(at);
+                entity->get_manager()->run_activity_system(at);
+            }
+            state_->register_named_entity("created_" + std::to_string(created_++), entity->get_id());
+            if (const auto *meta = this->definition(*entity); meta and meta->capturable) {
+                this->capturable_entities_.push_back(entity->get_id());
+            }
         }
     }
-    else if (type == 15) {
+    else if (type == 14 or type == 15) {
         for (const auto &entity : matching(effect, at, true)) {
             loop->create_event("game.removal", entity->get_manager(), state_, at, {{"target_id", entity->get_id()}});
         }
     }
-    else if (type == 12) {
+    else if (type == 18) {
+        const auto target_owner = player(number(effect, "target_player"));
+        for (const auto &entity : matching(effect, at, true)) {
+            if (auto own = entity->try_get_component_as<gamestate::component::Ownership>(component_t::OWNERSHIP)) {
+                own->set_owner(at, target_owner);
+            }
+        }
+    }
+    else if (type == 12 or type == 19 or type == 30) {
         for (const auto &entity : matching(effect, at, true)) {
             if (not entity->has_component(component_t::MOVE)) continue;
             loop->create_event("game.send_command", entity->get_manager(), state_, at,
@@ -486,7 +701,69 @@ void OriginalScenario::execute(const Value &effect, time::time_t at) {
                                                         coord::phys_t::from_double(number(effect, "location_y")), 0}}});
         }
     }
-    else throw std::invalid_argument{"Unsupported original effect"};
+    else if (type == 24 or type == 34 or type == 27) {
+        const auto amount = number(effect, "quantity", 0);
+        const nyan::fqon_t health = "de2_base.data.util.attribute.types.Health";
+        for (const auto &entity : matching(effect, at, true)) {
+            if (auto live = entity->try_get_component_as<gamestate::component::Live>(component_t::LIVE)) {
+                if (const auto cur = live->get_attribute_value(at, health)) {
+                    int64_t next = *cur;
+                    if (type == 24) next = std::max<int64_t>(0, *cur - amount);
+                    else if (type == 34) {
+                        const auto max_hp = live->get_attribute_max(health).value_or(*cur + amount);
+                        next = std::min(max_hp, *cur + amount);
+                    }
+                    else next = std::max<int64_t>(1, amount);
+                    live->set_attribute(at, health, next);
+                }
+            }
+        }
+    }
+    else if (type == 35) {
+        const auto map_size = state_->get_map()->get_size();
+        const double lx = std::clamp(double(number(effect, "location_x", 0)), 0.0, std::max(0.0, double(map_size[0]) - 0.01));
+        const double ly = std::clamp(double(number(effect, "location_y", 0)), 0.0, std::max(0.0, double(map_size[1]) - 0.01));
+        coord::phys3 point{coord::phys_t::from_double(lx), coord::phys_t::from_double(ly), 0};
+        point.up = coord::phys_t::from_double(state_->get_map()->get_terrain()->height_at(point.ne.to_double(), point.se.to_double()));
+        for (const auto &entity : matching(effect, at, true)) {
+            if (auto pos = entity->try_get_component_as<gamestate::component::Position>(component_t::POSITION)) {
+                pos->set_position(at, point);
+            }
+        }
+    }
+    else if (type == 38 or type == 39) {
+        // Enable/disable object or technology: disable_action when disabling.
+        const auto slot = state_->get_player(player(number(effect, "source_player")));
+        if (number(effect, "quantity", 0) == 0) {
+            if (type == 38) {
+                const auto key = std::to_string(number(effect, "object_list_unit_id"));
+                if (config_.at("definitions").has(key)) {
+                    slot->disable_action(text(config_.at("definitions").at(key), "fqon"));
+                }
+            }
+            else {
+                const auto key = std::to_string(number(effect, "technology"));
+                if (config_.at("technologies").has(key)) {
+                    slot->disable_action(config_.at("technologies").at(key).as_string());
+                }
+            }
+        }
+    }
+    else if (type == 0 or type == 4 or type == 6 or type == 7 or type == 10 or type == 17 or type == 22
+             or type == 25 or type == 26 or type == 28 or type == 29 or type == 31 or type == 32 or type == 33
+             or type == 36 or type == 37 or type == 40 or type == 41 or type == 42 or type == 43 or type == 44
+             or type == 45 or type == 46 or type == 47 or type == 48 or type == 50 or type == 51 or type == 54
+             or type == 55 or type == 57 or type == 58 or type == 59 or type == 60 or type == 61 or type == 62
+             or type == 63 or type == 64 or type == 65 or type == 66 or type == 69 or type == 70 or type == 71
+             or type == 72 or type == 73 or type == 74 or type == 79 or type == 80 or type == 86 or type == 87
+             or type == 88 or type == 89 or type == 90 or type == 91 or type == 98 or type == 99 or type == 100
+             or type == 101 or type == 102 or type == 103 or type == 104 or type == 105 or type == 106 or type == 107
+             or type == 108 or type == 109) {
+        // Sound, UI/visual/naming, gate lock, or stat-modifier effects not yet modeled in runtime.
+    }
+    else {
+        log::log(MSG(warn) << "OriginalScenario: unhandled effect_type " << type);
+    }
     changed(at);
 }
 

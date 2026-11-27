@@ -4,10 +4,12 @@
 
 #include <eigen3/Eigen/Dense>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -38,7 +40,6 @@
 #include "gamestate/terrain.h"
 #include "gamestate/terrain_chunk.h"
 #include "coord/tile.h"
-#include "renderer/gui/guisys/public/gui_input.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/event/economy_action.h"
 #include "gamestate/event/send_command.h"
@@ -66,6 +67,7 @@
 #include "renderer/render_target.h"
 #include "renderer/resources/assets/asset_manager.h"
 #include "renderer/resources/shader_source.h"
+#include "renderer/resources/texture_data.h"
 #include "renderer/resources/texture_info.h"
 #include "renderer/stages/camera/manager.h"
 #include "renderer/stages/hud/render_stage.h"
@@ -78,6 +80,8 @@
 #include "time/clock.h"
 #include "util/path.h"
 #include "presenter/viewmodel/selection_model.h"
+
+import openage.util.startup_trace;
 
 
 namespace openage::presenter {
@@ -116,9 +120,11 @@ struct Presenter::HudCache {
 	bool has_selection_snapshot{false};
 	QVariantList last_cards;
 	QVariantList last_actions;
+	QVariantList last_production_queue;
 	int last_construction{-1};
 	bool last_can_stop{false};
 	QString last_action_status;
+	uint64_t last_feedback_seq{0};
 	int last_idle_villagers{-1};
 	bool has_diplomacy_snapshot{false};
 	QVariantList last_diplomacy;
@@ -154,14 +160,12 @@ void Presenter::run() {
 	}
 
 	while (not this->window->should_close()) {
-		this->gui_app->process_events();
-		// TODO: pass button presses and events from GUI to controller
-
-		this->render();
-
-		this->renderer->check_error();
-
+		this->frame_rendered = false;
 		this->window->update();
+		this->gui_app->process_events();
+		if (not this->frame_rendered and not this->window->should_close()) {
+			std::this_thread::sleep_for(std::chrono::milliseconds{1});
+		}
 	}
 
 	log::log(MSG(info) << "Presenter: Draw loop exited");
@@ -181,6 +185,8 @@ void Presenter::init_all() {
 	if (this->initialized) {
 		return;
 	}
+	this->startup_origin_ns = timing::get_monotonic_time();
+	util::StartupTraceScope total_trace{"presenter.init_all.total"};
 	log::log(MSG(info) << "Presenter: pre-flight init_all() (on main thread, "
 	                       "before Engine::loop spawns workers)");
 	this->init_graphics();
@@ -209,87 +215,118 @@ void Presenter::init_graphics() {
 	log::log(INFO << "Presenter: Initializing graphics subsystems...");
 
 	// Start up rendering framework
-	this->gui_app = this->init_window_system();
+	{
+		util::StartupTraceScope trace{"presenter.qt_app"};
+		this->gui_app = this->init_window_system();
+		ENSURE(this->gui_app != nullptr, "Presenter::init_graphics: failed to create GuiApplication.");
+	}
 
 	// Window and renderer
-	this->window = renderer::Window::create("openage presenter test", this->window_settings);
-	this->renderer = this->window->make_renderer();
+	{
+		util::StartupTraceScope trace{"presenter.window"};
+		this->window = renderer::Window::create("openage presenter test", this->window_settings);
+		ENSURE(this->window != nullptr, "Presenter::init_graphics: failed to create Window.");
+	}
+	{
+		util::StartupTraceScope trace{"presenter.renderer"};
+		this->renderer = this->window->make_renderer();
+		ENSURE(this->renderer != nullptr, "Presenter::init_graphics: failed to create Renderer.");
+	}
 
-	// Asset mangement
-	this->asset_manager = std::make_shared<renderer::resources::AssetManager>(
-		this->renderer,
-		this->root_dir / "assets" / "converted");
-	auto missing_tex = this->root_dir / "assets" / "test" / "textures" / "test_missing.sprite";
-	this->asset_manager->set_placeholder_animation(missing_tex);
-	auto fallback_terrain = this->root_dir / "assets" / "test" / "textures" / "test_terrain.terrain";
-	this->asset_manager->set_placeholder_terrain(fallback_terrain);
+	// Asset management
+	{
+		util::StartupTraceScope trace{"presenter.asset_manager"};
+		this->asset_manager = std::make_shared<renderer::resources::AssetManager>(
+			this->renderer,
+			this->root_dir / "assets" / "converted");
+		auto missing_tex = this->root_dir / "assets" / "test" / "textures" / "test_missing.sprite";
+		this->asset_manager->set_placeholder_animation(missing_tex);
+		auto fallback_terrain = this->root_dir / "assets" / "test" / "textures" / "test_terrain.terrain";
+		this->asset_manager->set_placeholder_terrain(fallback_terrain);
+	}
 
-	// Camera
-	this->camera = std::make_shared<renderer::camera::Camera>(this->renderer, this->window->get_size());
-	this->camera->look_at_coord(coord::scene3{10.0, 10.0, 0}); // Center camera on the map
-	this->window->add_resize_callback([this](size_t w, size_t h, double /*scale*/) {
-		this->camera->resize(w, h);
-	});
+	// Camera and camera manager
+	{
+		util::StartupTraceScope trace{"presenter.camera"};
+		this->camera = std::make_shared<renderer::camera::Camera>(this->renderer, this->window->get_size());
+		ENSURE(this->camera != nullptr, "Presenter::init_graphics: failed to create Camera.");
+		this->camera->look_at_coord(coord::scene3{10.0, 10.0, 0}); // Center camera on the map
+		this->window->add_resize_callback([this](size_t w, size_t h, double /*scale*/) {
+			this->camera->resize(w, h);
+		});
 
-	// Camera manager
-	this->camera_manager = std::make_shared<renderer::camera::CameraManager>(this->camera);
-	// TODO: Make boundaries dynamic based on map size.
-	this->camera_manager->set_camera_boundaries(
-		renderer::camera::CameraBoundaries{
-			renderer::camera::X_BOUND_MIN,
-			renderer::camera::X_BOUND_MAX,
-			renderer::camera::Y_BOUND_MIN,
-			renderer::camera::Y_BOUND_MAX,
-			renderer::camera::Z_BOUND_MIN,
-			renderer::camera::Z_BOUND_MAX});
+		this->camera_manager = std::make_shared<renderer::camera::CameraManager>(this->camera);
+		// TODO: Make boundaries dynamic based on map size.
+		this->camera_manager->set_camera_boundaries(
+			renderer::camera::CameraBoundaries{
+				renderer::camera::X_BOUND_MIN,
+				renderer::camera::X_BOUND_MAX,
+				renderer::camera::Y_BOUND_MIN,
+				renderer::camera::Y_BOUND_MAX,
+				renderer::camera::Z_BOUND_MIN,
+				renderer::camera::Z_BOUND_MAX});
+	}
 
-	// Skybox
-	this->skybox_renderer = std::make_shared<renderer::skybox::SkyboxRenderStage>(
-		this->window,
-		this->renderer,
-		this->root_dir["assets"]["shaders"]);
-	this->skybox_renderer->set_color(0.035f, 0.045f, 0.05f, 1.0f);
-	this->render_passes.push_back(this->skybox_renderer->get_render_pass());
+	// Render stages
+	{
+		util::StartupTraceScope trace{"presenter.render_stages"};
+		ENSURE(this->time_loop != nullptr, "Presenter::init_graphics: TimeLoop must not be null.");
 
-	// Terrain
-	this->terrain_renderer = std::make_shared<renderer::terrain::TerrainRenderStage>(
-		this->window,
-		this->renderer,
-		this->camera,
-		this->root_dir["assets"]["shaders"],
-		this->asset_manager,
-		this->time_loop->get_clock());
-	this->render_passes.push_back(this->terrain_renderer->get_render_pass());
+		// Skybox
+		this->skybox_renderer = std::make_shared<renderer::skybox::SkyboxRenderStage>(
+			this->window,
+			this->renderer,
+			this->root_dir["assets"]["shaders"]);
+		this->skybox_renderer->set_color(0.035f, 0.045f, 0.05f, 1.0f);
+		this->render_passes.push_back(this->skybox_renderer->get_render_pass());
 
-	// Units/buildings
-	this->world_renderer = std::make_shared<renderer::world::WorldRenderStage>(
-		this->window,
-		this->renderer,
-		this->camera,
-		this->root_dir["assets"]["shaders"],
-		this->asset_manager,
-		this->time_loop->get_clock());
-	this->render_passes.push_back(this->world_renderer->get_render_pass());
+		// Terrain
+		this->terrain_renderer = std::make_shared<renderer::terrain::TerrainRenderStage>(
+			this->window,
+			this->renderer,
+			this->camera,
+			this->root_dir["assets"]["shaders"],
+			this->asset_manager,
+			this->time_loop->get_clock());
+		this->render_passes.push_back(this->terrain_renderer->get_render_pass());
 
-	// HUD
-	this->hud_renderer = std::make_shared<renderer::hud::HudRenderStage>(
-		this->window,
-		this->renderer,
-		this->camera,
-		this->root_dir["assets"]["shaders"],
-		this->asset_manager,
-		this->time_loop->get_clock());
-	this->render_passes.push_back(this->hud_renderer->get_render_pass());
+		// HUD (initialized before world pass so ground selection rings composite beneath units/buildings)
+		this->hud_renderer = std::make_shared<renderer::hud::HudRenderStage>(
+			this->window,
+			this->renderer,
+			this->camera,
+			this->root_dir["assets"]["shaders"],
+			this->asset_manager,
+			this->time_loop->get_clock());
+		this->render_passes.push_back(this->hud_renderer->get_selection_ring_render_pass());
 
-	// World-space selection overlay pass. Composites on top of
-	// terrain/units/HUD but under the GUI. Owns its own FBO so the
-	// drag-rect pass lifecycle is undisturbed.
-	this->render_passes.push_back(this->hud_renderer->get_selection_render_pass());
+		// Units/buildings
+		this->world_renderer = std::make_shared<renderer::world::WorldRenderStage>(
+			this->window,
+			this->renderer,
+			this->camera,
+			this->root_dir["assets"]["shaders"],
+			this->asset_manager,
+			this->time_loop->get_clock());
+		this->render_passes.push_back(this->world_renderer->get_render_pass());
 
-	this->init_gui();
-	this->init_final_render_pass();
+		// Drag selection box and health bar overlays (composited above units/buildings, under GUI)
+		this->render_passes.push_back(this->hud_renderer->get_render_pass());
+		this->render_passes.push_back(this->hud_renderer->get_selection_render_pass());
+	}
+
+	{
+		util::StartupTraceScope trace{"presenter.gui"};
+		this->init_gui();
+	}
+	{
+		util::StartupTraceScope trace{"presenter.final_pass"};
+		this->init_final_render_pass();
+		ENSURE(this->screen_renderer != nullptr, "Presenter::init_graphics: failed to create ScreenRenderStage.");
+	}
 
 	if (this->simulation) {
+		util::StartupTraceScope trace{"presenter.attach_renderer"};
 		auto render_factory = std::make_shared<renderer::RenderFactory>(this->terrain_renderer, this->world_renderer);
 		this->simulation->attach_renderer(render_factory);
 	}
@@ -366,20 +403,16 @@ void Presenter::init_gui() {
 
 	this->gui = std::make_shared<renderer::gui::GUI>(
 		this->gui_app, // Qt application wrapper
-		this->window,  // window for the gui
+		this->window,  // host QQuickWindow for the gui
 		qml_root_file, // entry qml file, absolute path.
 		qml_root,      // directory to watch for qml file changes
-		qml_assets,    // qml data: Engine *, the data directory, ...
-		this->renderer,
 		"missionHud",
 		this->mission_hud.get()
 	);
-
-	auto gui_pass = this->gui->get_render_pass();
-	this->render_passes.push_back(gui_pass);
 }
 
 void Presenter::init_input() {
+	util::StartupTraceScope trace{"presenter.init_input"};
 	log::log(INFO << "Presenter: Initializing input subsystem...");
 	Is_True(this->window != nullptr, ("Presenter::init_input: window is null"));
 
@@ -399,7 +432,6 @@ void Presenter::init_input() {
 						return;
 					}
 				}
-				this->gui->get_input_handler()->process(std::shared_ptr<QEvent>(ev.clone()));
 				return;
 			}
 			if (this->mission_hud->menu_open()) {
@@ -407,20 +439,31 @@ void Presenter::init_input() {
 					this->mission_hud->closeMenu();
 					return;
 				}
-				this->gui->get_input_handler()->process(std::shared_ptr<QEvent>(ev.clone()));
 				return;
 			}
 			if (ev.type() == QEvent::KeyPress and ev.key() == Qt::Key_Escape) {
-				if (this->pending_build) {
+				if (this->pending_repair) {
+					this->pending_repair.reset();
+				}
+				else if (this->pending_build) {
 					this->pending_build.reset();
 				}
+				else if (this->mission_hud->backCommands()) {
+					return;
+				}
 				else {
+					if (this->camera_manager) {
+						this->camera_manager->set_move_motion_dirs(0);
+					}
 					this->mission_hud->toggleMenu();
 				}
 				return;
 			}
 			if (ev.type() == QEvent::KeyPress
 			    and (ev.key() == Qt::Key_Return or ev.key() == Qt::Key_Enter)) {
+				if (this->camera_manager) {
+					this->camera_manager->set_move_motion_dirs(0);
+				}
 				this->mission_hud->openChat();
 				return;
 			}
@@ -439,6 +482,31 @@ void Presenter::init_input() {
 		    and std::exchange(this->placement_pressed, false)) {
 			return;
 		}
+		if (this->pending_repair and not over_hud and ev.type() == QEvent::MouseButtonPress) {
+			if (ev.button() == Qt::RightButton) {
+				this->pending_repair.reset();
+				return;
+			}
+			if (ev.button() == Qt::LeftButton) {
+				const coord::input mouse{static_cast<int>(point.x()), static_cast<int>(point.y())};
+				const auto state = this->simulation->get_game()->get_state();
+				const auto now = this->time_loop->get_clock()->get_time();
+				const auto viewer = this->game_controller->get_controlled();
+				const auto selected = this->game_controller->get_selected();
+				const auto target = input::game::command_target(state, mouse.to_phys3(this->camera),
+				                                                 this->world_renderer->pick(mouse.x, mouse.y), viewer, now);
+				if (target and std::ranges::find(selected, *this->pending_repair) != selected.end()) {
+					for (auto actor : selected) {
+						this->simulation->get_event_loop()->create_event("game.economy_action", this->simulation->get_commander(), state, now, {
+							{"actor", actor}, {"issuer", gamestate::player_id_t{viewer}}, {"repair_target", *target},
+						});
+					}
+					this->pending_repair.reset();
+				}
+				this->placement_pressed = true;
+				return;
+			}
+		}
 		if (this->pending_build and not over_hud and ev.type() == QEvent::MouseButtonPress) {
 			if (ev.button() == Qt::RightButton) {
 				this->pending_build.reset();
@@ -447,7 +515,7 @@ void Presenter::init_input() {
 			if (ev.button() == Qt::LeftButton) {
 				const auto [actor, option] = *this->pending_build;
 				const auto selected = this->game_controller->get_selected();
-				if (selected.size() == 1 and selected.front() == actor) {
+				if (std::ranges::find(selected, actor) != selected.end()) {
 					const coord::input mouse{static_cast<int>(point.x()), static_cast<int>(point.y())};
 					this->send_economy_action(actor, option, mouse.to_phys3(this->camera));
 				}
@@ -456,19 +524,11 @@ void Presenter::init_input() {
 				return;
 			}
 		}
-		if (ev.button() == Qt::LeftButton) {
-			if (ev.type() == QEvent::MouseButtonPress or ev.type() == QEvent::MouseButtonDblClick) {
-				this->mission_ui_pressed = over_hud;
-			}
-			if (this->mission_ui_pressed) {
-				this->gui->get_input_handler()->process(std::shared_ptr<QEvent>(ev.clone()));
-				if (ev.type() == QEvent::MouseButtonRelease) {
-					this->mission_ui_pressed = false;
-				}
-				return;
-			}
-		}
-		else if (over_hud) {
+		const bool active_drag = ev.button() == Qt::LeftButton
+		                       and ev.type() == QEvent::MouseButtonRelease
+		                       and this->game_controller
+		                       and this->game_controller->has_drag_select_start();
+		if (over_hud and not active_drag) {
 			return;
 		}
 		this->input_manager->set_mouse(point.x(), point.y());
@@ -496,14 +556,11 @@ void Presenter::init_input() {
 			static const auto sword = attack_cursor();
 			this->window->get_qt_window()->setCursor(attacking ? sword : QCursor(Qt::ArrowCursor));
 		}
-		if (this->mission_ui_pressed or over_hud) {
-			this->gui->get_input_handler()->process(std::shared_ptr<QEvent>(ev.clone()));
-			if (this->mission_ui_pressed or (this->mission_hud and this->mission_hud->menu_open())) {
-				if (this->camera_manager) {
-					this->camera_manager->set_move_motion_dirs(0);
-				}
-				return;
+		if (this->mission_hud and this->mission_hud->menu_open()) {
+			if (this->camera_manager) {
+				this->camera_manager->set_move_motion_dirs(0);
 			}
+			return;
 		}
 		this->input_manager->set_mouse(mouse.x, mouse.y);
 		this->input_manager->process(ev);
@@ -511,10 +568,23 @@ void Presenter::init_input() {
 	this->window->add_mouse_wheel_callback([this](const QWheelEvent &ev) {
 		const auto size = this->window->get_size();
 		if (this->mission_hud and this->mission_hud->is_interactive(ev.position().x(), ev.position().y(), size[0], size[1])) {
-			this->gui->get_input_handler()->process(std::shared_ptr<QEvent>(ev.clone()));
 			return;
 		}
 		this->input_manager->process(ev);
+	});
+	this->window->add_focus_lost_callback([this](bool deactivated) {
+		if (this->camera_manager) {
+			this->camera_manager->set_move_motion_dirs(0);
+		}
+		if (deactivated) {
+			this->placement_pressed = false;
+			if (this->hud_renderer) {
+				this->hud_renderer->remove_drag_entity();
+			}
+			if (this->game_controller) {
+				this->game_controller->reset_drag_select();
+			}
+		}
 	});
 
 	auto input_ctx = this->input_manager->get_global_context();
@@ -560,6 +630,7 @@ void Presenter::init_input() {
 			this->mission_hud->set_saves_dir(gamestate::GameSaveManager::directory(this->root_dir));
 			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::game_loaded, [this] {
 				this->pending_build.reset();
+				this->pending_repair.reset();
 				this->game_controller->set_selected({});
 			});
 			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::quit_requested, [this] {
@@ -573,11 +644,35 @@ void Presenter::init_input() {
 			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::action_requested,
 			                 [this](const QString &option, bool build) {
 				const auto selected = this->game_controller->get_selected();
-				if (selected.size() == 1) {
+				if (not selected.empty()) {
+					this->pending_repair.reset();
+					if (option == QStringLiteral("command.repair")) {
+						this->pending_build.reset();
+						this->pending_repair = selected.front();
+						return;
+					}
 					if (build) {
+						bool available = true;
+						bool affordable = true;
+						for (const auto &item : this->mission_hud->action_options()) {
+							const auto map = item.toMap();
+							if (map.value(QStringLiteral("id")).toString() == option) {
+								available = map.value(QStringLiteral("available"), true).toBool();
+								affordable = map.value(QStringLiteral("affordable"), true).toBool();
+								break;
+							}
+						}
+						if (not available) {
+							this->mission_hud->show_toast(QObject::tr("Prerequisites are missing."));
+							return;
+						}
+						if (not affordable) {
+							this->mission_hud->show_toast(QObject::tr("Not enough resources."));
+							return;
+						}
 						this->pending_build = {selected.front(), option.toStdString()};
 					}
-					else {
+					else if (selected.size() == 1) {
 						this->pending_build.reset();
 						const bool shift_held = (QGuiApplication::keyboardModifiers() & Qt::ShiftModifier) != 0;
 						bool is_train = false;
@@ -596,6 +691,20 @@ void Presenter::init_input() {
 					}
 				}
 			});
+			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::cancel_queue_requested, [this](int index) {
+				const auto selected = this->game_controller->get_selected();
+				if (selected.size() == 1 and index >= 0) {
+					this->simulation->get_event_loop()->create_event(
+						"game.economy_action", this->simulation->get_commander(),
+						this->simulation->get_game()->get_state(),
+						this->time_loop->get_clock()->get_time(),
+						{
+							{"actor", selected.front()},
+							{"issuer", gamestate::player_id_t{this->game_controller->get_controlled()}},
+							{"cancel_index", static_cast<int64_t>(index)},
+						});
+				}
+			});
 			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::card_requested, [this](int index) {
 				const auto cards = this->mission_hud->selection_cards();
 				if (index >= 0 and index < cards.size()) {
@@ -607,6 +716,8 @@ void Presenter::init_input() {
 				}
 			});
 			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::clear_requested, [this] {
+				this->pending_repair.reset();
+				this->pending_build.reset();
 				this->game_controller->set_selected({});
 			});
 			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::idle_villager_requested, [this] {
@@ -623,6 +734,8 @@ void Presenter::init_input() {
 				});
 			});
 			QObject::connect(this->mission_hud.get(), &HudQmlAdapter::stop_requested, [this] {
+				this->pending_repair.reset();
+				this->pending_build.reset();
 				event::EventHandler::param_map::map_t params{
 					{"type", gamestate::component::command::command_t::IDLE},
 					{"issuer", gamestate::player_id_t{this->game_controller->get_controlled()}},
@@ -652,12 +765,6 @@ void Presenter::init_input() {
 					this->time_loop->get_clock()->get_time(), params);
 			});
 		}
-	}
-
-	// attach GUI if it's initialized
-	if (this->gui) {
-		log::log(INFO << "Loading GUI controls");
-		this->input_manager->set_gui(this->gui->get_input_handler());
 	}
 
 	// setup camera controls
@@ -786,6 +893,34 @@ void Presenter::init_final_render_pass() {
 		}
 		this->screen_renderer->set_render_targets(targets);
 	});
+
+	this->window->set_render_callback([this]() {
+		this->render();
+		this->renderer->check_error();
+		this->frame_rendered = true;
+		if (not this->first_frame_logged) {
+			this->first_frame_logged = true;
+			util::log_startup_milestone("presenter.first_frame", this->startup_origin_ns);
+		}
+	});
+
+	this->window->set_post_render_callback([this]() {
+		// Captures the full framebuffer (OpenGL underlay + QML overlay) once at
+		// frame 60 when OPENAGE_DEBUG_SCREENSHOT is set.
+		if (const char *shot_env = std::getenv("OPENAGE_DEBUG_SCREENSHOT")) {
+			if (shot_env[0] != '\0') {
+				static int m1_frame = 0;
+				if (++m1_frame == 60) {
+					std::string shot{shot_env};
+					auto tex = this->render_passes.back()->get_target()->into_data().flip_y();
+					auto size = tex.get_info().get_size();
+					QImage qimg{tex.get_data(), size.first, size.second, QImage::Format_RGBA8888};
+					qimg.save(shot.c_str());
+					log::log(MSG(info) << "M1: screenshot saved to " << shot);
+				}
+			}
+		}
+	});
 }
 
 void Presenter::send_economy_action(gamestate::entity_id_t actor, const nyan::fqon_t &option,
@@ -796,6 +931,7 @@ void Presenter::send_economy_action(gamestate::entity_id_t actor, const nyan::fq
 	};
 	if (position) {
 		params.emplace("position", *position);
+		params.emplace("builders", this->game_controller->get_selected());
 	}
 	this->simulation->get_event_loop()->create_event(
 		"game.economy_action", this->simulation->get_commander(), this->simulation->get_game()->get_state(),
@@ -855,12 +991,21 @@ void Presenter::update_campaign_map() {
 		this->hud_cache->last_idle_villagers = idle_villager_count;
 		this->mission_hud->set_idle_villagers(idle_villager_count);
 	}
-	const QString action_status = this->pending_build
+	const auto feedback_event = state->action_feedback_event(viewer);
+	const QString action_status = this->pending_repair
+	                                ? QObject::tr("Left-click a damaged building to repair. Right-click to cancel.")
+	                                : this->pending_build
 	                                ? QObject::tr("Left-click to place the building. Right-click to cancel.")
-	                                : QString::fromStdString(state->action_feedback(viewer));
+	                                : QString::fromStdString(feedback_event.message);
 	if (action_status != this->hud_cache->last_action_status) {
 		this->hud_cache->last_action_status = action_status;
 		this->mission_hud->set_action_status(action_status);
+	}
+	if (feedback_event.seq != 0 and feedback_event.seq != this->hud_cache->last_feedback_seq) {
+		this->hud_cache->last_feedback_seq = feedback_event.seq;
+		if (feedback_event.is_error and not feedback_event.message.empty()) {
+			this->mission_hud->show_toast(QString::fromStdString(feedback_event.message));
+		}
 	}
 
 	QVariantList relations;
@@ -1029,8 +1174,19 @@ void Presenter::render() {
 		};
 		QVariantList cards;
 		QVariantList actions;
+		QVariantList production_queue;
 		bool can_stop = false;
 		int construction = -1;
+		const auto economy_handler = this->simulation->get_economy_handler();
+		const bool builders_selected = not selected.empty() and std::ranges::all_of(selected, [&](gamestate::entity_id_t id) {
+			if (not state->has_game_entity(id)) {
+				return false;
+			}
+			const auto entity = state->get_game_entity(id);
+			const auto ownership = entity->try_get_component_as<gamestate::component::Ownership>(gamestate::component::component_t::OWNERSHIP);
+			return not entity->is_dead() and entity->construct_ability and ownership
+			    and ownership->get_owners().get(simulation_time) == player;
+		});
 		for (auto id : selected) {
 			if (not state->has_game_entity(id) or not state->can_see(player, id)) {
 				continue;
@@ -1078,13 +1234,40 @@ void Presenter::render() {
 			if (ownership and owner == player) {
 				can_stop = can_stop or entity->has_component(gamestate::component::component_t::MOVE)
 				                    or entity->has_component(gamestate::component::component_t::ATTACK);
-				if (selected.size() == 1) {
+				if (selected.size() == 1 or (builders_selected and id == selected.front())) {
 					if (build and build->get_progress() < 100) {
 						construction = static_cast<int>(build->get_progress());
 					}
 					if (not build or not build->is_under_construction()) {
+						std::unordered_map<std::string, int> queued_counts;
+						if (economy_handler) {
+							const auto entries = economy_handler->queue_snapshot(id, simulation_time);
+							for (const auto &entry : entries) {
+								++queued_counts[entry.option.id];
+								const int pct = static_cast<int>(std::round(entry.progress * 100.0));
+								production_queue.append(QVariantMap{
+									{"name", entry.option.kind == gamestate::ActionKind::Transform
+										? (entity->unpacked ? QStringLiteral("Pack") : QStringLiteral("Unpack"))
+										: object_label(entry.option.subject)},
+									{"icon", icon_url(entry.option.kind == gamestate::ActionKind::Transform
+										? (entity->unpacked ? "command.pack" : "command.unpack")
+										: entry.option.subject)},
+									{"research", entry.option.kind == gamestate::ActionKind::Research},
+									{"transform", entry.option.kind == gamestate::ActionKind::Transform},
+									{"active", entry.active},
+									{"progress", pct},
+								});
+							}
+						}
 						const auto owner_player = state->get_player(owner);
+						if (entity->repair_ability) {
+							actions.append(QVariantMap{{"id", "command.repair"}, {"name", QObject::tr("Repair")},
+							                           {"command", true}, {"enabled", true}});
+						}
 						for (const auto &option : entity->action_options) {
+							if (selected.size() > 1 and option.kind != gamestate::ActionKind::Build) {
+								continue;
+							}
 							if (owner_player and not owner_player->allows_action(option.subject)) {
 								continue;
 							}
@@ -1092,8 +1275,12 @@ void Presenter::render() {
 							    and owner_player and owner_player->has_researched(option.subject)) {
 								continue;
 							}
-							const bool available = not owner_player
-							                    or gamestate::event::action_available(option, *state, *owner_player, simulation_time);
+							const bool research_queued = option.kind == gamestate::ActionKind::Research
+							                          and economy_handler
+							                          and economy_handler->is_research_queued(owner, option.subject);
+							const bool available = not research_queued
+							                    and (not owner_player
+							                         or gamestate::event::action_available(option, *state, *owner_player, simulation_time));
 							bool affordable = true;
 							QStringList cost;
 							QVariantList cost_items;
@@ -1110,6 +1297,7 @@ void Presenter::render() {
 									});
 								}
 							}
+							const auto qit = queued_counts.find(option.id);
 							actions.append(QVariantMap{
 								{"id", QString::fromStdString(option.id)},
 								{"icon", icon_url(option.kind == gamestate::ActionKind::Transform
@@ -1118,12 +1306,16 @@ void Presenter::render() {
 									? (entity->unpacked ? QStringLiteral("Pack") : QStringLiteral("Unpack"))
 									: object_label(option.subject)},
 								{"build", option.kind == gamestate::ActionKind::Build},
+								{"category", state->command_categories.contains(option.subject)
+								                 ? QString::fromStdString(state->command_categories.at(option.subject)) : QString{}},
 								{"research", option.kind == gamestate::ActionKind::Research},
 								{"transform", option.kind == gamestate::ActionKind::Transform},
 								{"detail", cost.join(QStringLiteral(" · "))},
 								{"costs", cost_items},
 								{"available", available},
 								{"affordable", affordable},
+								{"queued", research_queued},
+								{"queuedCount", qit != queued_counts.end() ? qit->second : 0},
 								{"enabled", available and affordable},
 							});
 						}
@@ -1145,38 +1337,18 @@ void Presenter::render() {
 				this->mission_hud->set_selection_details(std::move(cards), std::move(actions), construction, can_stop,
 					{{"stop", icon_url("command.stop")}, {"cancel", icon_url("command.cancel")}});
 			}
+			if (production_queue != this->hud_cache->last_production_queue) {
+				this->hud_cache->last_production_queue = production_queue;
+				this->mission_hud->set_production_queue(std::move(production_queue));
+			}
 		}
 	}
 	this->hud_renderer->set_selection_overlays(std::move(quads));
 
 	this->hud_renderer->update();
-	this->gui->render();
 
 	for (auto &pass : this->render_passes) {
 		this->renderer->render(pass);
-	}
-
-	// M1 visibility-spike screenshot hook (TEMPORARY; deletion condition: M6
-	// Gate A signoff, replaced by the acceptance screenshot flow). Gated by
-	// OPENAGE_DEBUG_SCREENSHOT (native path). Captures the framebuffer once at
-	// frame 60 (~1 s) so scenario spawn/init has settled. We read the SCREEN
-	// render target via into_data() (glReadPixels, available on macOS GL 4.1)
-	// instead of renderer->display_into_data(): the latter calls glReadnPixels
-	// which requires GL 4.5 and aborts on macOS (GL caps at 4.1). into_data()
-	// is bottom-origin so flip_y(). The PNG is written via QImage::save with a
-	// native path used by the screenshot acceptance flow.
-	if (const char *shot_env = std::getenv("OPENAGE_DEBUG_SCREENSHOT")) {
-		if (shot_env[0] != '\0') {
-			static int m1_frame = 0;
-			if (++m1_frame == 60) {
-				std::string shot{shot_env};
-				auto tex = this->render_passes.back()->get_target()->into_data().flip_y();
-				auto size = tex.get_info().get_size();
-				QImage qimg{tex.get_data(), size.first, size.second, QImage::Format_RGBA8888};
-				qimg.save(shot.c_str());
-				log::log(MSG(info) << "M1: screenshot saved to " << shot);
-			}
-		}
 	}
 }
 
@@ -1397,12 +1569,7 @@ bool Presenter::handle_gameplay_hotkey(const QKeyEvent &ev) {
 			continue;
 		}
 		if (this->mission_hud) {
-			const auto actions = this->mission_hud->action_options();
-			if (static_cast<int>(idx) < actions.size()) {
-				const auto map = actions[static_cast<int>(idx)].toMap();
-				const auto opt_id = map.value(QStringLiteral("id")).toString();
-				const bool build = map.value(QStringLiteral("build")).toBool();
-				this->mission_hud->requestAction(opt_id, build);
+			if (this->mission_hud->activateCommand(static_cast<int>(idx))) {
 				return true;
 			}
 			if (key == Qt::Key_S and this->mission_hud->can_stop()) {

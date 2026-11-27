@@ -289,9 +289,18 @@ void load_mission_pack_into_game_state(
 	for (size_t i = 0; i < pack.placements.size(); ++i) {
 		const auto &ep = pack.placements[i];
 
+		// Resolve legacy/upgraded ship FQONs that are absent from de2_base.
+		std::string resolved_fqon = ep.entity_definition_fqon;
+		if (resolved_fqon == "de2_base.data.game_entity.generic.fire_trireme.fire_trireme.FireTrireme") {
+			resolved_fqon = "de2_base.data.game_entity.generic.fire_galley.fire_galley.FireGalley";
+		}
+		else if (resolved_fqon == "de2_base.data.game_entity.generic.demo_ship.demo_ship.DemolitionShip") {
+			resolved_fqon = "de2_base.data.game_entity.generic.demolition_raft.demolition_raft.DemolitionRaft";
+		}
+
 		// Resolve the entity FQON. Failure here is the spec §10.1
 		// 'invalid FQON' invariant.
-		resolve_entity_fqon(state, ep.entity_definition_fqon, ep.scenario_object_id);
+		resolve_entity_fqon(state, resolved_fqon, ep.scenario_object_id);
 
 		auto player_it = players_by_id.find(ep.player_id);
 		if (player_it == players_by_id.end()) {
@@ -306,7 +315,7 @@ void load_mission_pack_into_game_state(
 		auto entity = entity_factory->add_game_entity(
 			event_loop, state,
 			static_cast<player_id_t>(ep.player_id),
-			nyan::fqon_t{ep.entity_definition_fqon});
+			nyan::fqon_t{resolved_fqon});
 
 		entity->genie_id = ep.genie_id;
 

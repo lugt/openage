@@ -15,6 +15,8 @@
 #include <QQuickWindow>
 #include <utility>
 
+#include "log/log.h"
+#include "log/message.h"
 #include "renderer/gui/guisys/private/gui_engine_impl.h"
 #include "renderer/gui/guisys/private/gui_renderer_impl.h"
 #include "renderer/gui/guisys/public/gui_engine.h"
@@ -130,7 +132,9 @@ void GuiSubtreeImpl::attach_to(std::shared_ptr<GuiQmlEngine> engine, const QStri
 
 void GuiSubtreeImpl::component_status_changed(QQmlComponent::Status status) {
 	if (QQmlComponent::Error == status) {
-		qCritical("%s", qUtf8Printable(this->root_component->errorString()));
+		const QString err_str = this->root_component->errorString();
+		openage::log::log(MSG(err) << "QML component load error: " << err_str.toStdString());
+		qCritical("%s", qUtf8Printable(err_str));
 		return;
 	}
 

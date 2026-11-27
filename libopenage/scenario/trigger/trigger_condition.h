@@ -99,6 +99,12 @@ public:
 	 * re-evaluated.
 	 */
 	virtual std::vector<DependencyKey> dependencies() const = 0;
+
+	/**
+	 * Whether this condition acts as an OR separator between
+	 * conjunction groups in a trigger's condition list.
+	 */
+	virtual bool is_or_separator() const { return false; }
 };
 
 

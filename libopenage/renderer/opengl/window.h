@@ -8,12 +8,11 @@
 
 
 QT_FORWARD_DECLARE_CLASS(QWindow)
+QT_FORWARD_DECLARE_CLASS(QQuickWindow)
 QT_FORWARD_DECLARE_CLASS(QOpenGLContext)
 
 namespace openage {
 namespace renderer {
-
-class EventHandlingQuickWindow;
 
 namespace opengl {
 
@@ -48,8 +47,14 @@ public:
 	/// Return a pointer to this window's GL context.
 	const std::shared_ptr<opengl::GlContext> &get_context() const;
 
+	/// Return the underlying QQuickWindow used for both OpenGL underlay and QML overlay.
+	const std::shared_ptr<QQuickWindow> &get_quick_window() const;
+
 private:
-	// OpenGL Context in Qt
+	// Main Qt Quick window (same object as Window::window)
+	std::shared_ptr<QQuickWindow> quick_window;
+
+	// OpenGL Context owned by QQuickWindow and wrapped by GlContext
 	std::shared_ptr<opengl::GlContext> context;
 };
 

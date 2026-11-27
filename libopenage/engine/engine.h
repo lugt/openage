@@ -9,6 +9,7 @@
 
 #include "renderer/window.h"
 #include "util/path.h"
+#include "util/timing.h"
 
 
 // TODO: Remove custom jthread definition when clang/libc++ finally supports it
@@ -206,6 +207,11 @@ private:
 	 * Video/audio/input management. Can be nullptr in headless mode.
 	 */
 	std::shared_ptr<presenter::Presenter> presenter;
+
+	/**
+	 * Monotonic timestamp captured at Engine construction for startup milestones.
+	 */
+	time_nsec_t startup_origin_ns{0};
 
 	/**
 	 * True iff `initialize_runtime()` has run to completion. Set true at

@@ -6,6 +6,7 @@
 #include <memory>
 #include <map>
 #include <shared_mutex>
+#include <string>
 #include <optional>
 #include <unordered_map>
 
@@ -45,6 +46,8 @@ class Player;
  */
 class GameState : public openage::event::State {
 public:
+	/** Original build-page categories keyed by the producible building definition. */
+	std::map<std::string, std::string> command_categories;
 	/**
 	 * Create a new game state.
 	 *
@@ -143,8 +146,14 @@ public:
 	int64_t entity_score_value(const GameEntity &entity, player_id_t owner);
 	/** Credit a destroyed or converted enemy; the caller gates duplicate events. */
 	void record_enemy_loss(entity_id_t target, player_id_t killer, time::time_t at);
+	struct ActionFeedback {
+		std::string message;
+		uint64_t seq = 0;
+		bool is_error = false;
+	};
 	std::string action_feedback(player_id_t player) const;
-	void set_action_feedback(player_id_t player, std::string message);
+	ActionFeedback action_feedback_event(player_id_t player) const;
+	void set_action_feedback(player_id_t player, std::string message, bool is_error = false);
 
 	/**
 	 * P4.4C: set the EventLoop handle. The constructor sets it
@@ -302,7 +311,8 @@ private:
 	std::vector<PlayerScore> scores;
 	std::unordered_map<nyan::fqon_t, nyan::fqon_t> score_costs;
 	bool score_costs_initialized = false;
-	std::unordered_map<player_id_t, std::string> economy_feedback;
+	std::unordered_map<player_id_t, ActionFeedback> economy_feedback;
+	uint64_t next_feedback_seq = 1;
 	mutable std::shared_mutex economy_mutex;
 
 	/**

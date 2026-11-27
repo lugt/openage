@@ -14,10 +14,13 @@
 #include "gamestate/component/api/build.h"
 #include "gamestate/component/api/gather.h"
 #include "gamestate/component/api/live.h"
+#include "gamestate/component/api/move.h"
 #include "gamestate/component/internal/activity.h"
+#include "gamestate/component/internal/commands/types.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/entity_factory.h"
+#include "gamestate/event/send_command.h"
 #include "gamestate/api/util.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
@@ -242,6 +245,40 @@ double build_seconds(const GameEntity &worker, const nyan::Object &building) {
 	return 0;
 }
 
+struct RepairSpec {
+	double rate;
+	std::map<nyan::fqon_t, double> cost;
+};
+
+std::optional<RepairSpec> repair_spec(const GameEntity &worker, component::Live &live) {
+	if (not worker.repair_ability or not live.get_resistance()) {
+		return std::nullopt;
+	}
+	for (const auto &resistance : objects(*live.get_resistance(), "Resistance.resistances")) {
+		if (not resistance.extends("engine.resistance.continuous.flat_attribute_change.type.FlatAttributeChangeIncrease")) {
+			continue;
+		}
+		for (const auto &effect : objects(*worker.repair_ability, "ApplyContinuousEffect.effects")) {
+			if (effect.get_object("FlatAttributeChange.type").get_name() != resistance.get_object("FlatAttributeChange.type").get_name()) {
+				continue;
+			}
+			RepairSpec result{effect.get_object("FlatAttributeChange.change_rate").get_float("AttributeRate.rate")
+			                    - resistance.get_object("FlatAttributeChange.block_rate").get_float("AttributeRate.rate"), {}};
+			for (const auto &[type, value] : effect.get_dict("Effect.properties")) {
+				const auto ref = std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr());
+				const auto property = effect.get_view()->get_object(ref->get_name());
+				if (property.extends("engine.effect.property.type.Cost")) {
+					for (const auto &amount : objects(property.get_object("Cost.cost"), "ResourceCost.amount")) {
+						result.cost[amount.get_object("ResourceAmount.type").get_name()] = amount.get_float("ResourceAmount.amount");
+					}
+				}
+			}
+			return result;
+		}
+	}
+	return std::nullopt;
+}
+
 void place(GameState &game, const std::shared_ptr<GameEntity> &entity, player_id_t owner,
            const coord::phys3 &position, const time::time_t &at) {
 	auto component = entity->try_get_component_as<component::Position>(component_t::POSITION);
@@ -261,6 +298,7 @@ void begin_build(openage::event::EventLoop &loop,
                  const std::shared_ptr<GameState> &game, const time::time_t &at,
                  const std::shared_ptr<GameEntity> &worker, GameEntity &site,
                  component::Build &build, double seconds, std::vector<coord::phys3> route) {
+	++worker->repair_order;
 	if (auto gather = worker->try_get_component_as<component::Gather>(component_t::GATHER)) {
 		++gather->order;
 	}
@@ -330,7 +368,7 @@ bool action_available(const ActionOption &option, const GameState &game, const P
 	    and can_start(option, game, player, at);
 }
 
-int64_t EconomyActionHandler::queued_population(player_id_t player) const {
+int64_t EconomyActionHandler::queued_population_locked(player_id_t player) const {
 	int64_t result = 0;
 	for (const auto &[id, queue] : this->jobs) {
 		for (const auto &job : queue) {
@@ -342,9 +380,49 @@ int64_t EconomyActionHandler::queued_population(player_id_t player) const {
 	return result;
 }
 
+int64_t EconomyActionHandler::queued_population(player_id_t player) const {
+	std::lock_guard lock{this->jobs_mutex};
+	return this->queued_population_locked(player);
+}
+
 bool EconomyActionHandler::busy(entity_id_t actor) const {
+	std::lock_guard lock{this->jobs_mutex};
 	const auto found = this->jobs.find(actor);
 	return found != this->jobs.end() and not found->second.empty();
+}
+
+std::vector<EconomyActionHandler::QueueEntry> EconomyActionHandler::queue_snapshot(
+	entity_id_t actor, const time::time_t &at) const {
+	std::lock_guard lock{this->jobs_mutex};
+	std::vector<QueueEntry> result;
+	const auto found = this->jobs.find(actor);
+	if (found == this->jobs.end()) {
+		return result;
+	}
+	result.reserve(found->second.size());
+	for (size_t i = 0; i < found->second.size(); ++i) {
+		const auto &job = found->second[i];
+		double progress = 0.0;
+		if (i == 0) {
+			if (job.duration <= 0.0) {
+				progress = 1.0;
+			}
+			else {
+				progress = std::clamp((at - job.started_at).to_double() / job.duration, 0.0, 1.0);
+			}
+		}
+		result.push_back(QueueEntry{job.option, i == 0, progress});
+	}
+	return result;
+}
+
+bool EconomyActionHandler::is_research_queued(player_id_t player, const nyan::fqon_t &subject) const {
+	std::lock_guard lock{this->jobs_mutex};
+	return std::ranges::any_of(this->jobs, [&](const auto &entry) {
+		return std::ranges::any_of(entry.second, [&](const auto &job) {
+			return job.owner == player and job.option.kind == ActionKind::Research and job.option.subject == subject;
+		});
+	});
 }
 
 bool force_scenario_research(GameState &game, player_id_t id, const nyan::fqon_t &technology, const time::time_t &at) {
@@ -364,15 +442,22 @@ void EconomyActionHandler::invoke(openage::event::EventLoop &loop,
 	const auto id = params.get("actor", entity_id_t{});
 	const auto actor = game->has_game_entity(id) ? game->get_game_entity(id) : nullptr;
 	if (params.get("finish", false)) {
-		auto it = this->jobs.find(id);
-		if (it == this->jobs.end() or it->second.empty()) {
-			return;
+		std::optional<Job> finished_job;
+		{
+			std::lock_guard lock{this->jobs_mutex};
+			auto it = this->jobs.find(id);
+			if (it == this->jobs.end() or it->second.empty()) {
+				return;
+			}
+			if (params.check_type<uint64_t>("token")
+			    and it->second.front().token != params.get("token", uint64_t{0})) {
+				return;
+			}
+			finished_job = it->second.front();
+			it->second.pop_front();
 		}
-		auto queue = std::move(it->second);
-		const auto job = queue.front();
-		const auto owner = job.owner;
-		const auto &option = job.option;
-		queue.pop_front();
+		const auto owner = finished_job->owner;
+		const auto &option = finished_job->option;
 		auto player = game->get_player(owner);
 		bool success = false;
 		if (actor and not actor->is_dead() and owner_of(*actor, at) == owner) {
@@ -416,24 +501,42 @@ void EconomyActionHandler::invoke(openage::event::EventLoop &loop,
 				player->add_resource(resource, amount);
 			}
 		}
-		if (actor and not actor->is_dead() and not queue.empty() and owner_of(*actor, at) == queue.front().owner) {
-			const auto &next = queue.front();
-			const double delay = game->fast_actions() ? 0.05 : next.option.seconds;
-			it->second = std::move(queue);
+		std::optional<std::pair<double, uint64_t>> next_event;
+		std::deque<Job> refund_queue;
+		{
+			std::lock_guard lock{this->jobs_mutex};
+			auto it = this->jobs.find(id);
+			if (it != this->jobs.end()) {
+				if (actor and not actor->is_dead() and not it->second.empty()
+				    and owner_of(*actor, at) == it->second.front().owner) {
+					auto &next = it->second.front();
+					const double delay = game->fast_actions() ? 0.05 : next.option.seconds;
+					next.started_at = at;
+					next.duration = delay;
+					next_event = {delay, next.token};
+				}
+				else {
+					refund_queue = std::move(it->second);
+					this->jobs.erase(it);
+				}
+			}
+		}
+		if (next_event) {
 			loop.create_event("game.economy_action", target, state,
-			                  at + time::time_t::from_double(delay),
-			                  {{"actor", id}, {"finish", true}});
+			                  at + time::time_t::from_double(next_event->first),
+			                  {{"actor", id}, {"finish", true}, {"token", next_event->second}});
 		}
 		else {
-			for (const auto &remaining : queue) {
+			for (const auto &remaining : refund_queue) {
 				auto remaining_player = game->get_player(remaining.owner);
 				for (const auto &[resource, amount] : remaining.option.cost) {
 					remaining_player->add_resource(resource, amount);
 				}
 			}
-			this->jobs.erase(it);
 		}
-		game->set_action_feedback(owner, success ? "Completed" : "Could not complete the order. Resources returned.");
+		game->set_action_feedback(owner,
+		                          success ? "Completed" : "Could not complete the order. Resources returned.",
+		                          not success);
 		return;
 	}
 	const auto owner = params.get("issuer", player_id_t{});
@@ -441,7 +544,131 @@ void EconomyActionHandler::invoke(openage::event::EventLoop &loop,
 		return;
 	}
 	auto player = game->get_player(owner);
-	auto feedback = [&](std::string message) { game->set_action_feedback(owner, std::move(message)); };
+	auto feedback = [&](std::string message) { game->set_action_feedback(owner, std::move(message), false); };
+	auto error_feedback = [&](std::string message) { game->set_action_feedback(owner, std::move(message), true); };
+	if (params.check_type<entity_id_t>("repair_target")) {
+		const auto target_id = params.get("repair_target", entity_id_t{});
+		const bool followup = params.check_type<uint64_t>("repair_order");
+		if (followup and params.get("repair_order", uint64_t{}) != actor->repair_order) {
+			return;
+		}
+		const auto movement = actor->try_get_component_as<component::Move>(component_t::MOVE);
+		if (followup and (not movement or movement->generation != params.get("move_generation", uint64_t{}))) {
+			return;
+		}
+		if (not game->has_game_entity(target_id)) {
+			if (followup) {
+				system::Idle::idle(actor, at);
+			}
+			return;
+		}
+		auto site = game->get_game_entity(target_id);
+		auto live = site->try_get_component_as<component::Live>(component_t::LIVE);
+		const auto spec = live ? repair_spec(*actor, *live) : std::nullopt;
+		if (site->is_dead() or owner_of(*site, at) != owner or not finished(*site)
+		    or not movement or not site->has_component(component_t::BUILD) or not spec or spec->rate <= 0) {
+			if (followup) {
+				system::Idle::idle(actor, at);
+			}
+			error_feedback("Select a damaged, completed building you own.");
+			return;
+		}
+		const auto hp = live->get_attribute_value(at, health).value();
+		const auto max_hp = live->get_attribute_max(health).value();
+		if (hp >= max_hp) {
+			system::Idle::idle(actor, at);
+			feedback("Repair complete.");
+			return;
+		}
+		if (not followup) {
+			auto route = build_route(*game->get_map(), *actor, position_of(*actor, at), *site, position_of(*site, at));
+			if (route.empty()) {
+				error_feedback("The villager cannot reach this building.");
+				return;
+			}
+			SendCommandHandler stop;
+			stop.invoke(loop, target, state, at, {{"type", component::command::command_t::IDLE},
+			                                   {"entity_ids", std::vector<entity_id_t>{id}}, {"issuer", owner}});
+			const auto arrives = at + system::Move::move_along_path(actor, game, std::move(route), at);
+			loop.create_event("game.economy_action", target, state, arrives, {
+				{"actor", id}, {"issuer", owner}, {"repair_target", target_id}, {"repair_order", actor->repair_order},
+				{"move_generation", movement->generation},
+			});
+			feedback("Repairing building.");
+			return;
+		}
+		auto repaired = params.get("repaired", int64_t{});
+		const auto increment = std::min(params.get("repair_hp", int64_t{}), max_hp - hp);
+		if (increment > 0) {
+			std::map<nyan::fqon_t, int64_t> payment;
+			for (const auto &[resource, full_cost] : spec->cost) {
+				payment[resource] = static_cast<int64_t>(std::ceil((repaired + increment) * full_cost / max_hp)
+				                                         - std::ceil(repaired * full_cost / max_hp));
+			}
+			if (not std::ranges::all_of(payment, [&](const auto &cost) { return player->has_enough(cost.first, cost.second); })) {
+				system::Idle::idle(actor, at);
+				error_feedback("Not enough resources to continue repairing.");
+				return;
+			}
+			for (const auto &[resource, amount] : payment) {
+				if (amount > 0) {
+					player->spend(resource, amount);
+				}
+			}
+			live->set_attribute(at, health, hp + increment);
+			repaired += increment;
+		}
+		if (hp + increment >= max_hp) {
+			system::Idle::idle(actor, at);
+			feedback("Repair complete.");
+			return;
+		}
+		actor->play_animation(*actor->repair_ability, at);
+		const auto next_hp = std::min<int64_t>(max_hp - hp - increment, static_cast<int64_t>(std::ceil(spec->rate)));
+		loop.create_event("game.economy_action", target, state, at + time::time_t::from_double(next_hp / spec->rate), {
+			{"actor", id}, {"issuer", owner}, {"repair_target", target_id}, {"repair_order", actor->repair_order},
+			{"move_generation", movement->generation},
+			{"repaired", repaired}, {"repair_hp", next_hp},
+		});
+		return;
+	}
+	if (params.check_type<int64_t>("cancel_index")) {
+		const auto idx = params.get("cancel_index", int64_t{-1});
+		std::optional<Job> cancelled;
+		std::optional<std::pair<double, uint64_t>> next_event;
+		{
+			std::lock_guard lock{this->jobs_mutex};
+			auto it = this->jobs.find(id);
+			if (it == this->jobs.end() or idx < 0 or static_cast<size_t>(idx) >= it->second.size()) {
+				return;
+			}
+			if (it->second[static_cast<size_t>(idx)].owner != owner) {
+				return;
+			}
+			cancelled = it->second[static_cast<size_t>(idx)];
+			it->second.erase(it->second.begin() + idx);
+			if (it->second.empty()) {
+				this->jobs.erase(it);
+			}
+			else if (idx == 0) {
+				auto &next = it->second.front();
+				const double delay = game->fast_actions() ? 0.05 : next.option.seconds;
+				next.started_at = at;
+				next.duration = delay;
+				next_event = {delay, next.token};
+			}
+		}
+		for (const auto &[resource, amount] : cancelled->option.cost) {
+			player->add_resource(resource, amount);
+		}
+		if (next_event) {
+			loop.create_event("game.economy_action", target, state,
+			                  at + time::time_t::from_double(next_event->first),
+			                  {{"actor", id}, {"finish", true}, {"token", next_event->second}});
+		}
+		feedback("Order cancelled.");
+		return;
+	}
 	if (params.check_type<entity_id_t>("site")) {
 		const auto site_id = params.get("site", entity_id_t{});
 		if (not actor->construct_ability or not game->has_game_entity(site_id)) {
@@ -465,7 +692,7 @@ void EconomyActionHandler::invoke(openage::event::EventLoop &loop,
 			feedback("Construction resumed.");
 		}
 		else {
-			feedback("The villager cannot reach this building site.");
+			error_feedback("The villager cannot reach this building site.");
 		}
 		return;
 	}
@@ -476,22 +703,18 @@ void EconomyActionHandler::invoke(openage::event::EventLoop &loop,
 		return;
 	}
 	if (option->kind == ActionKind::Research
-	    and (player->has_researched(option->subject) or std::ranges::any_of(this->jobs, [&](const auto &entry) {
-		    return std::ranges::any_of(entry.second, [&](const auto &job) {
-			    return job.owner == owner and job.option.subject == option->subject;
-		    });
-	    }))) {
-		feedback("This technology is already researched or in progress.");
+	    and (player->has_researched(option->subject) or this->is_research_queued(owner, option->subject))) {
+		error_feedback("This technology is already researched or in progress.");
 		return;
 	}
 	if (not can_start(*option, *game, *player, at)) {
-		feedback("Prerequisites are missing.");
+		error_feedback("Prerequisites are missing.");
 		return;
 	}
 	if (not std::ranges::all_of(option->cost, [&](const auto &amount) {
 		    return player->has_enough(amount.first, amount.second);
 	    })) {
-		feedback("Not enough resources.");
+		error_feedback("Not enough resources.");
 		return;
 	}
 	if (option->kind == ActionKind::Build) {
@@ -502,7 +725,7 @@ void EconomyActionHandler::invoke(openage::event::EventLoop &loop,
 		const auto definition = player->get_db_view()->get_object(option->subject);
 		const auto seconds = build_seconds(*actor, definition);
 		if (not std::isfinite(seconds) or seconds <= 0) {
-			feedback("This building's construction is unavailable.");
+			error_feedback("This building's construction is unavailable.");
 			return;
 		}
 		auto building = this->factory->add_game_entity(game->get_event_loop(), game, owner, option->subject, false);
@@ -511,13 +734,13 @@ void EconomyActionHandler::invoke(openage::event::EventLoop &loop,
 		const auto tile = center.to_tile();
 		if (not build or not can_place(*game->get_map(), *building, center)
 		    or (visibility and visibility->at(tile.ne, tile.se) == TileVisibility::Unexplored)) {
-			feedback("Cannot build at this location.");
+			error_feedback("Cannot build at this location.");
 			return;
 		}
 		const auto from = position_of(*actor, at);
 		auto route = build_route(*game->get_map(), *actor, from, *building, center);
 		if (route.empty()) {
-			feedback("The villager cannot reach this building site.");
+			error_feedback("The villager cannot reach this building site.");
 			return;
 		}
 		for (const auto &[resource, amount] : option->cost) {
@@ -531,6 +754,22 @@ void EconomyActionHandler::invoke(openage::event::EventLoop &loop,
 		this->factory->attach_entity_renderer(building);
 		place(*game, building, owner, center, at);
 		begin_build(loop, target, game, at, actor, *building, *build, seconds, std::move(route));
+		const auto selected_helpers = params.get("builders", std::vector<entity_id_t>{});
+		const std::set<entity_id_t> helpers{selected_helpers.begin(), selected_helpers.end()};
+		for (auto helper_id : helpers) {
+			if (helper_id == id or not game->has_game_entity(helper_id)) {
+				continue;
+			}
+			const auto helper = game->get_game_entity(helper_id);
+			if (helper->is_dead() or not helper->construct_ability or owner_of(*helper, at) != owner) {
+				continue;
+			}
+			const auto helper_seconds = build_seconds(*helper, definition);
+			auto helper_route = build_route(*game->get_map(), *helper, position_of(*helper, at), *building, center);
+			if (std::isfinite(helper_seconds) and helper_seconds > 0 and not helper_route.empty()) {
+				begin_build(loop, target, game, at, helper, *building, *build, helper_seconds, std::move(helper_route));
+			}
+		}
 		feedback("Construction ordered.");
 		return;
 	}
@@ -539,20 +778,27 @@ void EconomyActionHandler::invoke(openage::event::EventLoop &loop,
 		return;
 	}
 	constexpr size_t max_queue_size = 15;
-	auto &queue = this->jobs[id];
-	if (queue.size() >= max_queue_size) {
-		feedback("Training queue is full.");
-		return;
-	}
 	if (option->kind == ActionKind::Transform) {
 		if (auto attack = actor->try_get_component_as<component::Attack>(component_t::ATTACK)) {
 			attack->stop_attack();
 		}
 		system::Move::halt(actor, game, at);
-		queue.push_back(Job{owner, *option});
-		if (queue.size() == 1) {
+		bool start_now = false;
+		uint64_t token = 0;
+		{
+			std::lock_guard lock{this->jobs_mutex};
+			auto &queue = this->jobs[id];
+			if (queue.size() >= max_queue_size) {
+				error_feedback("Training queue is full.");
+				return;
+			}
+			start_now = queue.empty();
+			token = this->next_token++;
+			queue.push_back(Job{owner, *option, 0, at, option->seconds, token});
+		}
+		if (start_now) {
 			loop.create_event("game.economy_action", target, state, at + time::time_t::from_double(option->seconds),
-			                  {{"actor", id}, {"finish", true}});
+			                  {{"actor", id}, {"finish", true}, {"token", token}});
 			feedback(actor->unpacked ? "Packing Trebuchet." : "Unpacking Trebuchet.");
 		}
 		return;
@@ -561,28 +807,43 @@ void EconomyActionHandler::invoke(openage::event::EventLoop &loop,
 	if (option->kind == ActionKind::Train) {
 		population = api::population_cost(player->get_db_view(), option->subject);
 		game->update_player_economies(at);
-		const auto economy = game->player_economy(owner);
-		if (economy.population + this->queued_population(owner) + population > economy.population_capacity) {
-			if (queue.empty()) {
-				this->jobs.erase(id);
-			}
-			feedback("Population capacity is full.");
+	}
+	const double delay = game->fast_actions() ? 0.05 : option->seconds;
+	bool start_now = false;
+	size_t queue_size = 0;
+	uint64_t token = 0;
+	{
+		std::lock_guard lock{this->jobs_mutex};
+		auto &queue = this->jobs[id];
+		if (queue.size() >= max_queue_size) {
+			error_feedback("Training queue is full.");
 			return;
 		}
+		if (option->kind == ActionKind::Train) {
+			const auto economy = game->player_economy(owner);
+			if (economy.population + this->queued_population_locked(owner) + population > economy.population_capacity) {
+				if (queue.empty()) {
+					this->jobs.erase(id);
+				}
+				error_feedback("Population capacity is full.");
+				return;
+			}
+		}
+		for (const auto &[resource, amount] : option->cost) {
+			player->spend(resource, amount);
+		}
+		start_now = queue.empty();
+		token = this->next_token++;
+		queue.push_back(Job{owner, *option, population, start_now ? at : time::time_t{0}, start_now ? delay : 0.0, token});
+		queue_size = queue.size();
 	}
-	for (const auto &[resource, amount] : option->cost) {
-		player->spend(resource, amount);
-	}
-	const bool start_now = queue.empty();
-	queue.push_back(Job{owner, *option, population});
 	if (start_now) {
-		const double delay = game->fast_actions() ? 0.05 : option->seconds;
 		loop.create_event("game.economy_action", target, state, at + time::time_t::from_double(delay),
-		                  {{"actor", id}, {"finish", true}});
+		                  {{"actor", id}, {"finish", true}, {"token", token}});
 		feedback(option->kind == ActionKind::Research ? "Research in progress." : "Training in progress.");
 	}
 	else {
-		feedback("Queued (" + std::to_string(queue.size()) + " in queue).");
+		feedback("Queued (" + std::to_string(queue_size) + " in queue).");
 	}
 }
 

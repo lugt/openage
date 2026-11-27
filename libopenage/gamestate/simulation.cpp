@@ -36,6 +36,7 @@
 #include "scenario/trigger/original_scenario.h"
 
 import openage.gamestate.ai;
+import openage.gamestate.wildlife;
 
 namespace openage::gamestate {
 namespace {
@@ -245,6 +246,9 @@ bool GameSimulation::initialize() {
 			this->trigger_runtime->register_handlers();
 			this->wire_trigger_data(mission_pack_dir);
 			this->register_trigger_handler();
+			if (auto original = this->trigger_runtime->original_scenario()) {
+				wildlife::start(this->event_loop, this->commander, this->game->get_state(), original->config());
+			}
 		}
 
 		// P4.4F Task 3: register the simulation-level removal

@@ -15,6 +15,7 @@ module;
 #include "gamestate/component/internal/position.h"
 #include "gamestate/game.h"
 #include "gamestate/game_entity.h"
+#include "gamestate/entity_factory.h"
 #include "gamestate/event/death.h"
 #include "gamestate/event/send_command.h"
 #include "gamestate/component/internal/ownership.h"
@@ -53,12 +54,20 @@ void movement_replanning() {
 	const auto state = simulation->get_game()->get_state();
 	std::vector<entity_id_t> ids;
 	for (const auto &[id, entity] : state->get_game_entities()) {
-		if (entity->has_component(component::component_t::MOVE)) {
+		const auto ownership = entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
+		// Exercise player orders independently of autonomous Gaia movement.
+		if (entity->has_component(component::component_t::MOVE) and ownership and ownership->get_owners().get(0) == 0) {
 			ids.push_back(id);
 		}
 	}
 	std::ranges::sort(ids);
 	TESTEQUALS(ids.empty(), false);
+	if (ids.size() == 1) {
+		const auto second = simulation->get_entity_factory()->add_game_entity(
+			simulation->get_event_loop(), state, 0, state->get_game_entity(ids.front())->definition);
+		state->add_game_entity(second);
+		ids.push_back(second->get_id());
+	}
 	const auto entity = state->get_game_entity(ids.front());
 	const auto position = entity->try_get_component_as<component::Position>(component::component_t::POSITION);
 	const auto map = state->get_map();

@@ -76,7 +76,7 @@ std::vector<coord::phys3> find_path(const std::shared_ptr<path::Pathfinder> &pat
 	};
 	auto tile_path = pathfinder->get_path(request);
 
-	log::log(MSG(info) << "Move::find_path: grid_id=" << grid_id
+	log::log(DBG << "Move::find_path: grid_id=" << grid_id
 	             << " start_tile=(" << start_tile.ne << "," << start_tile.se << ")"
 	             << " end_tile=(" << end_tile.ne << "," << end_tile.se << ")"
 	             << " status=" << static_cast<int>(tile_path.status));
@@ -176,7 +176,7 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 			static_cast<int>(start_tile.ne), static_cast<int>(start_tile.se)};
 		openage::gamestate::scenario::CellPosition target_cell{
 			static_cast<int>(target_tile.ne), static_cast<int>(target_tile.se)};
-		log::log(MSG(info) << "Move::move_default: entity=" << entity->get_id()
+		log::log(DBG << "Move::move_default: entity=" << entity->get_id()
 		             << " nav_service=yes start=(" << start_cell.x << "," << start_cell.y << ")"
 		             << " dest=(" << target_cell.x << "," << target_cell.y << ")"
 		             << " mover_rx=" << mover_rx << " mover_ry=" << mover_ry);
@@ -241,7 +241,7 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 				static_cast<coord::tile_t>(c.x),
 				static_cast<coord::tile_t>(c.y)}.to_phys3_center());
 		}
-		log::log(MSG(info) << "Move::move_default: A* waypoints=" << waypoints.size()
+		log::log(DBG << "Move::move_default: A* waypoints=" << waypoints.size()
 		                   << " segments=" << (waypoints.size() > 0 ? waypoints.size() - 1 : 0));
 	}
 	else {
@@ -249,13 +249,13 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 		// build a Map without a NavigationService (no mission pack
 		// loader, only synthetic terrain).
 		auto pathfinder = map->get_pathfinder();
-		log::log(MSG(info) << "Move::move_default: entity=" << entity->get_id()
+		log::log(DBG << "Move::move_default: entity=" << entity->get_id()
 		             << " path_type=" << move_path_grid->get_name()
 		             << " current=(" << current_pos.ne << "," << current_pos.se << ")"
 		             << " dest=(" << destination.ne << "," << destination.se << ")");
 		auto grid_id = map->get_grid_id(move_path_grid->get_name());
 		waypoints = find_path(pathfinder, grid_id, current_pos, destination, start_time);
-		log::log(MSG(info) << "Move::move_default: grid_id=" << grid_id
+		log::log(DBG << "Move::move_default: grid_id=" << grid_id
 		                   << " waypoints=" << waypoints.size() << " total_time_so_far=0");
 	}
 
@@ -314,7 +314,7 @@ const time::time_t Move::move_along_path(const std::shared_ptr<GameEntity> &enti
 	}
 	double total_time = 0;
 	pos_component->set_position(start_time, current_pos);
-	log::log(MSG(info) << "Move::move_default: move_speed.get()=" << move_speed.get()
+	log::log(DBG << "Move::move_default: move_speed.get()=" << move_speed.get()
 	                   << " move_speed->is_infinite_positive()=" << move_speed->is_infinite_positive());
 	auto event_loop = state->get_event_loop();
 	const size_t segment_count = waypoints.size() > 0 ? waypoints.size() - 1 : 0;
@@ -500,12 +500,12 @@ const time::time_t Move::move_along_path(const std::shared_ptr<GameEntity> &enti
 	// each new move_default wipes future keyframes. Log where the dest keyframe
 	// landed and what a mid-point query returns, so a stuck villager is
 	// attributable to either the math here or the curve semantics).
-	log::log(MSG(info) << "Move::move_default: total_time=" << total_time
+	log::log(DBG << "Move::move_default: total_time=" << total_time
 	                   << " end keyframe at t+" << total_time << " (=start_time + total_time)");
 	if (total_time > 0) {
 		auto query_t = start_time + time::time_t::from_double(total_time * 0.5);
 		auto mid_pos = positions.get(query_t);
-		log::log(MSG(info) << "Move::move_default: mid-t pos=(" << mid_pos.ne << "," << mid_pos.se
+		log::log(DBG << "Move::move_default: mid-t pos=(" << mid_pos.ne << "," << mid_pos.se
 		                   << ") (expect ~partway between current and dest)");
 	}
 

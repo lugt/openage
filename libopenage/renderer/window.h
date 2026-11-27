@@ -95,6 +95,8 @@ public:
 	using mouse_move_cb_t = std::function<void(const QMouseEvent &)>;
 	using mouse_wheel_cb_t = std::function<void(const QWheelEvent &)>;
 	using resize_cb_t = std::function<void(size_t, size_t, double)>;
+	using focus_lost_cb_t = std::function<void(bool window_deactivated)>;
+	using render_cb_t = std::function<void()>;
 
 	/**
 	 * Register a function that executes when a key is pressed.
@@ -132,6 +134,30 @@ public:
 	void add_resize_callback(const resize_cb_t &cb);
 
 	/**
+	 * Register a function that executes when the cursor leaves the window or
+	 * the window loses focus/activation.
+	 *
+	 * @param cb Callback receiving true on focus loss/deactivation, false on pointer leave.
+	 */
+	void add_focus_lost_callback(const focus_lost_cb_t &cb);
+
+	/**
+	 * Register the underlay render callback executed before the Qt Quick
+	 * overlay is recorded onto the window framebuffer.
+	 *
+	 * @param cb Callback function.
+	 */
+	void set_render_callback(render_cb_t cb);
+
+	/**
+	 * Register a callback executed after the Qt Quick overlay is recorded
+	 * onto the window framebuffer (e.g. for capturing full-frame screenshots).
+	 *
+	 * @param cb Callback function.
+	 */
+	void set_post_render_callback(render_cb_t cb);
+
+	/**
 	 * Get the underlying QWindow that is used for drawing.
 	 *
 	 * @return Pointer to the QWindow.
@@ -166,7 +192,7 @@ public:
 	void close();
 
 protected:
-	Window(size_t width, size_t height, bool ignore_user_input);
+	Window(size_t width, size_t height, bool ignore_user_input, bool queue_input_events = true);
 
 	/**
 	 * Determines if the window should be closed.
@@ -208,6 +234,21 @@ protected:
 	 * Callbacks for resize actions.
 	 */
 	std::vector<resize_cb_t> on_resize;
+
+	/**
+	 * Callbacks for pointer leave or window focus loss.
+	 */
+	std::vector<focus_lost_cb_t> on_focus_lost;
+
+	/**
+	 * Underlay render callback executed before Qt Quick draws the GUI.
+	 */
+	render_cb_t on_render;
+
+	/**
+	 * Post-render callback executed after Qt Quick draws the GUI.
+	 */
+	render_cb_t on_post_render;
 
 	/**
 	 * Main Qt window handle.

@@ -78,21 +78,27 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	// edge movement
 	binding_func_t edge_move{[&](const event_arguments &args) {
 		auto event = std::dynamic_pointer_cast<QMouseEvent>(args.e.get_event());
-		auto pos_x = event->position().x();
-		auto pos_y = event->position().y();
+		if (not event) {
+			return;
+		}
+		const auto pos_x = event->position().x();
+		const auto pos_y = event->position().y();
+		const auto viewport = cam->get_viewport_size();
+		const double width = static_cast<double>(viewport[0]);
+		const double height = static_cast<double>(viewport[1]);
 
 		int move_directions = 0;
-		if (pos_x < 10) {
+		if (pos_x < 10.0) {
 			move_directions = move_directions | static_cast<int>(renderer::camera::MoveDirection::LEFT);
 		}
-		else if (pos_x > cam->get_viewport_size()[0] - 10) {
+		else if (width > 10.0 and pos_x > width - 10.0) {
 			move_directions = move_directions | static_cast<int>(renderer::camera::MoveDirection::RIGHT);
 		}
 
-		if (pos_y < 10) {
+		if (pos_y < 10.0) {
 			move_directions = move_directions | static_cast<int>(renderer::camera::MoveDirection::FORWARD);
 		}
-		else if (pos_y > cam->get_viewport_size()[1] - 10) {
+		else if (height > 10.0 and pos_y > height - 10.0) {
 			move_directions = move_directions | static_cast<int>(renderer::camera::MoveDirection::BACKWARD);
 		}
 

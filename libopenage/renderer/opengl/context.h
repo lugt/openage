@@ -47,6 +47,17 @@ public:
 	 */
 	explicit GlContext(const std::shared_ptr<QWindow> &window,
 	                   bool debug = false);
+
+	/**
+	 * Wrap an existing Qt-owned OpenGL context (e.g. created by QQuickWindow).
+	 *
+	 * @param window Window for the context.
+	 * @param external_context Non-owning pointer to Qt's QOpenGLContext.
+	 * @param debug If true, enable OpenGL debug logging.
+	 */
+	GlContext(const std::shared_ptr<QWindow> &window,
+	          QOpenGLContext *external_context,
+	          bool debug = false);
 	~GlContext() = default;
 
 	// It doesn't make sense to have more than one instance of the same context.
@@ -148,6 +159,12 @@ public:
 	 * @throw Error if the binding point is not valid.
 	 */
 	void free_uniform_buffer_binding(size_t binding_point);
+
+	/**
+	 * Reset global OpenGL state expected by the openage renderer after
+	 * external rendering (such as Qt Quick) used the same context.
+	 */
+	void reset_gl_state();
 
 	/**
 	 * Find out the supported graphics functions and OpenGL version of the device.

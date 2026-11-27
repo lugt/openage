@@ -98,11 +98,15 @@ public:
 	std::vector<ActionOption> action_options;
 	std::optional<nyan::Object> construct_ability;
 	std::optional<nyan::Object> heal_ability;
+	std::optional<nyan::Object> repair_ability;
+	uint64_t repair_order = 0;
 	uint64_t construction_order = 0;
 	entity_id_t building_site = 0;
 	uint64_t heal_order = 0;
 	bool is_transformable = false;
 	bool unpacked = false;
+	/** Neutral predators may initiate combat without changing Gaia diplomacy. */
+	bool wildlife_predator = false;
 
 	void add_damage_animation(double max_health_percent, std::string path);
 	void render_damage(const time::time_t &time, int64_t previous_hp, int64_t current_hp, int64_t max_hp);

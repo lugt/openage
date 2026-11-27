@@ -76,6 +76,9 @@ void SendCommandHandler::invoke(openage::event::EventLoop &loop,
 		const auto owner = entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP);
 		return entity->is_dead() or (has_issuer and (not owner or owner->get_owners().get(time) != issuer));
 	});
+	for (auto id : ids) {
+		++gstate->get_game_entity(id)->repair_order;
+	}
 	if (command_type == component::command::command_t::GATHER) {
 		for (auto id : ids) {
 			++gstate->get_game_entity(id)->heal_order;
@@ -144,7 +147,7 @@ void SendCommandHandler::invoke(openage::event::EventLoop &loop,
 		case component::command::command_t::MOVE: {
 			if (entity->is_transformable and entity->unpacked) {
 				if (const auto owner = entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP)) {
-					gstate->set_action_feedback(owner->get_owners().get(time), "Pack Trebuchet before moving.");
+					gstate->set_action_feedback(owner->get_owners().get(time), "Pack Trebuchet before moving.", true);
 				}
 				break;
 			}
@@ -161,7 +164,7 @@ void SendCommandHandler::invoke(openage::event::EventLoop &loop,
 		case component::command::command_t::ATTACK: {
 			if (entity->is_transformable and not entity->unpacked) {
 				if (const auto owner = entity->try_get_component_as<component::Ownership>(component::component_t::OWNERSHIP)) {
-					gstate->set_action_feedback(owner->get_owners().get(time), "Unpack Trebuchet before attacking.");
+					gstate->set_action_feedback(owner->get_owners().get(time), "Unpack Trebuchet before attacking.", true);
 				}
 				break;
 			}

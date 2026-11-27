@@ -19,8 +19,9 @@ std::shared_ptr<Window> Window::create(const std::string &title,
 }
 
 
-Window::Window(size_t width, size_t height, bool ignore_user_input) :
-	size{width, height}, event_handler{std::make_shared<WindowEventHandler>(ignore_user_input)} {}
+Window::Window(size_t width, size_t height, bool ignore_user_input, bool queue_input_events) :
+	size{width, height},
+	event_handler{std::make_shared<WindowEventHandler>(ignore_user_input, queue_input_events)} {}
 
 
 const util::Vector2s &Window::get_size() const {
@@ -53,6 +54,18 @@ void Window::add_key_callback(const key_cb_t &cb) {
 
 void Window::add_resize_callback(const resize_cb_t &cb) {
 	this->on_resize.push_back(cb);
+}
+
+void Window::add_focus_lost_callback(const focus_lost_cb_t &cb) {
+	this->on_focus_lost.push_back(cb);
+}
+
+void Window::set_render_callback(render_cb_t cb) {
+	this->on_render = std::move(cb);
+}
+
+void Window::set_post_render_callback(render_cb_t cb) {
+	this->on_post_render = std::move(cb);
 }
 
 const std::shared_ptr<QWindow> &Window::get_qt_window() const {

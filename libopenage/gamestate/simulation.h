@@ -294,6 +294,13 @@ public:
 	void set_modpacks(const std::vector<std::string> &modpacks);
 
 	/**
+	 * Access the building production/research queue handler.
+	 */
+	std::shared_ptr<event::EconomyActionHandler> get_economy_handler() const {
+		return this->economy_handler;
+	}
+
+	/**
 	 * current simulation state variable.
 	 * to be set to false to stop the simulation loop.
 	 *

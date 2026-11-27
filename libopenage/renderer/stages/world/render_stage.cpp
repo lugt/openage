@@ -80,13 +80,22 @@ void WorldRenderStage::update() {
 		if (obj->is_changed()) {
 			this->render_objects_by_id[obj->get_id()] = obj;
 		}
-
-		if (WorldRenderStage::ENABLE_FRUSTUM_CULLING
-		    and not obj->is_visible(camera_frustum, current_time)) {
+		if (obj->is_hidden_by_fog(current_time, this->visibility.get())) {
+			if (not obj->get_uniforms().empty()) {
+				this->render_pass->remove_renderables(obj->get_uniforms());
+				obj->clear_uniforms();
+			}
+			obj->clear_changed_flag();
 			continue;
 		}
 
-		if (obj->is_changed()) {
+		if (WorldRenderStage::ENABLE_FRUSTUM_CULLING
+		    and not obj->is_visible(camera_frustum, current_time)) {
+			obj->clear_changed_flag();
+			continue;
+		}
+
+		if (obj->is_changed() or obj->get_uniforms().empty()) {
 			if (obj->requires_renderable()) {
 				this->render_pass->remove_renderables(obj->get_uniforms());
 				auto layer_positions = obj->get_layer_positions(current_time);
@@ -122,6 +131,7 @@ void WorldRenderStage::update() {
 			}
 		}
 		obj->update_uniforms(current_time, this->visibility.get());
+		obj->clear_changed_flag();
 	}
 }
 

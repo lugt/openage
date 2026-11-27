@@ -83,13 +83,21 @@ Event::Event(const QEvent &ev) :
 	} break;
 	case QEvent::Wheel: {
 		auto event = dynamic_pointer_cast<QWheelEvent>(this->event);
-		if (event->angleDelta().y() > 0) {
+		int delta_y = event->angleDelta().y();
+		if (delta_y == 0) {
+			delta_y = event->pixelDelta().y();
+		}
+		if (delta_y > 0) {
 			// forward
 			this->cc = ClassCode(event_class::WHEEL, 1);
 		}
-		else {
+		else if (delta_y < 0) {
 			// backwards
 			this->cc = ClassCode(event_class::WHEEL, -1);
+		}
+		else {
+			// horizontal scroll or zero-delta scroll-end frame
+			this->cc = ClassCode(event_class::WHEEL, 0);
 		}
 		this->mod_code = event->modifiers();
 		this->state = event->type();

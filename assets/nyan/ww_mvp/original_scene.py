@@ -12,6 +12,152 @@ from original_map import convert_terrain
 
 PREFIX = 'ww_mvp.campaign.william_wallace.original_entities'
 RESOURCE_NAMES = ('Food', 'Wood', 'Stone', 'Gold')
+GAMEPLAY_METADATA_VERSION = 1
+
+
+def _command_categories(units):
+    return {
+        f"de2_base.data.game_entity.generic.{folder}.{folder}.{name}": "military"
+        if units[identifier]["interface_kind"] == 10
+        else "economic"
+        for identifier, (name, folder) in names.BUILDING_LINE_LOOKUPS.items()
+    }
+
+
+def _wildlife_kind(unit):
+    """Identify live wildlife from the source class and default flight task."""
+    if unit["type"] != 70 or unit.get("speed", 0) <= 0:
+        return ""
+    if unit["class_"] == 58:
+        return "herdable"
+    if unit["class_"] == 9:
+        return "prey"
+    if unit["class_"] == 10 and "WOLF" in unit["name"].upper():
+        return "wolf"
+    if any(
+        task["action_type"] == 10 and task["is_default"] for task in (unit.get("bird") or {}).get("tasks", [])
+    ):
+        return "bird"
+    return ""
+
+
+def _animal_definition(identifier, unit, kind, original, graphics, media):
+    """Reuse converted animal abilities with the original actor's own graphics and stats."""
+    parent = "bird.Bird" if kind == "bird" else "sheep.Sheep" if kind == "herdable" else "deer.Deer"
+    abilities = ["Idle", "Move"]
+    inherited = (
+        ["Visibility", "TerrainRequirement", "Named", "Selectable"]
+        if kind == "bird"
+        else [
+            "Activity",
+            "Despawn",
+            "Resistance",
+            "SelectableSelf",
+            "SelectableOthers",
+            "Stop",
+            "Turn",
+            "Visibility",
+            "TerrainRequirement",
+            "Named",
+        ]
+    )
+    food = sum(item["amount"] for item in unit["resource_storages"] if item["type"] == 0)
+    if kind != "bird":
+        abilities.extend(("Live", "LineOfSight", "Collision", "Death"))
+        if food > 0:
+            abilities.append("Harvestable")
+    if kind == "wolf":
+        abilities.append("Attack")
+    lines = [
+        "",
+        f"Unit{identifier}({parent}):",
+        "    GameEntity.abilities = {"
+        + ", ".join(abilities + [f"{parent}.{name}" for name in inherited])
+        + "}",
+        "    GameEntity.variants = {}",
+    ]
+    roles = [("Idle", unit["standing_graphic"][0]), ("Move", unit["dead_fish"]["walking_graphic"])]
+    if kind != "bird":
+        roles.append(("Death", unit["dying_graphic"]))
+    if kind == "wolf":
+        roles.append(("Attack", unit["type_50"]["attack_graphic"]))
+    for role, graphic_id in roles:
+        if graphic_id < 0:
+            raise ValueError(f"Missing {role} graphic for original animal {identifier}")
+        sprite = _sprite(original, graphics[graphic_id], media)
+        base = f"{parent}.{role}" if role != "Attack" else "militia.Militia.Attack"
+        lines.extend(
+            ("", f"    {role}({base}):", "        Ability.properties = {property.Animated: Animated}")
+        )
+        if role == "Move":
+            lines.append(f"        Move.speed = {unit['speed']}")
+        elif role == "Attack":
+            lines.extend(
+                (
+                    f"        ApplyDiscreteEffect.reload_time = {unit['type_50']['reload_time']}",
+                    "        ApplyDiscreteEffect.batches = {Batch}",
+                    "",
+                    "        Batch(militia.Militia.Attack.Batch):",
+                    "            EffectBatch.effects = {Melee}",
+                    "",
+                    "            Melee(militia.Militia.Attack.Batch.Melee):",
+                    "                FlatAttributeChange.change_value = Amount",
+                    "",
+                    "                Amount(militia.Militia.Attack.Batch.Melee.ChangeAmount):",
+                    f"                    AttributeAmount.amount = {unit['type_50']['displayed_attack']}",
+                )
+            )
+        lines.extend(
+            (
+                "",
+                "        Animated(property.Animated):",
+                "            Animated.animations = {Animation}",
+                "",
+                "            Animation(graphics.Animation):",
+                f'                Animation.sprite = "{sprite}"',
+            )
+        )
+    if kind != "bird":
+        archetype = "Sheep" if kind == "herdable" else "Deer"
+        lines.extend(
+            (
+                "",
+                f"    Collision({parent}.Collision):",
+                "        Collision.hitbox = Hitbox",
+                "",
+                f"        Hitbox({parent}.Collision.{archetype}Hitbox):",
+                f"            Hitbox.radius_x = {float(unit['collision_size_x'])}",
+                f"            Hitbox.radius_y = {float(unit['collision_size_y'])}",
+            )
+        )
+        if food > 0:
+            lines.extend(
+                (
+                    "",
+                    f"    Harvestable({parent}.Harvestable):",
+                    "        Harvestable.resources = Food",
+                    "",
+                    f"        Food({parent}.Harvestable.{archetype}ResourceSpot):",
+                    f"            ResourceSpot.max_amount = {int(food)}",
+                    f"            ResourceSpot.starting_amount = {int(food)}",
+                    f"            ResourceSpot.decay_rate = {float(unit['resource_decay'])}",
+                )
+            )
+        lines.extend(
+            (
+                "",
+                f"    LineOfSight({parent}.LineOfSight):",
+                f"        LineOfSight.range = {float(unit['line_of_sight'])}",
+                "",
+                f"    Live({parent}.Live):",
+                "        Live.attributes = {Health}",
+                "",
+                f"        Health({parent}.Live.Health):",
+                f"            AttributeSetting.max_value = {float(unit['hit_points'])}",
+                f"            AttributeSetting.starting_value = {float(unit['hit_points'])}",
+            )
+        )
+    return lines
 
 
 def _sprite(original, graphic, destination, stem=None):
@@ -22,13 +168,13 @@ def _sprite(original, graphic, destination, stem=None):
     from openage.convert.processor.export.texture_merge import merge_frames
     from openage.convert.value_object.read.media.sld import SLD
     from openage.util.export_cache import ExportCache
-    from inspect import getfile, getmodule
+    from inspect import getfile, getmodule, getsource
 
     stem = stem or f"graphic_{graphic['id']}"
     output = destination / f'{stem}.sprite'
     source = original / 'resources/_common/drs/graphics' / (graphic['file_name'] + '.sld')
     data = source.read_bytes()
-    version = Path(__file__).read_bytes()
+    version = getsource(_sprite).encode("utf-8")
     for implementation in (getfile(SpriteMetadata), getfile(TextureMetadata),
                            getmodule(merge_frames).__file__, getmodule(SLD).__file__):
         version += Path(implementation).read_bytes()
@@ -66,8 +212,15 @@ def _sprite(original, graphic, destination, stem=None):
     (destination / f'{stem}.texture').write_text(descriptor.dump())
     sprite = SpriteMetadata(str(destination), f'{stem}.sprite')
     sprite.add_texture(0, f'{stem}.texture')
-    sprite.add_layer(0, LayerMode.LOOP if frames > 1 else LayerMode.OFF,
-                     position=graphic['layer'], time_per_frame=graphic['frame_duration'] or .1)
+    sequence_type = graphic.get('sequence_type', 0)
+    frame_duration = graphic.get('frame_duration') or 0.0
+    if frames <= 1 or sequence_type == 0x00 or frame_duration <= 0.0:
+        layer_mode = LayerMode.OFF
+    elif sequence_type & 0x08:
+        layer_mode = LayerMode.ONCE
+    else:
+        layer_mode = LayerMode.LOOP
+    sprite.add_layer(0, layer_mode, position=graphic['layer'], time_per_frame=frame_duration or None)
     for direction in range(angles):
         angle = int((270 + direction * 360 / angles) % 360)
         sprite.add_angle(angle)
@@ -156,8 +309,11 @@ def _definitions(scene, original, destination, catalog, de2_base_dir=None, media
     required = {unit['unit_const'] for unit in scene['units']}
     required.update(effect['object_list_unit_id'] for trigger in scene['triggers'] for effect in trigger['effects']
                     if effect['effect_type'] == 11 and effect.get('object_list_unit_id', -1) >= 0)
-    required.update((38, 74, 83, 293, 600))
+    required.update((38, 65, 74, 83, 96, 126, 293, 594, 600, 705))
     lines = ['!version 0.2.0',
+             'import de2_base.data.game_entity.generic.bird.bird as bird',
+             'import de2_base.data.game_entity.generic.deer.deer as deer',
+             'import de2_base.data.game_entity.generic.sheep.sheep as sheep',
              'import de2_base.data.game_entity.generic.cliff.cliff as cliff',
              'import de2_base.data.game_entity.generic.forest_tree.forest_tree as forest',
              'import engine.util.game_entity as entity', 'import engine.ability.type as ability',
@@ -180,7 +336,11 @@ def _definitions(scene, original, destination, catalog, de2_base_dir=None, media
         has_sld = graphic_id >= 0 and (
             original / 'resources/_common/drs/graphics' / (graphics[graphic_id]['file_name'] + '.sld')
         ).is_file()
-        if identifier in lookup and (
+        wildlife = _wildlife_kind(unit)
+        if wildlife and has_sld:
+            fqon = f'{PREFIX}.Unit{identifier}'
+            lines.extend(_animal_definition(identifier, unit, wildlife, original, graphics, media))
+        elif identifier in lookup and (
             not has_sld
             or (de2_base / f'data/game_entity/generic/{lookup[identifier][1]}/graphics/idle_{lookup[identifier][1]}.sprite').is_file()
         ):
@@ -207,6 +367,8 @@ def _definitions(scene, original, destination, catalog, de2_base_dir=None, media
                                    'unit_type': unit['type'], 'sight': unit['line_of_sight'],
                                    'capturable': unit['type'] == 80 or object_type in (3, 4),
                                    'radius_x': unit['collision_size_x'], 'radius_y': unit['collision_size_y']}
+        if wildlife:
+            result[str(identifier)]['wildlife'] = {'kind': wildlife, 'speed': unit['speed']}
     (destination / 'original_entities.nyan').write_text('\n'.join(lines) + '\n')
     return result
 
@@ -342,6 +504,7 @@ def original_scene(template, mission, original, destination, catalog, de2_base_d
     match = __import__('re').search(r'_(\d+)\.', scene['source_file'])
     number = int(match.group(1)) if match else 1
     metadata = {'mission': number, 'source_sha256': scene['source_sha256'], 'players': source_players,
+                'gameplay_metadata_version': GAMEPLAY_METADATA_VERSION,
                 'ai_test_variant': scene.get('ai_test_variant', 'original'),
                 'definitions': definitions,
                 'technologies': {str(identifier): f'de2_base.data.tech.generic.{folder}.{folder}.{name}'
@@ -351,6 +514,10 @@ def original_scene(template, mission, original, destination, catalog, de2_base_d
                 'triggers': [{key: value for key, value in trigger.items() if key not in ('conditions', 'effects', 'new_effect', 'new_condition')} for trigger in scene['triggers']],
                 'objects': {str(unit['reference_id']): unit['unit_const'] for unit in scene['units']}}
     metadata['technologies']['90'] = f'{PREFIX}.Tracking'
+    source_units = json.loads(
+        gzip.decompress((catalog / 'raw/civilizations/00-gaia.json.gz').read_bytes())
+    )['units']
+    metadata['command_categories'] = _command_categories(source_units)
     raw_terrain = catalog / 'raw/globals.json.gz'
     terrain_definitions = json.loads(gzip.decompress(raw_terrain.read_bytes()))['terrain_block']['terrains']
     return replace(template, id=f'ww_mission{number}_original', source='original-aoe2scenario', source_file=scene['source_file'],

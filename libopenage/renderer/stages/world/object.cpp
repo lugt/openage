@@ -51,7 +51,7 @@ void WorldObject::set_render_entity(const std::shared_ptr<RenderEntity> &entity)
 void WorldObject::fetch_updates(const time::time_t &time) {
 	// TODO: Calling this once per frame is very expensive
 	if (not this->render_entity->is_changed()) {
-		if (this->layer_uniforms.size() != this->get_required_layer_count(time)) {
+		if (not this->layer_uniforms.empty() and this->layer_uniforms.size() != this->get_required_layer_count(time)) {
 			this->require_renderable = true;
 			this->changed = true;
 		}
@@ -98,11 +98,18 @@ void WorldObject::update_uniforms(const time::time_t &time,
 	const bool selectable = this->render_entity->is_selectable();
 	// Live objects use the same visibility as selection and the minimap.
 	// Remains have no simulation entity, so show them only on visible ground.
-	const bool hidden_by_fog = visibility
-	                        and (selectable
-	                               ? not visibility->contains(this->ref_id)
-	                               : visibility->at(current_pos.ne.to_int(), current_pos.se.to_int())
-	                                   != gamestate::TileVisibility::Visible);
+	const bool hidden_by_fog = this->is_hidden_by_fog(time, visibility);
+	// New renderables need complete uniforms even when initially hidden.
+	// Afterwards the fog flag alone hides them until visibility returns.
+	if (hidden_by_fog and this->uniforms_initialized) {
+		if (not this->fog_was_hidden) {
+			for (auto &uniforms : this->layer_uniforms) {
+				uniforms->update(this->fog_hidden, true);
+			}
+			this->fog_was_hidden = true;
+		}
+		return;
+	}
 
 	// Direction angle the object is facing towards currently
 	auto angle_degrees = this->angle.get(time).to_float();
@@ -183,6 +190,8 @@ void WorldObject::update_uniforms(const time::time_t &time,
 		layer_unifs->update(this->anchor_offset, anchor_offset);
 		this->sprite_top = std::max(this->sprite_top, (subtex_size_vec.y() + anchor_offset.y()) * scale * 0.5f);
 	}
+	this->uniforms_initialized = true;
+	this->fog_was_hidden = hidden_by_fog;
 }
 
 uint32_t WorldObject::get_id() {
@@ -243,6 +252,27 @@ void WorldObject::clear_changed_flag() {
 
 void WorldObject::set_uniforms(std::vector<std::shared_ptr<renderer::UniformInput>> &&uniforms) {
 	this->layer_uniforms = std::move(uniforms);
+	this->uniforms_initialized = false;
+	this->fog_was_hidden = false;
+}
+
+void WorldObject::clear_uniforms() {
+	this->layer_uniforms.clear();
+	this->uniforms_initialized = false;
+	this->fog_was_hidden = false;
+	this->require_renderable = true;
+	this->sprite_top = 0.0f;
+}
+
+bool WorldObject::is_hidden_by_fog(const time::time_t &time, const gamestate::VisibilitySnapshot *visibility) const {
+	if (not visibility) {
+		return false;
+	}
+	if (this->render_entity->is_selectable()) {
+		return not visibility->contains(this->ref_id);
+	}
+	const auto point = this->position.get(time);
+	return visibility->at(point.ne.to_int(), point.se.to_int()) != gamestate::TileVisibility::Visible;
 }
 
 bool WorldObject::is_visible(const camera::Frustum2d &frustum,

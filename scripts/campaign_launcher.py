@@ -177,7 +177,27 @@ def activate_converted_mission(campaign_id: str, mission_id: str) -> None:
     if scene is not None:
         sys.path.insert(0, str(ROOT / "bin"))
         sys.path.insert(0, str(ROOT / "assets/nyan/ww_mvp"))
-        from original_scene import prepare_gameplay_graphics
+        from original_scene import GAMEPLAY_METADATA_VERSION, original_scene, prepare_gameplay_graphics
+
+        if scene.get("gameplay_metadata_version") != GAMEPLAY_METADATA_VERSION:
+            from openage.scenario.ir import ScenarioDefinition
+            from openage.scenario.writer import write_mission_pack
+
+            parsed = ROOT / "logs/campaigns/parsed" / campaign_id / f"{mission_id}.json"
+            if not parsed.is_file():
+                raise ValueError("Gameplay metadata is outdated; reconvert this campaign first.")
+            template = ScenarioDefinition.from_dump(ROOT / "docs/mvp/reports/mission1-scenario-dump")
+            updated = original_scene(
+                template,
+                parsed,
+                locate_original()[2].parents[2],
+                source,
+                ROOT / "logs/tech-trees",
+                de2_base_dir=ROOT / "assets/converted/de2_base",
+                shared_media_dir=campaigns_root / "_shared",
+            )
+            write_mission_pack(updated, source)
+            scene = updated.original_scenario
 
         prepare_gameplay_graphics(
             locate_original()[2].parents[2],

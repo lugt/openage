@@ -66,8 +66,13 @@ class HudQmlAdapter : public QObject {
 		NOTIFY mission_changed)
 	Q_PROPERTY(QVariantList selectionCards READ selection_cards NOTIFY selection_details_changed)
 	Q_PROPERTY(QVariantList actionOptions READ action_options NOTIFY selection_details_changed)
+	Q_PROPERTY(QVariantList commandOptions READ command_options NOTIFY selection_details_changed)
+	Q_PROPERTY(QString commandPage READ command_page NOTIFY selection_details_changed)
 	Q_PROPERTY(QVariantMap commandIcons READ command_icons NOTIFY selection_details_changed)
+	Q_PROPERTY(QVariantList productionQueue READ production_queue NOTIFY production_queue_changed)
 	Q_PROPERTY(QString actionStatus READ action_status NOTIFY action_status_changed)
+	Q_PROPERTY(QString toastMessage READ toast_message NOTIFY toast_changed)
+	Q_PROPERTY(quint64 toastSeq READ toast_seq NOTIFY toast_changed)
 	Q_PROPERTY(int constructionProgress READ construction_progress NOTIFY selection_details_changed)
 	Q_PROPERTY(bool canStop READ can_stop NOTIFY selection_details_changed)
 	Q_PROPERTY(int commandBarHeight READ command_bar_height CONSTANT)
@@ -132,8 +137,19 @@ public:
 	QVariantList selection_cards() const { return this->cards; }
 	QVariantMap command_icons() const { return this->command_images; }
 	QVariantList action_options() const { return this->actions; }
+	/** Commands on the current villager build page, including navigation. */
+	QVariantList command_options() const;
+	QString command_page() const { return this->command_page_; }
+	Q_INVOKABLE bool activateCommand(int index);
+	Q_INVOKABLE bool backCommands();
+	QVariantList production_queue() const { return this->prod_queue_; }
+	void set_production_queue(QVariantList queue);
+	Q_INVOKABLE void cancelQueueItem(int index) { emit cancel_queue_requested(index); }
 	QString action_status() const { return this->status; }
 	void set_action_status(QString status);
+	QString toast_message() const { return this->toast_message_; }
+	quint64 toast_seq() const { return this->toast_seq_; }
+	void show_toast(QString message);
 	Q_INVOKABLE void requestAction(const QString &option, bool build) { emit action_requested(option, build); }
 	int construction_progress() const { return this->construction; }
 	bool can_stop() const { return this->stop_enabled; }
@@ -196,7 +212,10 @@ public:
 
 signals:
 	void selection_details_changed();
+	void production_queue_changed();
+	void cancel_queue_requested(int index);
 	void action_status_changed();
+	void toast_changed();
 	void action_requested(const QString &option, bool build);
 	void map_options_changed();
 	void card_requested(int index);
@@ -247,7 +266,11 @@ private:
 	QVariantList cards;
 	QVariantMap command_images;
 	QVariantList actions;
+	QString command_page_;
+	QVariantList prod_queue_;
 	QString status;
+	QString toast_message_;
+	quint64 toast_seq_{0};
 	int construction = -1;
 	bool stop_enabled = false;
 	bool show_units = true;

@@ -14,6 +14,7 @@
 
 #include "renderer/window.h"
 #include "util/path.h"
+#include "util/timing.h"
 
 
 namespace qtgui {
@@ -237,9 +238,12 @@ protected:
 	std::array<std::vector<gamestate::entity_id_t>, 10> control_groups_;
 	std::unordered_map<std::string, size_t> hotkey_cycle_index_;
 	std::optional<std::pair<gamestate::entity_id_t, nyan::fqon_t>> pending_build;
+	std::optional<gamestate::entity_id_t> pending_repair;
 	bool placement_pressed = false;
-	bool mission_ui_pressed = false;
 	bool attack_pointer = false;
+	bool frame_rendered = false;
+	bool first_frame_logged = false;
+	time_nsec_t startup_origin_ns{0};
 	time::time_t next_minimap_update{0};
 	void update_campaign_map();
 

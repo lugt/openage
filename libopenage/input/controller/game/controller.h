@@ -106,8 +106,14 @@ public:
 	 * Set the start position of a drag selection.
 	 *
 	 * @param start Start position of the drag selection.
+	 * @param double_click True if initiated by a left double-click.
 	 */
-	void set_drag_select_start(const coord::input &start);
+	void set_drag_select_start(const coord::input &start, bool double_click = false);
+
+	/**
+	 * Check whether the current selection gesture started with a double-click.
+	 */
+	bool is_drag_select_double_click() const;
 
 	/**
 	 * Get the start position of a drag selection.
@@ -169,6 +175,11 @@ private:
 	std::optional<coord::input> drag_select_start;
 
 	/**
+	 * Whether the active selection gesture started with a double-click.
+	 */
+	bool drag_select_double_click = false;
+
+	/**
 	 * Mutex for threaded access.
 	 */
 	mutable std::recursive_mutex mutex;
@@ -195,6 +206,11 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 
 bool is_attack_target(const std::shared_ptr<gamestate::GameState> &state, const coord::phys3 &world,
                       std::optional<uint32_t> sprite, gamestate::player_id_t viewer, time::time_t now);
+
+/** Pick a visible command target using the shared sprite/footprint hit test. */
+std::optional<gamestate::entity_id_t> command_target(const std::shared_ptr<gamestate::GameState> &state,
+                                                   const coord::phys3 &world, std::optional<uint32_t> sprite,
+                                                   gamestate::player_id_t viewer, time::time_t now);
 
 } // namespace input::game
 } // namespace openage

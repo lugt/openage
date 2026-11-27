@@ -12,10 +12,6 @@
 #include "coord/pixel.h"
 #include "input/action.h"
 
-namespace qtgui {
-class GuiInput;
-}
-
 namespace openage::input {
 
 namespace camera {
@@ -41,13 +37,6 @@ public:
 	InputManager();
 
 	~InputManager() = default;
-
-	/**
-	 * Set the GUI input handler.
-	 *
-	 * @param gui_input GUI input handler.
-	 */
-	void set_gui(const std::shared_ptr<qtgui::GuiInput> &gui_input);
 
 	/**
 	 * Set the controller for the camera.
@@ -194,11 +183,6 @@ private:
 	 * Interface to the HUD.
 	 */
 	std::shared_ptr<hud::Controller> hud_controller;
-
-	/**
-	 * Interface to the GUI.
-	 */
-	std::shared_ptr<qtgui::GuiInput> gui_input;
 
 	/**
 	 * mouse position in the window
