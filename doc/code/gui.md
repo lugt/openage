@@ -17,6 +17,8 @@ The live reloader watches the QML directory and its descendants, including file 
 It keeps the filesystem watcher alive and compares entry sizes and modification times before reloading, so backend notifications without source changes do not destroy active controls.
 Run `bin/run test testing::gui_source_changes` for the asset-free source-change regression test.
 Run `QT_QPA_PLATFORM=offscreen bin/run test -d testing::hud_clicks` to inject pointer clicks into the shipped mission HUD and check menu navigation and settings at two window sizes without a GPU.
+Run `bin/run test -d testing::gui_native_input` on a graphical desktop to exercise the native window event queue, real GUI renderer, pointer release and text input.
+The offscreen GUI uses a separate pointer device because native release processing clears the native device's grabs before queued input reaches QML.
 
 ### Image providers
 

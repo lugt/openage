@@ -14,7 +14,10 @@ namespace qtgui {
 
 GuiInputImpl::GuiInputImpl(const std::shared_ptr<GuiRenderer> &renderer) :
 	QObject{},
-	window{renderer->get_window()} {
+	window{renderer->get_window()},
+	mouse_device{"openage GUI mouse", 0, QInputDevice::DeviceType::Mouse,
+	             QPointingDevice::PointerType::Generic,
+	             QInputDevice::Capability::Position | QInputDevice::Capability::Hover, 1, 3} {
 }
 
 
@@ -40,16 +43,20 @@ bool GuiInputImpl::process(const std::shared_ptr<QEvent> &event) {
 		const QPointF global_pos = mouse_event->globalPosition();
 		const QPointF old_pos = this->last_mouse_pos.x() >= 0.0 ? this->last_mouse_pos : pos;
 		if (event->type() == QEvent::MouseMove or pos != this->last_mouse_pos) {
-			QHoverEvent hover_ev{QEvent::HoverMove, pos, global_pos, old_pos, mouse_event->modifiers()};
+			QHoverEvent hover_ev{QEvent::HoverMove, pos, global_pos, old_pos, mouse_event->modifiers(), &this->mouse_device};
 			QCoreApplication::instance()->sendEvent(this->window.get(), &hover_ev);
 			this->last_mouse_pos = pos;
 		}
+		// Native release delivery clears grabs before queued events reach QML.
+		// Keep the offscreen scene's grab state separate from the native mouse.
 		QMouseEvent ev{mouse_event->type(),
 		               pos,
 		               global_pos,
 		               mouse_event->button(),
 		               mouse_event->buttons(),
-		               mouse_event->modifiers()};
+		               mouse_event->modifiers(),
+		               &this->mouse_device};
+		ev.setTimestamp(mouse_event->timestamp());
 		return QCoreApplication::instance()->sendEvent(this->window.get(), &ev);
 	}
 	case QEvent::KeyPress:

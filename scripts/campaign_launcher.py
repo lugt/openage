@@ -62,6 +62,8 @@ def _campaign_inputs(install_args: Sequence[str | Path]) -> set[Path]:
     paths.add(ROOT / "openage/util/export_cache.py")
     paths.add(ROOT / "scripts/tech_tree/catalog.py")
     paths.update((ROOT / "logs/tech-trees/civilizations").glob("*.json"))
+    paths.update((ROOT / "logs/tech-trees/raw/civilizations").glob("*.json.gz"))
+    paths.update((ROOT / "cfg/converter/games").rglob("*.toml"))
     paths.update(
         path
         for path in (ROOT / "bin/openage/convert").rglob("*")
@@ -171,6 +173,18 @@ def activate_converted_mission(campaign_id: str, mission_id: str) -> None:
     source = campaigns_root / campaign_id / mission_id
     if not (source / "scenario.json").is_file() or not (source / "mission_01.nyan").is_file():
         raise ValueError(f"未找到已转换的战役关卡: {campaign_id}/{mission_id}")
+    scene = json.loads((source / "scenario.json").read_text())["ScenarioDefinition"]["original_scenario"]
+    if scene is not None:
+        sys.path.insert(0, str(ROOT / "bin"))
+        sys.path.insert(0, str(ROOT / "assets/nyan/ww_mvp"))
+        from original_scene import prepare_gameplay_graphics
+
+        prepare_gameplay_graphics(
+            locate_original()[2].parents[2],
+            ROOT / "assets/converted/de2_base",
+            ROOT / "logs/tech-trees",
+            {player["civilization"] for player in scene["players"] if player["active"]},
+        )
     destination = ROOT / "assets/converted/ww_mvp/campaign/william_wallace"
     destination.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(ROOT / "assets/nyan/ww_mvp/modpack.toml", ROOT / "assets/converted/ww_mvp/modpack.toml")

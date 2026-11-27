@@ -27,6 +27,10 @@ void hud_clicks() {
 	presenter::tests::hud_clicks();
 }
 
+void gui_native_input() {
+	qtgui::tests::native_input();
+}
+
 void campaign_scoring() {
 	gamestate::tests::campaign_scoring();
 }

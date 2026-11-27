@@ -30,3 +30,11 @@ Sounds are exported to OPUS files.
 Modpack conversion takes an original game installation and converts its data
 and media files into an [openage modpack](/doc/media/openage/modpacks.md).
 The converted game can then be run inside openage.
+
+### Campaign graphics
+
+Pre-converted campaign launches prepare starting building and construction graphics from the original SLD files using the exported catalogs in `logs/tech-trees/raw/`.
+Multipart buildings use their complete preview graphic rather than an individual annex, and construction graphics include the builder's working animation.
+Prepared images and descriptors are cached with their source and converter fingerprints.
+The DE2 modpack exporter names textures by graphic ID because different graphics can share the legacy SLP sentinel `-1`.
+Shared graphics are exported once and referenced by every sprite that uses them.

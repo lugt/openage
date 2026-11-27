@@ -26,6 +26,7 @@ def tests_py():
     yield "openage.testing.launcher.launch_contracts"
     yield "openage.testing.launcher.parallel_golden_contracts"
     yield "openage.testing.terrain.cached_conversion"
+    yield "openage.convert.processor.conversion.de2.tests.media_requests"
     yield "openage.testing.terrain.catalog_conversion"
     yield "openage.testing.snapshot.headless_regression"
     yield (
@@ -163,6 +164,7 @@ def demos_cpp():
     """
 
     yield ("openage::testing::hud_clicks", "automated pointer checks for the shipped mission HUD")
+    yield ("openage::testing::gui_native_input", "native window to offscreen GUI pointer and keyboard checks")
     yield ("openage::console::tests::render", "prints a few test lines to a buffer, and renders it to stdout")
     yield (
         "openage::console::tests::interactive",

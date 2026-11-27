@@ -14,7 +14,7 @@ PREFIX = 'ww_mvp.campaign.william_wallace.original_entities'
 RESOURCE_NAMES = ('Food', 'Wood', 'Stone', 'Gold')
 
 
-def _sprite(original, graphic, destination):
+def _sprite(original, graphic, destination, stem=None):
     """Convert one original atlas at a time, then release all decoded frames."""
     from openage.convert.entity_object.export.formats.sprite_metadata import LayerMode, SpriteMetadata
     from openage.convert.entity_object.export.formats.texture_metadata import TextureMetadata
@@ -24,7 +24,7 @@ def _sprite(original, graphic, destination):
     from openage.util.export_cache import ExportCache
     from inspect import getfile, getmodule
 
-    stem = f"graphic_{graphic['id']}"
+    stem = stem or f"graphic_{graphic['id']}"
     output = destination / f'{stem}.sprite'
     source = original / 'resources/_common/drs/graphics' / (graphic['file_name'] + '.sld')
     data = source.read_bytes()
@@ -77,6 +77,72 @@ def _sprite(original, graphic, destination):
     cache.commit()
     return f'./original_entity_graphics/{stem}.sprite'
 
+
+def prepare_gameplay_graphics(original, de2_base, catalog, civilizations):
+    """Prepare starting buildings and construction from the exported source catalog."""
+    from openage.convert.service.conversion.internal_name_lookups import get_graphic_set_lookups
+    from openage.convert.service.init.version_detect import create_version_objects
+    from openage.convert.value_object.init.game_version import GameVersion
+    from openage.util.fslike.directory import Directory
+
+    config = Directory(str(Path(__file__).resolve().parents[3] / "cfg/converter/games")).root
+    editions, _ = create_version_objects(config)
+    edition = next(item for item in editions if item.game_id == "AOE2DE")
+    graphics_sets = get_graphic_set_lookups(GameVersion(edition))
+    raw = catalog / "raw"
+    graphics = json.loads(gzip.decompress((raw / "graphics.json.gz").read_bytes()))
+    metadata = json.loads(gzip.decompress((raw / "civilization_metadata.json.gz").read_bytes()))
+    source = original / "resources/_common/drs/graphics"
+    sets = {0: None}
+    for index, record in enumerate(metadata):
+        if index and record["data_name"] in civilizations:
+            groups = [entry[2] for entry in graphics_sets.values() if index in entry[0]]
+            if len(groups) != 1:
+                raise ValueError(f"Missing graphics set for civilization {index}")
+            sets[index] = groups[0]
+    for civilization, group in sets.items():
+        records = list((raw / "civilizations").glob(f"{civilization:02d}-*.json.gz"))
+        if len(records) != 1:
+            raise ValueError(f"Missing unit catalog for civilization {civilization}")
+        units = json.loads(gzip.decompress(records[0].read_bytes()))["units"]
+
+        def export(identifier, destination, stem):
+            if identifier < 0 or not (destination / f"{stem}.sprite").is_file():
+                return
+            graphic = graphics[identifier]
+            # Composite-only records have no SLD; the full converter owns their deltas.
+            if graphic["file_name"] in ("None", "X", "W", ""):
+                return
+            if not (source / (graphic["file_name"] + ".sld")).is_file():
+                raise FileNotFoundError(source / (graphic["file_name"] + ".sld"))
+            _sprite(original, graphic, destination, stem=stem)
+
+        shared = de2_base / "data/game_entity/shared/graphics"
+        for identifier, (_, folder) in names.BUILDING_LINE_LOOKUPS.items():
+            unit = units[identifier]
+            building = unit.get("building") if unit else None
+            if not building:
+                continue
+            # Multipart buildings provide a complete preview rather than just their rear annex.
+            head = building["head_unit"]
+            standing = units[head] if head >= 0 else unit
+            directory = de2_base / f"data/game_entity/generic/{folder}/graphics"
+            if group is None:
+                export(standing["standing_graphic"][0], directory, f"idle_{folder}")
+                export(building["construction_graphic_id"], shared, f"idle_construct0_override_{folder}")
+            else:
+                export(standing["standing_graphic"][0], shared, f"idle_{group}_{folder}")
+        workers = [
+            task["working_graphic_id"]
+            for unit in units
+            if unit and unit["class_"] == 4
+            for task in (unit.get("bird") or {}).get("tasks", [])
+            if task["action_type"] == 101 and task["working_graphic_id"] >= 0
+        ]
+        if not workers:
+            raise ValueError(f"Missing construction animation for civilization {civilization}")
+        stem = f"construct_{group}_villager" if group else "construct_villager"
+        export(workers[0], shared, stem)
 
 def _definitions(scene, original, destination, catalog, de2_base_dir=None, media_dir=None):
     units = json.loads(gzip.decompress((catalog / 'raw/civilizations/00-gaia.json.gz').read_bytes()))['units']
@@ -218,6 +284,8 @@ def original_scene(template, mission, original, destination, catalog, de2_base_d
     media_dir = (shared_media_dir / 'original_entity_graphics') if shared_media_dir else None
     terrain_dir = (shared_media_dir / 'original_terrain_graphics') if shared_media_dir else None
     hud_dir = (shared_media_dir / 'hud') if shared_media_dir else None
+    base = de2_base_dir or (destination.parents[2] / 'de2_base')
+    prepare_gameplay_graphics(original, base, catalog, {player['civilization'] for player in scene['players'] if player['active']})
     definitions = _definitions(scene, original, destination, catalog, de2_base_dir=de2_base_dir, media_dir=media_dir)
     _hud_icons(original, destination, catalog, definitions, hud_dir=hud_dir)
     # Reserve player 2 for Gaia, preserving other slots if a later scene uses them.

@@ -6,6 +6,7 @@
 
 #include <QObject>
 #include <QPointF>
+#include <QPointingDevice>
 
 Q_FORWARD_DECLARE_OBJC_CLASS(QEvent);
 Q_FORWARD_DECLARE_OBJC_CLASS(QQuickWindow);
@@ -31,6 +32,7 @@ public:
 
 private:
 	std::shared_ptr<QQuickWindow> window;
+	QPointingDevice mouse_device;
 	QPointF last_mouse_pos{-1.0, -1.0};
 };
 
